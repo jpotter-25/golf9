@@ -1,0 +1,35 @@
+{
+  "name": "golf9",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "lint": "eslint . --ext .ts,.tsx --max-warnings=0",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "expo": "~53.0.0",
+    "react": "19.0.0",
+    "react-native": "0.79.4",
+    "@react-navigation/native": "^7.0.14",
+    "@react-navigation/native-stack": "^7.0.14",
+    "react-native-gesture-handler": "^2.16.2",
+    "react-native-safe-area-context": "^5.1.0",
+    "react-native-screens": "^4.9.0",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "@types/react": "~19.0.0",
+    "@types/react-native": "~0.79.0",
+    "eslint": "^9.9.0",
+    "eslint-config-universe": "^13.6.2",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
