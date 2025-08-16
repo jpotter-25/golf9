@@ -1,7 +1,11 @@
 // src/screens/GameScreen.tsx
-// Purpose: Gameplay with scaling, piles, final-sweep, multi-round flow,
-// proper "keep revealed" behavior, and opponent panels sized/clipped
-// so their grids never overhang the titled rectangle (2P/3P/4P).
+// Purpose:
+// - Gameplay loop, piles, round flow, final-sweep
+// - Solo vs AI that autoplays instantly (short human-like delay), and
+//   DISABLES touch input on AI turns and AI peek
+// - In Solo mode: peeks auto-advance (no tap prompts), overlay hidden
+// - Opponent panels sized from actual grid footprint so 2P/3P never clip
+// - “Keep Revealed” bypasses discard rule; 5s are scored as −5
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Alert, Modal, useWindowDimensions } from 'react-native';
@@ -28,116 +32,148 @@ export default function GameScreen({ route, navigation }: Props) {
   const { players, mode, rounds: roundsFromLobby } = route.params as any;
   const TOTAL_ROUNDS: number = typeof roundsFromLobby === 'number' ? roundsFromLobby : 9;
 
-  // Round manager
+  // -------- Round state --------
   const [round, setRound] = useState<number>(1);
   const [totals, setTotals] = useState<number[]>(
     Array.from({ length: players }, () => 0)
   );
 
+  // -------- Core game / UI state --------
   const [state, setState] = useState<GameState>(() => deal(players));
-  const [held, setHeld] = useState<Card | null>(null);
-  const [tick, setTick] = useState(0);
-  const [activeSource, setActiveSource] = useState<'draw' | 'discard' | null>(null);
+  const [held, setHeld] = useState<Card | null>(null);                 // human only
+  const [activeSource, setActiveSource] = useState<'draw'|'discard'|null>(null);
   const [pending, setPending] = useState<{ r: number; c: number } | null>(null);
+  const [locked, setLocked] = useState(false);                         // freeze during round summary
 
-  // Freeze timers while showing round summary
-  const [locked, setLocked] = useState(false);
-
-  // Final-sweep state (UI-managed)
-  const [sweepActive, setSweepActive] = useState(false);
+  const [sweepActive, setSweepActive] = useState(false);               // final sweep after someone flips last card
   const sweepStarter = useRef<number | null>(null);
   const lastTurnIndex = useRef<number>(0);
 
-  const playerCount = state.players.length;
-  const metrics = useBoardMetrics(playerCount);
+  const metrics = useBoardMetrics(state.players.length);
   const { width: winW } = useWindowDimensions();
 
-  // === Opponent panel width (prevents right/left bleed) ===
-  // Row has horizontal padding of 8 on each side + 8px gaps between items.
-  const OPP_ROW_SIDE_PAD = 8 * 2;
-  const OPP_ROW_GAPS = 8 * 2; // two gaps between three panels
-  // Use CEIL (not floor) so rounding never makes the panel narrower than its content.
-  const oppPanelWidth = Math.ceil((winW - OPP_ROW_SIDE_PAD - OPP_ROW_GAPS) / 3);
+  // ===== Opponent panel sizing (prevents clipping in 2P/3P) =====
+  const OPP_INNER_PAD = 8;
+  const footprint = (cw: number, gap: number) => cw * 3 + gap * 2 + OPP_INNER_PAD * 2;
+  let oppPanelWidth = Math.ceil(footprint(metrics.opp.cardW, metrics.opp.gap)) + 2; // +2 safety
 
-  // Ticker for countdown chip
-  useEffect(() => {
-    const t = setInterval(() => setTick((x) => x + 1), 1000);
-    return () => clearInterval(t);
-  }, []);
+  const oppCount = getOppCount(state);
+  if (oppCount === 3) {
+    const SIDE_PAD = 8 * 2; // row container horizontal padding
+    const GAPS = 8 * 2;     // two gaps between three panels
+    const maxEach = Math.floor((winW - SIDE_PAD - GAPS) / 3);
+    if (oppPanelWidth > maxEach) oppPanelWidth = maxEach;
+  }
 
-  // Peek deadlines
+  // ===== Flags for Solo vs AI =====
+  const isSolo = mode === 'solo';
+  const isHumanTurn = !(isSolo && state.phase === 'turn' && state.currentPlayerIndex !== 0);
+  const isHumanPeek = !(isSolo && state.phase === 'peek' && (state.peekTurnIndex ?? 0) !== 0);
+
+  // ===== Idle / peek timers =====
+  // Turn idle (used mainly for Pass & Play)
   useEffect(() => {
+    if (locked) return;
     const id = setInterval(() => {
-      setState((s) => {
-        if (locked) return s;
-        if (s.phase !== 'peek' || !s.peekEndsAt) return s;
-        if (Date.now() >= s.peekEndsAt) {
-          const filled = autoCompleteCurrentPeek(s);
+      setState(s => {
+        if (s.phase !== 'turn' || !s.turnEndsAt) return s;
+        if (Date.now() < s.turnEndsAt) return s;
+
+        if (held) {
+          const next = discardDrawn(s, held);
+          setHeld(null);
           setPending(null);
           setActiveSource(null);
-          return advancePeek(filled);
+          return next;
+        } else {
+          const { state: next, drawn } = drawFromDeck(s);
+          return discardDrawn(next, drawn);
         }
-        return s;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [held, locked]);
+
+  // Peek idle (used mainly for Pass & Play)
+  useEffect(() => {
+    if (locked) return;
+    const id = setInterval(() => {
+      setState(s => {
+        if (s.phase !== 'peek' || !s.peekEndsAt) return s;
+        return Date.now() >= s.peekEndsAt
+          ? advancePeek(autoCompleteCurrentPeek(s))
+          : s;
       });
     }, 250);
     return () => clearInterval(id);
   }, [locked]);
 
-  // Idle-time autoplayer
+  // ===== SOLO: auto-advance peek with no tap =====
+  // If current peeker is AI, instantly complete their peeks and advance.
   useEffect(() => {
-    const timer = setInterval(() => {
-      setState((s) => {
-        if (locked) return s;
-        if (s.phase !== 'turn' || !s.turnEndsAt) return s;
-        if (Date.now() >= s.turnEndsAt) {
-          setPending(null);
-          setActiveSource(null);
-          if (held) {
-            const next = discardDrawn(s, held);
-            setHeld(null);
-            return next;
-          } else {
-            const { state: next, drawn } = drawFromDeck(s);
-            return discardDrawn(next, drawn);
-          }
-        }
-        return s;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [held, locked]);
+    if (!isSolo || locked) return;
+    if (state.phase !== 'peek') return;
+    const idx = state.peekTurnIndex ?? 0;
 
-  // Final sweep detection
+    // AI peeks auto-run
+    if (idx !== 0) {
+      const t = setTimeout(() => {
+        setState(s => advancePeek(autoCompleteCurrentPeek(s)));
+      }, 250);
+      return () => clearTimeout(t);
+    }
+
+    // Human (index 0) just finished peeking? Auto-advance to next player (no tap).
+    const flips = state.players[0]?.peekFlips ?? 0;
+    if (flips >= 2) {
+      const t = setTimeout(() => {
+        setState(s => advancePeek(s));
+      }, 150);
+      return () => clearTimeout(t);
+    }
+  }, [state, isSolo, locked]);
+
+  // ===== SOLO: auto-turn for AI (no waiting) =====
   useEffect(() => {
-    if (state.phase !== 'turn' || locked) return;
+    if (!isSolo || locked) return;
+    if (state.phase !== 'turn') return;
     const i = state.currentPlayerIndex;
-    const allUp = state.players[i].grid.every((row) => row.every((c) => c?.faceUp));
+    if (i === 0) return; // human
+    const t = setTimeout(() => {
+      setState(s => aiPlayTurn(s, i));
+    }, 350);
+    return () => clearTimeout(t);
+  }, [state, isSolo, locked]);
+
+  // ===== Final sweep detection =====
+  useEffect(() => {
+    if (locked || state.phase !== 'turn') return;
+    const i = state.currentPlayerIndex;
+    const allUp = state.players[i].grid.every(row => row.every(c => c?.faceUp));
     if (allUp && !sweepActive && sweepStarter.current == null) {
-      sweepStarter.current = i;     // who triggered the sweep
+      sweepStarter.current = i;
       setSweepActive(true);
     }
   }, [state, sweepActive, locked]);
 
-  // When a new turn begins during a sweep, see if we looped back to the starter
   useEffect(() => {
-    if (state.phase !== 'turn' || locked) return;
+    if (locked || state.phase !== 'turn') return;
     const i = state.currentPlayerIndex;
     if (sweepActive && sweepStarter.current != null) {
       if (lastTurnIndex.current !== i && i === sweepStarter.current) {
-        endRoundAndMaybeContinue(); // everyone else had their last turns
+        endRoundAndMaybeContinue();
       }
     }
     lastTurnIndex.current = i;
   }, [state, sweepActive, locked]);
 
-  // Local scoring so we can enforce "5 = -5"
+  // ===== Scoring helper (5 = −5) =====
   const scoreGrid = (grid: Grid): number => {
     let total = 0;
     for (let r = 0; r < 3; r++) {
       for (let c = 0; c < 3; c++) {
         const card = grid[r][c];
-        if (!card) continue;
-        if (card.zeroed) continue; // matched column -> 0
+        if (!card || card.zeroed) continue;
         const rank = card.rank;
         let val = 0;
         if (rank === 'A') val = 1;
@@ -154,9 +190,9 @@ export default function GameScreen({ route, navigation }: Props) {
   };
 
   function endRoundAndMaybeContinue() {
-    setLocked(true); // freeze timers/UI progression during summary
-    const roundScores = state.players.map((p) => scoreGrid(p.grid));
-    setTotals((prev) => prev.map((t, i) => t + roundScores[i]));
+    setLocked(true);
+    const roundScores = state.players.map(p => scoreGrid(p.grid));
+    setTotals(prev => prev.map((t, i) => t + roundScores[i]));
 
     const prettyRound = roundScores.map((sc, i) => `Player ${i + 1}: ${sc}`).join('\n');
 
@@ -168,15 +204,14 @@ export default function GameScreen({ route, navigation }: Props) {
           {
             text: 'Next',
             onPress: () => {
-              // reset for next round
               sweepStarter.current = null;
               setSweepActive(false);
               setHeld(null);
               setPending(null);
               setActiveSource(null);
               setState(deal(players));
-              setRound((r) => r + 1);
-              setLocked(false); // resume
+              setRound(r => r + 1);
+              setLocked(false);
             },
           },
         ],
@@ -186,7 +221,6 @@ export default function GameScreen({ route, navigation }: Props) {
       const finalLines = state.players
         .map((_, i) => `Player ${i + 1}: ${totals[i] + roundScores[i]}`)
         .join('\n');
-
       Alert.alert(
         'Game Over',
         finalLines,
@@ -196,7 +230,7 @@ export default function GameScreen({ route, navigation }: Props) {
     }
   }
 
-  // Helpers
+  // ===== UI helpers =====
   const secsLeft =
     locked
       ? 0
@@ -210,10 +244,9 @@ export default function GameScreen({ route, navigation }: Props) {
 
   const opponents = useMemo(() => {
     const active = bottomIndex;
-    return state.players.map((p, i) => ({ p, i })).filter((x) => x.i !== active);
+    return state.players.map((p, i) => ({ p, i })).filter(x => x.i !== active);
   }, [state, bottomIndex]);
 
-  // Convenience: how many face-down remain for current player?
   const faceDownLeft = (() => {
     const g = state.players[state.currentPlayerIndex].grid;
     let n = 0;
@@ -221,10 +254,10 @@ export default function GameScreen({ route, navigation }: Props) {
     return n;
   })();
 
-  // ——— Actions ———
+  // ===== Human actions (blocked on AI turns/peeks) =====
   const onPressGrid = (r: number, c: number) => {
-    setState((s) => {
-      if (locked) return s;
+    if (!isHumanTurn || !isHumanPeek) return;
+    setState(s => {
       if (s.phase === 'peek') {
         if (s.peekTurnIndex == null) return s;
         return flipForPeek(s, r, c);
@@ -237,8 +270,8 @@ export default function GameScreen({ route, navigation }: Props) {
       if (cell && !cell.faceUp) {
         const next = structuredClone(s) as GameState;
         const target = next.players[next.currentPlayerIndex].grid[r][c]!;
-        target.faceUp = true; // reveal first
-        setPending({ r, c }); // await decision
+        target.faceUp = true;
+        setPending({ r, c });
         return next;
       } else {
         const next = replaceGridCard(s, s.currentPlayerIndex, r, c, held);
@@ -251,7 +284,7 @@ export default function GameScreen({ route, navigation }: Props) {
   };
 
   const onDraw = () => {
-    if (locked) return;
+    if (!isHumanTurn) return;
     if (state.phase !== 'turn' || held) return;
     const { state: next, drawn } = drawFromDeck(state);
     setHeld(drawn);
@@ -261,7 +294,7 @@ export default function GameScreen({ route, navigation }: Props) {
   };
 
   const onTakeDiscard = () => {
-    if (locked) return;
+    if (!isHumanTurn) return;
     if (state.phase !== 'turn' || held) return;
     const { state: next, drawn } = takeDiscard(state);
     if (drawn) setHeld(drawn);
@@ -271,52 +304,38 @@ export default function GameScreen({ route, navigation }: Props) {
   };
 
   const onDiscardHeld = () => {
-    if (locked) return;
-    if (!held) return;
-
-    // Rule: Only allowed when exactly 1 face-down remains.
+    if (!isHumanTurn || !held) return;
     if (faceDownLeft !== 1) {
       Alert.alert('Choose a slot', 'You can only discard the held card when one slot remains face-down.');
       return;
     }
-
-    setState((s) => discardDrawn(s, held));
+    setState(s => discardDrawn(s, held));
     setHeld(null);
     setPending(null);
     setActiveSource(null);
   };
 
-  // Keep revealed should not be gated by the discard rule.
   const onKeepRevealed = () => {
-    if (!held || !pending || locked) return;
-    setState((s) => discardDrawn(s, held)); // discard as part of replace flow
+    if (!isHumanTurn || !held || !pending) return;
+    setState(s => discardDrawn(s, held));
     setHeld(null);
     setPending(null);
     setActiveSource(null);
   };
 
   const onKeepDrawn = () => {
-    if (!held || !pending || locked) return;
-    setState((s) => replaceGridCard(s, s.currentPlayerIndex, pending.r, pending.c, held));
+    if (!isHumanTurn || !held || !pending) return;
+    setState(s => replaceGridCard(s, s.currentPlayerIndex, pending.r, pending.c, held));
     setHeld(null);
     setPending(null);
     setActiveSource(null);
   };
 
-  // Pass overlay (peek)
-  const showPassOverlay =
-    state.phase === 'peek' &&
-    (state.players[state.peekTurnIndex ?? 0]?.peekFlips ?? 0) >= 2;
-
-  const nextPeekLabel = (() => {
-    if (state.phase !== 'peek' || state.peekTurnIndex == null) return '';
-    let idx = state.peekTurnIndex;
-    for (let marched = 0; marched < state.players.length; marched++) {
-      idx = (idx + 1) % state.players.length;
-      if ((state.players[idx]?.peekFlips ?? 2) < 2) return `Pass to ${state.players[idx].name}`;
-    }
-    return 'All set! Tap to start the round';
-  })();
+  // ===== Render =====
+  const timerLabel = `⏱ ${secsLeft}s`;
+  const overlayFlips = (state.players[state.peekTurnIndex ?? 0]?.peekFlips ?? 0) >= 2;
+  // Hide pass overlay in Solo mode completely
+  const showPassOverlay = !isSolo && state.phase === 'peek' && overlayFlips;
 
   return (
     <View style={styles.container}>
@@ -328,18 +347,26 @@ export default function GameScreen({ route, navigation }: Props) {
             : `Turn: Player ${state.currentPlayerIndex + 1}`}
         </Text>
         <View style={styles.timerChip}>
-          <Text style={styles.timerText}>⏱ {secsLeft}s</Text>
+          <Text style={styles.timerText}>{timerLabel}</Text>
           <Text style={[styles.timerText, { marginLeft: 8 }]}>R{round}/{TOTAL_ROUNDS}</Text>
         </View>
       </View>
 
-      {/* Opponents – fixed-width panels + overflow hidden so nothing bleeds */}
+      {/* Opponents */}
       <View style={{ paddingHorizontal: 8, paddingBottom: 6 }}>
-        <View style={[styles.oppRow, { justifyContent: 'space-between' }]}>
+        <View style={[styles.oppRow, { justifyContent: oppCount === 3 ? 'space-between' : 'flex-start' }]}>
           {opponents.map(({ p }, idx) => (
             <View
               key={p.id ?? idx}
-              style={[styles.oppCard, { width: oppPanelWidth, overflow: 'hidden' }]}
+              style={[
+                styles.oppCard,
+                {
+                  width: oppPanelWidth,
+                  padding: OPP_INNER_PAD,
+                  overflow: 'hidden',
+                  marginRight: oppCount === 3 ? 0 : 8,
+                },
+              ]}
             >
               <Text style={styles.subtle} numberOfLines={1}>{p.name}</Text>
               <GridView grid={p.grid} metrics={metrics.opp} />
@@ -348,8 +375,8 @@ export default function GameScreen({ route, navigation }: Props) {
         </View>
       </View>
 
-      {/* Piles */}
-      <View style={{ paddingVertical: 2 }}>
+      {/* Piles (touch disabled on AI turns) */}
+      <View style={{ paddingVertical: 2 }} pointerEvents={isHumanTurn ? 'auto' : 'none'}>
         <Piles
           drawCount={state.drawPile.length}
           topDiscard={state.topDiscard}
@@ -361,8 +388,8 @@ export default function GameScreen({ route, navigation }: Props) {
         />
       </View>
 
-      {/* Bottom player */}
-      <View style={{ padding: 12 }}>
+      {/* Bottom player grid */}
+      <View style={{ padding: 12 }} pointerEvents={isHumanTurn && isHumanPeek ? 'auto' : 'none'}>
         <Text style={styles.meTitle}>{bottomPlayer.name}</Text>
         <GridView
           grid={bottomPlayer.grid}
@@ -373,7 +400,7 @@ export default function GameScreen({ route, navigation }: Props) {
       </View>
 
       {/* Footer */}
-      <View style={styles.footer}>
+      <View style={styles.footer} pointerEvents={isHumanTurn ? 'auto' : 'none'}>
         <View style={{ alignItems: 'center' }}>
           <Text style={styles.subtle}>Held</Text>
           <View style={{ height: 6 }} />
@@ -403,11 +430,11 @@ export default function GameScreen({ route, navigation }: Props) {
         )}
       </View>
 
-      {/* Pass overlay */}
+      {/* Pass overlay (hidden in Solo mode) */}
       <Modal transparent visible={showPassOverlay} animationType="fade">
-        <Pressable style={styles.overlay} onPress={() => setState((s) => advancePeek(s))}>
+        <Pressable style={styles.overlay} onPress={() => setState(s => advancePeek(s))}>
           <View style={styles.overlayCard}>
-            <Text style={styles.overlayTitle}>{nextPeekLabel}</Text>
+            <Text style={styles.overlayTitle}>{getNextPeekLabel(state)}</Text>
             <Text style={[styles.timerText, { marginTop: 12 }]}>Tap anywhere to continue</Text>
           </View>
         </Pressable>
@@ -416,29 +443,148 @@ export default function GameScreen({ route, navigation }: Props) {
   );
 }
 
+// ===== Helpers / AI =====
+function getOppCount(s: GameState) {
+  const me = s.phase === 'peek' ? (s.peekTurnIndex ?? 0) : s.currentPlayerIndex;
+  return s.players.filter((_, i) => i !== me).length;
+}
+
+function getNextPeekLabel(s: GameState): string {
+  if (s.phase !== 'peek' || s.peekTurnIndex == null) return '';
+  let idx = s.peekTurnIndex;
+  for (let marched = 0; marched < s.players.length; marched++) {
+    idx = (idx + 1) % s.players.length;
+    if ((s.players[idx]?.peekFlips ?? 2) < 2) return `Pass to ${s.players[idx].name}`;
+  }
+  return 'All set! Tap to start the round';
+}
+
+function value(card: Card): number {
+  if (card.rank === 'K') return 0;
+  if (card.rank === 'A') return 1;
+  if (card.rank === 'J' || card.rank === 'Q') return 10;
+  const n = parseInt(card.rank as string, 10);
+  if (!isNaN(n)) return n === 5 ? -5 : n;
+  return 0;
+}
+
+function colHasPairFor(card: Card, grid: Grid): boolean {
+  for (let c = 0; c < 3; c++) {
+    const ranks = [grid[0][c], grid[1][c], grid[2][c]].map(x => x?.rank ?? null);
+    const ups = [grid[0][c], grid[1][c], grid[2][c]].map(x => !!x?.faceUp);
+    const same = ranks.filter(r => r === card.rank).length;
+    if (same >= 2 && (!ups[0] || !ups[1] || !ups[2] || ranks.some(r => r !== card.rank))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function worstFaceUp(grid: Grid): { r: number; c: number; score: number } | null {
+  let out: { r: number; c: number; score: number } | null = null;
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+    const cell = grid[r][c];
+    if (!cell || !cell.faceUp || cell.zeroed) continue;
+    const v = value(cell);
+    if (!out || v > out.score) out = { r, c, score: v };
+  }
+  return out;
+}
+
+function anyFaceDown(grid: Grid): { r: number; c: number } | null {
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+    const cell = grid[r][c];
+    if (cell && !cell.faceUp) return { r, c };
+  }
+  return null;
+}
+
+function shouldTakeDiscard(s: GameState, idx: number, top: Card): boolean {
+  const g = s.players[idx].grid;
+  if (colHasPairFor(top, g)) return true;
+  const worst = worstFaceUp(g);
+  if (!worst) return false;
+  return value(top) < worst.score;
+}
+
+function pickTarget(grid: Grid, incoming: Card): { r: number; c: number } {
+  // 1) Finish a triple if possible
+  for (let c = 0; c < 3; c++) {
+    const cells = [grid[0][c], grid[1][c], grid[2][c]];
+    const ranks = cells.map(x => x?.rank ?? null);
+    const ups = cells.map(x => !!x?.faceUp);
+    const same = ranks.filter(r => r === incoming.rank).length;
+    if (same >= 2) {
+      for (let r = 0; r < 3; r++) {
+        const cur = grid[r][c];
+        if (!cur) continue;
+        if (!ups[r] || cur.rank !== incoming.rank) return { r, c };
+      }
+    }
+  }
+  // 2) Replace current worst face-up if incoming is better
+  const worst = worstFaceUp(grid);
+  if (worst && value(incoming) < worst.score) return { r: worst.r, c: worst.c };
+
+  // 3) Otherwise reveal any face-down
+  const fd = anyFaceDown(grid);
+  if (fd) return fd;
+
+  // 4) Fallback: first non-zeroed face-up
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+    const cell = grid[r][c];
+    if (cell && cell.faceUp && !cell.zeroed) return { r, c };
+  }
+  return { r: 0, c: 0 };
+}
+
+function aiPlayTurn(s: GameState, idx: number): GameState {
+  if (s.phase !== 'turn' || s.currentPlayerIndex !== idx) return s;
+
+  let working = s;
+  const top = working.topDiscard;
+
+  if (top && shouldTakeDiscard(working, idx, top)) {
+    const res = takeDiscard(working);
+    working = res.state;
+    const card = res.drawn!;
+    const { r, c } = pickTarget(working.players[idx].grid, card);
+    return replaceGridCard(working, idx, r, c, card);
+  }
+
+  const res = drawFromDeck(working);
+  working = res.state;
+  const drawn = res.drawn;
+  const { r, c } = pickTarget(working.players[idx].grid, drawn);
+  return replaceGridCard(working, idx, r, c, drawn);
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B1023' },
-  header: { paddingTop: 12, paddingHorizontal: 12, paddingBottom: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+
+  header: {
+    paddingTop: 12, paddingHorizontal: 12, paddingBottom: 6,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'
+  },
   heading: { color: '#E8ECF1', fontSize: 18, flexShrink: 1, marginRight: 8 },
-  timerChip: { flexDirection: 'row', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: '#121737', borderWidth: 1, borderColor: '#2A2F57' },
+  timerChip: {
+    flexDirection: 'row', paddingHorizontal: 10, paddingVertical: 6,
+    borderRadius: 999, backgroundColor: '#121737', borderWidth: 1, borderColor: '#2A2F57'
+  },
   timerText: { color: '#9BA3C7', fontVariant: ['tabular-nums'] },
 
   oppRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
-  oppCard: { borderWidth: 1, borderColor: '#2A2F57', backgroundColor: '#121737', padding: 8, borderRadius: 12 },
+  oppCard: { borderWidth: 1, borderColor: '#2A2F57', backgroundColor: '#121737', borderRadius: 12 },
 
   meTitle: { color: '#E8ECF1', fontSize: 16, marginBottom: 8 },
   subtle: { color: '#9BA3C7' },
 
   footer: {
-    minHeight: 72,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#2A2F57',
+    minHeight: 72, flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-between', paddingHorizontal: 16,
+    borderTopWidth: 1, borderTopColor: '#2A2F57',
   },
-  held: { color: '#FFCC66', fontSize: 22, fontWeight: '700' },
+  held: { color: '#ffffffff', fontSize: 22, fontWeight: '700' },
 
   keepBtn: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 12, borderWidth: 2, borderColor: '#4DA3FF' },
   keepText: { color: '#4DA3FF', fontWeight: '800' },

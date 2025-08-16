@@ -10,11 +10,11 @@ export default function RulesScreen() {
       <Text style={styles.title}>Golf 9 — Quick Rules</Text>
       <View style={styles.card}>
         <Text style={styles.h2}>Objective</Text>
-        <Text style={styles.p}>Have the lowest total points when the round ends. Kings count 0. Three-of-a-kind in a column clears to 0.</Text>
+        <Text style={styles.p}>Have the lowest total points when the round ends. 5's count -5. Kings count 0. Three-of-a-kind in a column clears to 0.</Text>
       </View>
       <View style={styles.card}>
         <Text style={styles.h2}>Setup</Text>
-        <Text style={styles.p}>Each player gets a 3×3 grid (9 cards) face-down. Flip one card for a quick peek.</Text>
+        <Text style={styles.p}>Each player gets a 3×3 grid (9 cards) face-down. Flip two cards during start (peek phase).</Text>
       </View>
       <View style={styles.card}>
         <Text style={styles.h2}>On Your Turn</Text>
