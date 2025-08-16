@@ -1,7 +1,7 @@
 // src/utils/scaling.ts
 // Purpose: Percent-of-screen, no-scroll scaling that ALWAYS keeps
 // header, opponents, piles, my grid, and footer fully visible.
-// Tweaks in this pass to stop 4P overflow on short devices.
+// Now globally scales down the current player's grid by 20% to provide extra footer clearance.
 
 import { useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,7 +37,7 @@ export function computeMetrics(
   const OPP_SCALE =
     playerCount === 2 ? 0.64 :
     playerCount === 3 ? 0.53 :
-    0.40; // <- shaved again for 4-player
+    0.40; // for 4-player mode
 
   const widthBound = Math.floor((usableW - 2 * gap) / 3);
 
@@ -58,10 +58,16 @@ export function computeMetrics(
 
   while (lo <= hi) {
     const mid = Math.floor((lo + hi) / 2);
-    if (fits(mid)) { best = mid; lo = mid + 1; } else { hi = mid - 1; }
+    if (fits(mid)) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
   }
 
-  const cardW_me = best;
+  // Apply a 20% reduction to the current player's card size
+  const cardW_me = Math.floor(best * 0.8);
   const cardH_me = Math.round(cardW_me * CARD_ASPECT);
   const cardW_opp = Math.floor(cardW_me * OPP_SCALE);
   const cardH_opp = Math.round(cardW_opp * CARD_ASPECT);
