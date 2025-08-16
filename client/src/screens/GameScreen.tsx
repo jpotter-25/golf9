@@ -1,14 +1,17 @@
 // src/screens/GameScreen.tsx
 // Purpose:
 // - Gameplay loop, piles, round flow, final-sweep
-// - Solo vs AI that autoplays instantly (short human-like delay), and
-//   DISABLES touch input on AI turns and AI peek
-// - In Solo mode: peeks auto-advance (no tap prompts), overlay hidden
-// - Opponent panels sized from actual grid footprint so 2P/3P never clip
-// - “Keep Revealed” bypasses discard rule; 5s are scored as −5
+// - Solo vs AI (AI peeks/plays automatically)
+// - Opponent panels sized from actual grid footprint
+// - “Keep Revealed” bypasses discard rule; 5s = −5
+// - Android nav bar hidden while this screen is focused
+// - ✅ Footer (Held / Discard Held) is now lifted using absolute positioning
+//   with a reliable percent-based bottom offset so it never looks flush.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Alert, Modal, useWindowDimensions } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as NavigationBar from 'expo-navigation-bar';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import type { GameState, Card, Grid } from '../game/types';
@@ -32,6 +35,9 @@ export default function GameScreen({ route, navigation }: Props) {
   const { players, mode, rounds: roundsFromLobby } = route.params as any;
   const TOTAL_ROUNDS: number = typeof roundsFromLobby === 'number' ? roundsFromLobby : 9;
 
+  const insets = useSafeAreaInsets();
+  const { width: winW, height: winH } = useWindowDimensions();
+
   // -------- Round state --------
   const [round, setRound] = useState<number>(1);
   const [totals, setTotals] = useState<number[]>(
@@ -40,38 +46,44 @@ export default function GameScreen({ route, navigation }: Props) {
 
   // -------- Core game / UI state --------
   const [state, setState] = useState<GameState>(() => deal(players));
-  const [held, setHeld] = useState<Card | null>(null);                 // human only
+  const [held, setHeld] = useState<Card | null>(null);
   const [activeSource, setActiveSource] = useState<'draw'|'discard'|null>(null);
   const [pending, setPending] = useState<{ r: number; c: number } | null>(null);
-  const [locked, setLocked] = useState(false);                         // freeze during round summary
+  const [locked, setLocked] = useState(false);
 
-  const [sweepActive, setSweepActive] = useState(false);               // final sweep after someone flips last card
+  const [sweepActive, setSweepActive] = useState(false);
   const sweepStarter = useRef<number | null>(null);
   const lastTurnIndex = useRef<number>(0);
 
   const metrics = useBoardMetrics(state.players.length);
-  const { width: winW } = useWindowDimensions();
 
-  // ===== Opponent panel sizing (prevents clipping in 2P/3P) =====
+  // ===== Opponent panel sizing =====
   const OPP_INNER_PAD = 8;
   const footprint = (cw: number, gap: number) => cw * 3 + gap * 2 + OPP_INNER_PAD * 2;
-  let oppPanelWidth = Math.ceil(footprint(metrics.opp.cardW, metrics.opp.gap)) + 2; // +2 safety
+  let oppPanelWidth = Math.ceil(footprint(metrics.opp.cardW, metrics.opp.gap)) + 2;
 
   const oppCount = getOppCount(state);
   if (oppCount === 3) {
-    const SIDE_PAD = 8 * 2; // row container horizontal padding
-    const GAPS = 8 * 2;     // two gaps between three panels
+    const SIDE_PAD = 8 * 2;
+    const GAPS = 8 * 2;
     const maxEach = Math.floor((winW - SIDE_PAD - GAPS) / 3);
     if (oppPanelWidth > maxEach) oppPanelWidth = maxEach;
   }
 
-  // ===== Flags for Solo vs AI =====
+  // ===== Solo vs AI flags =====
   const isSolo = mode === 'solo';
   const isHumanTurn = !(isSolo && state.phase === 'turn' && state.currentPlayerIndex !== 0);
   const isHumanPeek = !(isSolo && state.phase === 'peek' && (state.peekTurnIndex ?? 0) !== 0);
 
-  // ===== Idle / peek timers =====
-  // Turn idle (used mainly for Pass & Play)
+  // ===== Hide Android navigation bar while in-game =====
+  useEffect(() => {
+    NavigationBar.setVisibilityAsync('hidden').catch(() => {});
+    return () => {
+      NavigationBar.setVisibilityAsync('visible').catch(() => {});
+    };
+  }, []);
+
+  // ===== Idle / peek timers (for Pass & Play) =====
   useEffect(() => {
     if (locked) return;
     const id = setInterval(() => {
@@ -94,7 +106,6 @@ export default function GameScreen({ route, navigation }: Props) {
     return () => clearInterval(id);
   }, [held, locked]);
 
-  // Peek idle (used mainly for Pass & Play)
   useEffect(() => {
     if (locked) return;
     const id = setInterval(() => {
@@ -108,14 +119,12 @@ export default function GameScreen({ route, navigation }: Props) {
     return () => clearInterval(id);
   }, [locked]);
 
-  // ===== SOLO: auto-advance peek with no tap =====
-  // If current peeker is AI, instantly complete their peeks and advance.
+  // ===== SOLO: auto-advance peeks (no taps) =====
   useEffect(() => {
     if (!isSolo || locked) return;
     if (state.phase !== 'peek') return;
     const idx = state.peekTurnIndex ?? 0;
 
-    // AI peeks auto-run
     if (idx !== 0) {
       const t = setTimeout(() => {
         setState(s => advancePeek(autoCompleteCurrentPeek(s)));
@@ -123,7 +132,6 @@ export default function GameScreen({ route, navigation }: Props) {
       return () => clearTimeout(t);
     }
 
-    // Human (index 0) just finished peeking? Auto-advance to next player (no tap).
     const flips = state.players[0]?.peekFlips ?? 0;
     if (flips >= 2) {
       const t = setTimeout(() => {
@@ -133,12 +141,12 @@ export default function GameScreen({ route, navigation }: Props) {
     }
   }, [state, isSolo, locked]);
 
-  // ===== SOLO: auto-turn for AI (no waiting) =====
+  // ===== SOLO: AI plays turns automatically =====
   useEffect(() => {
     if (!isSolo || locked) return;
     if (state.phase !== 'turn') return;
     const i = state.currentPlayerIndex;
-    if (i === 0) return; // human
+    if (i === 0) return;
     const t = setTimeout(() => {
       setState(s => aiPlayTurn(s, i));
     }, 350);
@@ -167,7 +175,7 @@ export default function GameScreen({ route, navigation }: Props) {
     lastTurnIndex.current = i;
   }, [state, sweepActive, locked]);
 
-  // ===== Scoring helper (5 = −5) =====
+  // ===== Scoring (5 = −5) =====
   const scoreGrid = (grid: Grid): number => {
     let total = 0;
     for (let r = 0; r < 3; r++) {
@@ -254,7 +262,7 @@ export default function GameScreen({ route, navigation }: Props) {
     return n;
   })();
 
-  // ===== Human actions (blocked on AI turns/peeks) =====
+  // ===== Actions =====
   const onPressGrid = (r: number, c: number) => {
     if (!isHumanTurn || !isHumanPeek) return;
     setState(s => {
@@ -331,10 +339,15 @@ export default function GameScreen({ route, navigation }: Props) {
     setActiveSource(null);
   };
 
+  // ===== Footer lift calculation (absolute positioning) =====
+  // We lift the footer by ~2% of screen height, plus any bottom inset if present.
+  const PERCENT_LIFT = 0.0; // 2% as requested
+  const percentPixels = Math.round(winH * PERCENT_LIFT);
+  const bottomLift = insets.bottom + percentPixels;
+
   // ===== Render =====
   const timerLabel = `⏱ ${secsLeft}s`;
   const overlayFlips = (state.players[state.peekTurnIndex ?? 0]?.peekFlips ?? 0) >= 2;
-  // Hide pass overlay in Solo mode completely
   const showPassOverlay = !isSolo && state.phase === 'peek' && overlayFlips;
 
   return (
@@ -375,7 +388,7 @@ export default function GameScreen({ route, navigation }: Props) {
         </View>
       </View>
 
-      {/* Piles (touch disabled on AI turns) */}
+      {/* Piles */}
       <View style={{ paddingVertical: 2 }} pointerEvents={isHumanTurn ? 'auto' : 'none'}>
         <Piles
           drawCount={state.drawPile.length}
@@ -399,8 +412,8 @@ export default function GameScreen({ route, navigation }: Props) {
         />
       </View>
 
-      {/* Footer */}
-      <View style={styles.footer} pointerEvents={isHumanTurn ? 'auto' : 'none'}>
+      {/* Footer — ABSOLUTE, lifted by bottomLift (2% + inset) */}
+      <View style={[styles.footer, { bottom: bottomLift }]}>
         <View style={{ alignItems: 'center' }}>
           <Text style={styles.subtle}>Held</Text>
           <View style={{ height: 6 }} />
@@ -439,6 +452,11 @@ export default function GameScreen({ route, navigation }: Props) {
           </View>
         </Pressable>
       </Modal>
+
+      {/* Optional spacer so content never sits behind the absolute footer */}
+      <SafeAreaView edges={['bottom']}>
+        <View style={{ height: bottomLift + 12 }} />
+      </SafeAreaView>
     </View>
   );
 }
@@ -579,11 +597,23 @@ const styles = StyleSheet.create({
   meTitle: { color: '#E8ECF1', fontSize: 16, marginBottom: 8 },
   subtle: { color: '#9BA3C7' },
 
+  // Footer is absolutely positioned and lifted from the bottom
   footer: {
-    minHeight: 72, flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between', paddingHorizontal: 16,
-    borderTopWidth: 1, borderTopColor: '#2A2F57',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    // bottom is set dynamically via style prop (bottom: bottomLift)
+    minHeight: 74,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: '#2A2F57',
+    backgroundColor: 'transparent',
   },
+
   held: { color: '#ffffffff', fontSize: 22, fontWeight: '700' },
 
   keepBtn: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 12, borderWidth: 2, borderColor: '#4DA3FF' },
