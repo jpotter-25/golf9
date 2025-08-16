@@ -14,11 +14,11 @@ export function createDeck(): Card[] {
         id: `${s}-${r}-${Math.random().toString(36).slice(2)}`,
         suit: s,
         rank: r,
-        faceUp: false,
+        faceUp: false
       });
     }
   }
-  return shuffle([...deck, ...deck]); // 2 decks for 3x3 Golf for 2-4 players
+  return shuffle([...deck, ...deck]); // 2 decks for 3x3 Golf for 2–4 players
 }
 
 export function shuffle<T>(arr: T[]): T[] {
@@ -30,12 +30,13 @@ export function shuffle<T>(arr: T[]): T[] {
 }
 
 export function cardValue(card: Card): number {
+  if (card.zeroed) return 0;
   switch (card.rank) {
     case 'A': return 1;
     case '2': return 2;
     case '3': return 3;
     case '4': return 4;
-    case '5': return 5;
+    case '5': return 5; // tweak later if using -5 variant
     case '6': return 6;
     case '7': return 7;
     case '8': return 8;
@@ -43,7 +44,7 @@ export function cardValue(card: Card): number {
     case '10': return 10;
     case 'J': return 10;
     case 'Q': return 10;
-    case 'K': return 0; // Kings are 0 in many Golf variants
+    case 'K': return 0;
     default: return 0;
   }
 }

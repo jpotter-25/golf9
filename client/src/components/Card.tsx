@@ -1,5 +1,9 @@
 // src/components/Card.tsx
-// Purpose: Visual card component with face-up / face-down styles.
+// Purpose: Minimal, modern card visuals.
+//  - Back: blank tile.
+//  - Face: BIG centered rank + single small suit in the top-left.
+//  - Never overlaps: the center gets top padding based on suit size.
+//  - Optional green ring + "0" tag for zeroed cards.
 
 import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
@@ -13,41 +17,91 @@ type Props = {
 };
 
 export default function CardView({ card, width, height, onPress }: Props) {
-  return (
-    <Pressable onPress={onPress} disabled={!onPress}>
-      <View style={[styles.card, { width, height, opacity: card ? 1 : 0.6 }]}>
-        {card ? (
-          card.faceUp ? (
-            <View style={styles.faceUp}>
-              <Text style={styles.rank}>{card.rank}</Text>
-              <Text style={styles.suit}>{card.suit}</Text>
-            </View>
-          ) : (
-            <View style={styles.faceDown}>
-              <Text style={styles.back}>GOLF</Text>
-            </View>
-          )
-        ) : (
-          <View style={styles.empty}/>
-        )}
-      </View>
-    </Pressable>
+  const r = Math.round(width * 0.12);
+
+  // Scales
+  const tinySuit = Math.max(10, Math.round(width * 0.22));
+  const bigRank  = Math.min(
+    Math.max(18, Math.round(width * 0.52)),
+    Math.round(height * 0.58)
   );
+  const zeroMark = Math.max(12, Math.round(width * 0.28));
+
+  const Node = (
+    <View
+      style={[
+        styles.card,
+        { width, height, borderRadius: r },
+        card?.zeroed && styles.zeroedBorder,
+      ]}
+    >
+      {card ? (
+        card.faceUp ? (
+          <View style={[styles.face, { paddingTop: tinySuit * 1.6 }]}>
+            {/* small suit pinned to corner */}
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              style={[
+                styles.suitCorner,
+                { fontSize: tinySuit, color: colorForSuit(card.suit) },
+              ]}
+            >
+              {card.suit}
+            </Text>
+
+            {/* big centered rank */}
+            <View style={styles.centerWrap}>
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                style={[
+                  styles.rankCenter,
+                  { fontSize: bigRank, color: colorForSuit(card.suit) },
+                ]}
+              >
+                {card.rank}
+              </Text>
+            </View>
+
+            {card.zeroed && (
+              <Text style={[styles.zeroTag, { fontSize: zeroMark }]}>0</Text>
+            )}
+          </View>
+        ) : (
+          <View style={[styles.back, { borderRadius: r - 2 }]} />
+        )
+      ) : (
+        <View style={styles.back} />
+      )}
+    </View>
+  );
+
+  return onPress ? (
+    <Pressable onPress={onPress} style={{ width, height }}>
+      {Node}
+    </Pressable>
+  ) : (
+    Node
+  );
+}
+
+function colorForSuit(suit: string) {
+  return suit === '♥' || suit === '♦' ? '#FF7A7A' : '#E8ECF1';
 }
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 12,
-    backgroundColor: '#1A2146',
-    overflow: 'hidden',
+    backgroundColor: '#101735',
     borderWidth: 1,
     borderColor: '#2A2F57',
-    justifyContent: 'center',
-    alignItems: 'center'
+    overflow: 'hidden',
   },
-  faceUp: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  faceDown: { flex: 1, backgroundColor: '#121737', alignItems: 'center', justifyContent: 'center' },
-  back: { color: '#52E5A7', fontWeight: '700', letterSpacing: 2 },
-  rank: { fontSize: 24, color: '#E8ECF1', fontWeight: '700' },
-  suit: { fontSize: 20, color: '#FFCC66', marginTop: 4 }
+  face: { flex: 1 },
+  suitCorner: { position: 'absolute', left: 8, top: 6, fontWeight: '700' },
+  centerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  rankCenter: { fontWeight: '900', letterSpacing: 1 },
+  back: { flex: 1, backgroundColor: '#141C3F', borderWidth: 1, borderColor: '#2A2F57' },
+  zeroedBorder: { borderColor: '#52E5A7', borderWidth: 2 },
+  zeroTag: { position: 'absolute', right: 8, bottom: 6, color: '#52E5A7', fontWeight: '900' },
 });

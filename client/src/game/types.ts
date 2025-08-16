@@ -9,6 +9,8 @@ export type Card = {
   suit: Suit;
   rank: Rank;
   faceUp: boolean;
+  /** True when part of a 3-in-a-column match; card counts as 0 and shows green outline. */
+  zeroed?: boolean;
 };
 
 export type Grid = (Card | null)[][]; // 3x3
@@ -18,7 +20,8 @@ export type Player = {
   name: string;
   grid: Grid;
   score: number;
-  hasPeeking: boolean;
+  /** Number of peek flips taken in the pre-round phase (max 2). */
+  peekFlips: number;
 };
 
 export type GameMode = 'passplay' | 'solo' | 'online';
@@ -30,6 +33,15 @@ export type GameState = {
   drawPile: Card[];
   discardPile: Card[];
   phase: 'peek' | 'turn' | 'roundEnd';
+
   topDiscard: Card | null;
-  turnEndsAt?: number; // ms epoch for idle-time auto-play
+
+  /** Turn idle cutoff (ms since epoch). */
+  turnEndsAt?: number;
+
+  /** PASS-AND-PLAY: which player is currently peeking (index into players) */
+  peekTurnIndex?: number;
+
+  /** Deadline for the current player's peek (ms since epoch) */
+  peekEndsAt?: number;
 };
