@@ -1,13 +1,3 @@
-// src/screens/GameScreen.tsx
-// Purpose:
-// - Gameplay loop, piles, round flow, final-sweep
-// - Solo vs AI (AI peeks/plays automatically)
-// - Opponent panels sized from actual grid footprint
-// - “Keep Revealed” bypasses discard rule; 5s = −5
-// - Android nav bar hidden while this screen is focused
-// - ✅ Footer (Held / Discard Held) is now lifted using absolute positioning
-//   with a reliable percent-based bottom offset so it never looks flush.
-
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Alert, Modal, useWindowDimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -50,7 +40,6 @@ export default function GameScreen({ route, navigation }: Props) {
   const [activeSource, setActiveSource] = useState<'draw'|'discard'|null>(null);
   const [pending, setPending] = useState<{ r: number; c: number } | null>(null);
   const [locked, setLocked] = useState(false);
-  const [nowTime, setNowTime] = useState(Date.now());
 
   const [sweepActive, setSweepActive] = useState(false);
   const sweepStarter = useRef<number | null>(null);
@@ -76,6 +65,14 @@ export default function GameScreen({ route, navigation }: Props) {
   const isHumanTurn = !(isSolo && state.phase === 'turn' && state.currentPlayerIndex !== 0);
   const isHumanPeek = !(isSolo && state.phase === 'peek' && (state.peekTurnIndex ?? 0) !== 0);
 
+  // ===== Idle turn tracking for AI takeover =====
+  const [idleCounts, setIdleCounts] = useState<number[]>(
+    () => Array.from({ length: players }, () => 0)
+  );
+  const [aiControlled, setAIControlled] = useState<boolean[]>(
+    () => Array.from({ length: players }, () => false)
+  );
+
   // ===== Hide Android navigation bar while in-game =====
   useEffect(() => {
     NavigationBar.setVisibilityAsync('hidden').catch(() => {});
@@ -92,15 +89,63 @@ export default function GameScreen({ route, navigation }: Props) {
         if (s.phase !== 'turn' || !s.turnEndsAt) return s;
         if (Date.now() < s.turnEndsAt) return s;
 
+        const idx = s.currentPlayerIndex;
         if (held) {
-          const next = discardDrawn(s, held);
+          // Time expired with a card held: play it instead of discarding
+          const card = held;
+          const { r, c } = pickTarget(s.players[idx].grid, card);
+          const nextState = replaceGridCard(s, idx, r, c, card);
           setHeld(null);
           setPending(null);
           setActiveSource(null);
-          return next;
+          // Mark idle turn
+          setIdleCounts(prevCounts => {
+            const newCounts = [...prevCounts];
+            newCounts[idx] += 1;
+            if (newCounts[idx] >= 2) {
+              setAIControlled(prevFlags => {
+                const newFlags = [...prevFlags];
+                newFlags[idx] = true;
+                return newFlags;
+              });
+            }
+            return newCounts;
+          });
+          return nextState;
         } else {
-          const { state: next, drawn } = drawFromDeck(s);
-          return discardDrawn(next, drawn);
+          // Time expired without drawing: auto-draw (from discard if beneficial)
+          let working = s;
+          const idx = s.currentPlayerIndex;
+          let drawnCard: Card | null = null;
+          const top = working.topDiscard;
+          if (top && shouldTakeDiscard(working, idx, top)) {
+            const res = takeDiscard(working);
+            working = res.state;
+            drawnCard = res.drawn;
+          } else {
+            const res = drawFromDeck(working);
+            working = res.state;
+            drawnCard = res.drawn;
+          }
+          if (drawnCard) {
+            const { r, c } = pickTarget(working.players[idx].grid, drawnCard);
+            const nextState = replaceGridCard(working, idx, r, c, drawnCard);
+            setIdleCounts(prevCounts => {
+              const newCounts = [...prevCounts];
+              newCounts[idx] += 1;
+              if (newCounts[idx] >= 2) {
+                setAIControlled(prevFlags => {
+                  const newFlags = [...prevFlags];
+                  newFlags[idx] = true;
+                  return newFlags;
+                });
+              }
+              return newCounts;
+            });
+            return nextState;
+          }
+          // Fallback (shouldn't happen, as drawFromDeck always provides a card)
+          return working;
         }
       });
     }, 1000);
@@ -153,6 +198,18 @@ export default function GameScreen({ route, navigation }: Props) {
     }, 350);
     return () => clearTimeout(t);
   }, [state, isSolo, locked]);
+
+  // ===== Idle: auto-play for AI-controlled players =====
+  useEffect(() => {
+    if (locked || state.phase !== 'turn') return;
+    const i = state.currentPlayerIndex;
+    if (!aiControlled[i]) return;
+    if (isSolo) return;
+    const t = setTimeout(() => {
+      setState(s => aiPlayTurn(s, i));
+    }, 100);
+    return () => clearTimeout(t);
+  }, [state, locked, aiControlled, isSolo]);
 
   // ===== Final sweep detection =====
   useEffect(() => {
@@ -239,23 +296,13 @@ export default function GameScreen({ route, navigation }: Props) {
     }
   }
 
-  // ===== Visual Countdown Timer (UI) =====
-  useEffect(() => {
-    if (locked) return;
-    if (state.phase !== 'turn' && state.phase !== 'peek') return;
-    const intervalId = setInterval(() => {
-      setNowTime(Date.now());
-    }, 1000);
-    return () => clearInterval(intervalId);
-  }, [state.phase, locked]);
-
   // ===== UI helpers =====
   const secsLeft =
     locked
       ? 0
       : state.phase === 'peek'
-        ? Math.max(0, Math.ceil(((state.peekEndsAt ?? 0) - nowTime) / 1000))
-        : Math.max(0, Math.ceil(((state.turnEndsAt ?? 0) - nowTime) / 1000));
+        ? Math.max(0, Math.ceil(((state.peekEndsAt ?? 0) - Date.now()) / 1000))
+        : Math.max(0, Math.ceil(((state.turnEndsAt ?? 0) - Date.now()) / 1000));
 
   const bottomIndex =
     state.phase === 'peek' ? (state.peekTurnIndex ?? 0) : state.currentPlayerIndex;
@@ -269,13 +316,28 @@ export default function GameScreen({ route, navigation }: Props) {
   const faceDownLeft = (() => {
     const g = state.players[state.currentPlayerIndex].grid;
     let n = 0;
-    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) if (g[r][c] && !g[r][c]!.faceUp) n++;
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+      if (g[r][c] && !g[r][c]!.faceUp) n++;
+    }
     return n;
   })();
 
   // ===== Actions =====
   const onPressGrid = (r: number, c: number) => {
     if (!isHumanTurn || !isHumanPeek) return;
+    if (aiControlled[state.currentPlayerIndex]) {
+      // Player taps, so reclaim control if AI had taken over
+      setAIControlled(prevFlags => {
+        const newFlags = [...prevFlags];
+        newFlags[state.currentPlayerIndex] = false;
+        return newFlags;
+      });
+      setIdleCounts(prevCounts => {
+        const newCounts = [...prevCounts];
+        newCounts[state.currentPlayerIndex] = 0;
+        return newCounts;
+      });
+    }
     setState(s => {
       if (s.phase === 'peek') {
         if (s.peekTurnIndex == null) return s;
@@ -304,6 +366,18 @@ export default function GameScreen({ route, navigation }: Props) {
 
   const onDraw = () => {
     if (!isHumanTurn) return;
+    if (aiControlled[state.currentPlayerIndex]) {
+      setAIControlled(prevFlags => {
+        const newFlags = [...prevFlags];
+        newFlags[state.currentPlayerIndex] = false;
+        return newFlags;
+      });
+      setIdleCounts(prevCounts => {
+        const newCounts = [...prevCounts];
+        newCounts[state.currentPlayerIndex] = 0;
+        return newCounts;
+      });
+    }
     if (state.phase !== 'turn' || held) return;
     const { state: next, drawn } = drawFromDeck(state);
     setHeld(drawn);
@@ -314,6 +388,18 @@ export default function GameScreen({ route, navigation }: Props) {
 
   const onTakeDiscard = () => {
     if (!isHumanTurn) return;
+    if (aiControlled[state.currentPlayerIndex]) {
+      setAIControlled(prevFlags => {
+        const newFlags = [...prevFlags];
+        newFlags[state.currentPlayerIndex] = false;
+        return newFlags;
+      });
+      setIdleCounts(prevCounts => {
+        const newCounts = [...prevCounts];
+        newCounts[state.currentPlayerIndex] = 0;
+        return newCounts;
+      });
+    }
     if (state.phase !== 'turn' || held) return;
     const { state: next, drawn } = takeDiscard(state);
     if (drawn) setHeld(drawn);
@@ -324,6 +410,18 @@ export default function GameScreen({ route, navigation }: Props) {
 
   const onDiscardHeld = () => {
     if (!isHumanTurn || !held) return;
+    if (aiControlled[state.currentPlayerIndex]) {
+      setAIControlled(prevFlags => {
+        const newFlags = [...prevFlags];
+        newFlags[state.currentPlayerIndex] = false;
+        return newFlags;
+      });
+      setIdleCounts(prevCounts => {
+        const newCounts = [...prevCounts];
+        newCounts[state.currentPlayerIndex] = 0;
+        return newCounts;
+      });
+    }
     if (faceDownLeft !== 1) {
       Alert.alert('Choose a slot', 'You can only discard the held card when one slot remains face-down.');
       return;
@@ -336,6 +434,18 @@ export default function GameScreen({ route, navigation }: Props) {
 
   const onKeepRevealed = () => {
     if (!isHumanTurn || !held || !pending) return;
+    if (aiControlled[state.currentPlayerIndex]) {
+      setAIControlled(prevFlags => {
+        const newFlags = [...prevFlags];
+        newFlags[state.currentPlayerIndex] = false;
+        return newFlags;
+      });
+      setIdleCounts(prevCounts => {
+        const newCounts = [...prevCounts];
+        newCounts[state.currentPlayerIndex] = 0;
+        return newCounts;
+      });
+    }
     setState(s => discardDrawn(s, held));
     setHeld(null);
     setPending(null);
@@ -344,6 +454,18 @@ export default function GameScreen({ route, navigation }: Props) {
 
   const onKeepDrawn = () => {
     if (!isHumanTurn || !held || !pending) return;
+    if (aiControlled[state.currentPlayerIndex]) {
+      setAIControlled(prevFlags => {
+        const newFlags = [...prevFlags];
+        newFlags[state.currentPlayerIndex] = false;
+        return newFlags;
+      });
+      setIdleCounts(prevCounts => {
+        const newCounts = [...prevCounts];
+        newCounts[state.currentPlayerIndex] = 0;
+        return newCounts;
+      });
+    }
     setState(s => replaceGridCard(s, s.currentPlayerIndex, pending.r, pending.c, held));
     setHeld(null);
     setPending(null);
@@ -379,9 +501,9 @@ export default function GameScreen({ route, navigation }: Props) {
       {/* Opponents */}
       <View style={{ paddingHorizontal: 8, paddingBottom: 6 }}>
         <View style={[styles.oppRow, { justifyContent: oppCount === 3 ? 'space-between' : 'flex-start' }]}>
-          {opponents.map(({ p }, idx) => (
+          {opponents.map(({ p, i }) => (
             <View
-              key={p.id ?? idx}
+              key={p.id ?? i}
               style={[
                 styles.oppCard,
                 {
@@ -392,7 +514,9 @@ export default function GameScreen({ route, navigation }: Props) {
                 },
               ]}
             >
-              <Text style={styles.subtle} numberOfLines={1}>{p.name}</Text>
+              <Text style={styles.subtle} numberOfLines={1}>
+                {p.name}{aiControlled[i] ? ' (Idle: autoplay)' : ''}
+              </Text>
               <GridView grid={p.grid} metrics={metrics.opp} />
             </View>
           ))}
@@ -414,7 +538,9 @@ export default function GameScreen({ route, navigation }: Props) {
 
       {/* Bottom player grid */}
       <View style={{ padding: 12 }} pointerEvents={isHumanTurn && isHumanPeek ? 'auto' : 'none'}>
-        <Text style={styles.meTitle}>{bottomPlayer.name}</Text>
+        <Text style={styles.meTitle}>
+          {bottomPlayer.name}{aiControlled[bottomIndex] ? ' (Idle: autoplay)' : ''}
+        </Text>
         <GridView
           grid={bottomPlayer.grid}
           onPressCard={onPressGrid}
@@ -428,7 +554,11 @@ export default function GameScreen({ route, navigation }: Props) {
         <View style={{ alignItems: 'center' }}>
           <Text style={styles.subtle}>Held</Text>
           <View style={{ height: 6 }} />
-          {held ? <Text style={styles.held}>{held.rank}{held.suit}</Text> : <Text style={styles.subtle}>None</Text>}
+          {held ? (
+            <Text style={styles.held}>{held.rank}{held.suit}</Text>
+          ) : (
+            <Text style={styles.subtle}>None</Text>
+          )}
         </View>
 
         {pending && held ? (
@@ -483,7 +613,9 @@ function getNextPeekLabel(s: GameState): string {
   let idx = s.peekTurnIndex;
   for (let marched = 0; marched < s.players.length; marched++) {
     idx = (idx + 1) % s.players.length;
-    if ((s.players[idx]?.peekFlips ?? 2) < 2) return `Pass to ${s.players[idx].name}`;
+    if ((s.players[idx]?.peekFlips ?? 2) < 2) {
+      return `Pass to ${s.players[idx].name}`;
+    }
   }
   return 'All set! Tap to start the round';
 }
@@ -547,22 +679,28 @@ function pickTarget(grid: Grid, incoming: Card): { r: number; c: number } {
       for (let r = 0; r < 3; r++) {
         const cur = grid[r][c];
         if (!cur) continue;
-        if (!ups[r] || cur.rank !== incoming.rank) return { r, c };
+        if (!ups[r] || cur.rank !== incoming.rank) {
+          return { r, c };
+        }
       }
     }
   }
   // 2) Replace current worst face-up if incoming is better
   const worst = worstFaceUp(grid);
-  if (worst && value(incoming) < worst.score) return { r: worst.r, c: worst.c };
-
+  if (worst && value(incoming) < worst.score) {
+    return { r: worst.r, c: worst.c };
+  }
   // 3) Otherwise reveal any face-down
   const fd = anyFaceDown(grid);
   if (fd) return fd;
-
   // 4) Fallback: first non-zeroed face-up
-  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
-    const cell = grid[r][c];
-    if (cell && cell.faceUp && !cell.zeroed) return { r, c };
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      const cell = grid[r][c];
+      if (cell && cell.faceUp && !cell.zeroed) {
+        return { r, c };
+      }
+    }
   }
   return { r: 0, c: 0 };
 }
@@ -592,13 +730,22 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B1023' },
 
   header: {
-    paddingTop: 12, paddingHorizontal: 12, paddingBottom: 6,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'
+    paddingTop: 12,
+    paddingHorizontal: 12,
+    paddingBottom: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
   },
   heading: { color: '#E8ECF1', fontSize: 18, flexShrink: 1, marginRight: 8 },
   timerChip: {
-    flexDirection: 'row', paddingHorizontal: 10, paddingVertical: 6,
-    borderRadius: 999, backgroundColor: '#121737', borderWidth: 1, borderColor: '#2A2F57'
+    flexDirection: 'row',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#121737',
+    borderWidth: 1,
+    borderColor: '#2A2F57'
   },
   timerText: { color: '#9BA3C7', fontVariant: ['tabular-nums'] },
 
@@ -635,6 +782,15 @@ const styles = StyleSheet.create({
   altBtnText: { color: '#4DA3FF', fontWeight: '800' },
 
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
-  overlayCard: { padding: 20, borderRadius: 16, backgroundColor: '#121737', borderWidth: 1, borderColor: '#2A2F57', width: '75%', alignItems: 'center' },
+  overlayCard: {
+    padding: 20,
+    borderRadius: 16,
+    backgroundColor: '#121737',
+    borderWidth: 1,
+    borderColor: '#2A2F57',
+    width: '75%',
+    alignItems: 'center'
+  },
   overlayTitle: { color: '#E8ECF1', fontSize: 20, fontWeight: '800', textAlign: 'center' },
 });
+ 
