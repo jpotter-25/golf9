@@ -1,7 +1,8 @@
-// src/game/gameLogic.ts
-// Purpose: Initialize the game, manage turns, enforce rules and compute scores.
-// This version implements the negative‑five rule, the forced draw after a
-// three‑of‑a‑kind, and correct 25‑second turn and 15‑second peek timers.
+// client/src/game/gameLogic.ts
+// Purpose: Core rules engine. Fixes:
+// - Auto-advance from peek -> turn when all players flipped 2 cards
+// - Safe draw/take operations (keeps timer fresh)
+// - Keeps special "must draw from deck" rule for 3-in-a-column
 
 import { createDeck, cardValue } from './cards';
 import type { Card, GameState, Grid, Player } from './types';
@@ -9,23 +10,13 @@ import type { Card, GameState, Grid, Player } from './types';
 const ROWS = 3;
 const COLS = 3;
 
-// Configuration constants.  These match the design document: 25 s per turn and
-// 15 s per peek phase.
 const TURN_DURATION = 25_000;
 const PEEK_DURATION = 15_000;
 
-/**
- * Initialise an empty 3×3 grid.
- */
 export function initGrid(): Grid {
   return Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => null));
 }
 
-/**
- * Deal a full game state with the given number of players.  Each player
- * receives a 3×3 grid of face‑down cards.  The discard pile starts with one
- * face‑up card from the deck.  The game enters the peek phase.
- */
 export function deal(players: number): GameState {
   let deck = createDeck();
   const ps: Player[] = [];
@@ -42,7 +33,7 @@ export function deal(players: number): GameState {
       name: `Player ${i + 1}`,
       grid,
       score: 0,
-      peekFlips: 0
+      peekFlips: 0,
     });
   }
   const starter = deck.pop()!;
@@ -57,14 +48,11 @@ export function deal(players: number): GameState {
     phase: 'peek',
     topDiscard: starter,
     peekTurnIndex: 0,
-    peekEndsAt: Date.now() + PEEK_DURATION
+    peekEndsAt: Date.now() + PEEK_DURATION,
   };
   return game;
 }
 
-/**
- * Flip a card during the peek phase.  Players may only flip two cards each.
- */
 export function flipForPeek(state: GameState, r: number, c: number): GameState {
   const next = structuredClone(state) as GameState;
   if (next.phase !== 'peek' || next.peekTurnIndex == null) return next;
@@ -77,47 +65,54 @@ export function flipForPeek(state: GameState, r: number, c: number): GameState {
     card.faceUp = true;
     p.peekFlips += 1;
   }
+
+  // If this player finished peeking, either advance to the next peeker
+  // or start turns immediately if everyone is done.
+  if (p.peekFlips >= 2) {
+    if (allPeeked(next)) {
+      return startTurns(next);
+    }
+    return advancePeek(next);
+  }
   return next;
 }
 
-/**
- * Advance the peek turn.  When all players have peeked two cards, the game
- * enters the main turn phase.
- */
 export function advancePeek(state: GameState): GameState {
   const next = structuredClone(state) as GameState;
   if (next.phase !== 'peek' || next.peekTurnIndex == null) return next;
 
-  // find next player who still needs peeks
+  if (allPeeked(next)) {
+    return startTurns(next);
+  }
+
   let idx = next.peekTurnIndex;
-  let marched = 0;
-  while (marched < next.players.length) {
+  for (let i = 0; i < next.players.length; i++) {
     idx = (idx + 1) % next.players.length;
-    marched++;
-    if ((next.players[idx]?.peekFlips ?? 2) < 2) {
+    if (next.players[idx].peekFlips < 2) {
       next.peekTurnIndex = idx;
       next.peekEndsAt = Date.now() + PEEK_DURATION;
       return next;
     }
   }
-  // no one left → start turns
+  // Fallback: if somehow no candidate was found, start turns.
   return startTurns(next);
 }
 
-/**
- * Force a player to finish peeking automatically when the timer expires.
- */
+function allPeeked(state: GameState): boolean {
+  return state.players.every(p => p.peekFlips >= 2);
+}
+
 export function autoCompleteCurrentPeek(state: GameState): GameState {
   const next = structuredClone(state) as GameState;
   if (next.phase !== 'peek' || next.peekTurnIndex == null) return next;
   const p = next.players[next.peekTurnIndex];
 
+  // Flip random hidden cards until player has 2
   const coords: Array<{ r: number; c: number }> = [];
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
     const card = p.grid[r][c];
     if (card && !card.faceUp) coords.push({ r, c });
   }
-  // Randomly flip until they have two cards face‑up.
   while (p.peekFlips < 2 && coords.length) {
     const i = Math.floor(Math.random() * coords.length);
     const { r, c } = coords.splice(i, 1)[0];
@@ -125,13 +120,13 @@ export function autoCompleteCurrentPeek(state: GameState): GameState {
     card.faceUp = true;
     p.peekFlips += 1;
   }
-  return next;
+
+  if (allPeeked(next)) {
+    return startTurns(next);
+  }
+  return advancePeek(next);
 }
 
-/**
- * Start the main turn phase.  Choose a random player to begin and set the
- * turn timer.  Also clear any peek state.
- */
 export function startTurns(state: GameState): GameState {
   const next = structuredClone(state) as GameState;
   next.phase = 'turn';
@@ -143,20 +138,16 @@ export function startTurns(state: GameState): GameState {
   return next;
 }
 
-/**
- * Draw from the deck.  If the deck is empty, reshuffle the discard pile.
- * If the current player is under a forced‑draw restriction, this resets the
- * flag.  The turn timer is also reset.
- */
 export function drawFromDeck(state: GameState): { state: GameState; drawn: Card } {
   const next = structuredClone(state) as GameState;
+  if (next.phase !== 'turn') return { state: next, drawn: next.drawPile[next.drawPile.length - 1]! };
+
   if (next.drawPile.length === 0) reshuffle(next);
   const card = next.drawPile.pop()!;
   card.faceUp = true;
 
-  const idx = next.currentPlayerIndex;
-  // Consume forced draw flag if this player had a bonus turn.
-  if (next.mustDrawOnlyForPlayerIndex === idx) {
+  // If player was forced to draw deck, consuming the flag here allows discard next time.
+  if (next.mustDrawOnlyForPlayerIndex === next.currentPlayerIndex) {
     next.mustDrawOnlyForPlayerIndex = undefined;
   }
 
@@ -164,80 +155,59 @@ export function drawFromDeck(state: GameState): { state: GameState; drawn: Card 
   return { state: next, drawn: card };
 }
 
-/**
- * Take the top card from the discard pile.  If the current player must draw
- * from the deck (due to clearing a column), this function delegates to
- * drawFromDeck() instead.  The turn timer is reset.
- */
 export function takeDiscard(state: GameState): { state: GameState; drawn: Card | null } {
   const next = structuredClone(state) as GameState;
-  // Enforce three‑of‑a‑kind extra‑turn rule: redirect to drawFromDeck
+  if (next.phase !== 'turn') return { state: next, drawn: null };
+
   if (next.mustDrawOnlyForPlayerIndex === next.currentPlayerIndex) {
+    // Forced to draw from deck only
     return drawFromDeck(state);
   }
 
-  const top = next.discardPile[next.discardPile.length - 1] ?? null;
-  if (top) next.discardPile.pop();
+  const top = next.discardPile.pop() ?? null;
+  if (top) top.faceUp = true;
+  next.topDiscard = next.discardPile[next.discardPile.length - 1] ?? null;
   next.turnEndsAt = Date.now() + TURN_DURATION;
   return { state: next, drawn: top };
 }
 
-/**
- * Replace a card in the current player's grid with a new card.  The replaced
- * card is added to the discard pile.  After placement, check for three‑of‑a‑kind
- * in each column.  If a column was just zeroed, grant the player a bonus
- * turn but force them to draw from the deck on that bonus turn.
- */
 export function replaceGridCard(state: GameState, playerIndex: number, r: number, c: number, newCard: Card): GameState {
   const next = structuredClone(state) as GameState;
   const player = next.players[playerIndex];
   const replaced = player.grid[r][c];
-  // Place the new card face‑up.
   player.grid[r][c] = { ...newCard, faceUp: true };
+
   if (replaced) {
-    // Discard the replaced card.
     next.discardPile.push({ ...replaced, faceUp: true });
-    next.topDiscard = next.discardPile[next.discardPile.length - 1];
+    next.topDiscard = next.discardPile[next.discardPile.length - 1] ?? null;
   }
-  // Detect three‑of‑a‑kind in any column.
-  const newlyCleared = clearThreeOfAKindColumns(player.grid);
-  if (newlyCleared) {
-    // Bonus turn: set forced draw and reset timer, but keep same player.
-    next.mustDrawOnlyForPlayerIndex = playerIndex;
+
+  const cleared = clearThreeOfAKindColumns(player.grid);
+  if (cleared) {
+    next.mustDrawOnlyForPlayerIndex = playerIndex; // next immediate turn, deck only
     next.turnEndsAt = Date.now() + TURN_DURATION;
   } else {
-    // Advance to the next player.
     advanceTurn(next);
   }
   return next;
 }
 
-/**
- * Discard a drawn card without replacing a grid card.  This ends the player's
- * turn.  (Used when players decide not to replace any card after drawing.)
- */
 export function discardDrawn(state: GameState, card: Card): GameState {
   const next = structuredClone(state) as GameState;
   next.discardPile.push({ ...card, faceUp: true });
-  next.topDiscard = next.discardPile[next.discardPile.length - 1];
+  next.topDiscard = next.discardPile[next.discardPile.length - 1] ?? null;
   advanceTurn(next);
   return next;
 }
 
-/**
- * Check each column for three identical ranks and mark them as zeroed.  A column
- * must already be face‑up to qualify.  Returns true if at least one column
- * changed from non‑zeroed to zeroed on this call.
- */
 function clearThreeOfAKindColumns(grid: Grid): boolean {
   let changed = false;
   for (let c = 0; c < COLS; c++) {
     const col = [grid[0][c], grid[1][c], grid[2][c]];
     if (col.every(card => card && card.faceUp)) {
       const ranks = col.map(card => card!.rank);
-      const allZeroedAlready = col.every(card => card!.zeroed === true);
-      if (!allZeroedAlready && ranks[0] === ranks[1] && ranks[1] === ranks[2]) {
-        // Zero out the column.
+      const allZeroed = col.every(card => card!.zeroed);
+      if (!allZeroed && ranks[0] === ranks[1] && ranks[1] === ranks[2]) {
         for (let r = 0; r < ROWS; r++) {
           if (grid[r][c]) {
             grid[r][c]!.zeroed = true;
@@ -251,9 +221,6 @@ function clearThreeOfAKindColumns(grid: Grid): boolean {
   return changed;
 }
 
-/**
- * Shuffle the discard pile into the deck, leaving the top discard behind.
- */
 function reshuffle(state: GameState) {
   const top = state.discardPile.pop();
   const pool = [...state.discardPile];
@@ -266,10 +233,6 @@ function reshuffle(state: GameState) {
   state.topDiscard = top ?? null;
 }
 
-/**
- * Compute the total score of a player's grid.  Zeroed cards count as 0 and
- * face‑down cards should never be scored until they are revealed.
- */
 export function computeScore(grid: Grid): number {
   let sum = 0;
   for (let r = 0; r < ROWS; r++) {
@@ -281,20 +244,12 @@ export function computeScore(grid: Grid): number {
   return sum;
 }
 
-/**
- * Advance to the next player's turn.  Reset the turn timer and clear any
- * forced draw flag.
- */
 function advanceTurn(state: GameState) {
   state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.players.length;
   state.turnEndsAt = Date.now() + TURN_DURATION;
   state.mustDrawOnlyForPlayerIndex = undefined;
 }
 
-/**
- * Determine whether the round is over – i.e., all cards are face‑up.  This is
- * used to trigger scoring and start the next round.
- */
 export function isRoundOver(state: GameState): boolean {
   return state.players.every(p => p.grid.flat().every(c => c?.faceUp));
 }

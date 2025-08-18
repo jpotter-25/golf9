@@ -1,38 +1,42 @@
 // client/src/components/Grid.tsx
-// Purpose: Display a 3×3 grid of cards.  Supports callbacks for both legacy
-// 'onPressCard' props (used in GameScreen) and the newer 'onSelect' prop.
-// Extra props such as 'metrics' and 'activeCell' are accepted but not used.
+// Purpose: Display a 3×3 grid of cards.  If a `metrics` prop is provided,
+// cards will use the specified width, height and gap from metrics to size and
+// space themselves.  Supports both the new 'onSelect' callback and the
+// legacy 'onPressCard' used in GameScreen.  Extra props are accepted for
+// compatibility (e.g., 'metrics' and 'activeCell').
 
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import Card from './Card';
 import type { Grid as CardGrid } from '../game/types';
+import type { Metrics } from '../utils/scaling';
 
 export type GridProps = {
   grid: CardGrid;
-  /** Callback when the user selects a card using the new API. */
   onSelect?: (row: number, col: number) => void;
-  /** Legacy callback used in GameScreen. */
   onPressCard?: (row: number, col: number) => void;
-  /** Metrics and activeCell are accepted for compatibility but unused here. */
-  metrics?: unknown;
+  /** Optional metrics used to size cards and gaps dynamically. */
+  metrics?: Metrics;
   activeCell?: { r: number; c: number } | null;
-  [key: string]: unknown; // allow any other props without error
+  [key: string]: unknown;
 };
 
 const Grid: React.FC<GridProps> = ({
   grid,
   onSelect,
   onPressCard,
+  metrics,
 }) => {
-  // Use whichever callback is provided.
   const handleSelect = (r: number, c: number) => {
-    if (onSelect) {
-      onSelect(r, c);
-    } else if (onPressCard) {
-      onPressCard(r, c);
-    }
+    if (onSelect) onSelect(r, c);
+    else if (onPressCard) onPressCard(r, c);
   };
+
+  // Compute card size and margin based on metrics, defaulting to 60×90 with 4px gap.
+  const cardW = metrics ? metrics.cardW : 60;
+  const cardH = metrics ? metrics.cardH : 90;
+  const gap = metrics ? metrics.gap : 8;
+  const margin = gap / 2;
 
   return (
     <View style={styles.container}>
@@ -43,6 +47,9 @@ const Grid: React.FC<GridProps> = ({
               key={c}
               card={card}
               onPress={() => handleSelect(r, c)}
+              width={cardW}
+              height={cardH}
+              margin={margin}
             />
           ))}
         </View>

@@ -1,58 +1,70 @@
 // client/src/components/Piles.tsx
-// Purpose: Render the draw and discard piles.  Accepts multiple aliases for
-// properties used in GameScreen: 'drawCount' is an alias for 'drawPileCount',
-// and 'onTakeDiscard' is an alias for 'onTake'.  Extra props are ignored.
+// Purpose: Render the draw and discard piles.  Accepts optional metrics to
+// scale card sizes.  Also supports both 'drawPileCount' and 'drawCount' as
+// aliases, and both 'onTake' and 'onTakeDiscard' callbacks for compatibility
+// with GameScreen.
 
 import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import Card from './Card';
 import type { Card as GameCard } from '../game/types';
+import type { Metrics } from '../utils/scaling';
 
 export type PilesProps = {
   topDiscard: GameCard | null;
-  drawPileCount?: number; // modern prop name
-  drawCount?: number;     // alias used in GameScreen
+  drawPileCount?: number;
+  drawCount?: number; // alias used in GameScreen
   onDraw: () => void;
-  onTake?: () => void;        // modern callback name
+  onTake?: () => void;
   onTakeDiscard?: () => void; // alias used in GameScreen
-  activeSource?: 'draw' | 'discard' | null;
+  /** Optional metrics to size the pile cards. */
+  metrics?: Metrics;
   disableTake?: boolean;
-  [key: string]: unknown; // allow any other props without error
+  [key: string]: unknown;
 };
 
-const Piles: React.FC<PilesProps> = (props) => {
-  const {
-    topDiscard,
-    drawPileCount,
-    drawCount,
-    onDraw,
-    onTake,
-    onTakeDiscard,
-    disableTake = false,
-  } = props;
-
+const Piles: React.FC<PilesProps> = ({
+  topDiscard,
+  drawPileCount,
+  drawCount,
+  onDraw,
+  onTake,
+  onTakeDiscard,
+  metrics,
+  disableTake = false,
+}) => {
+  // Choose the appropriate callback for taking the discard pile.
   const handleTake = () => {
-    if (disableTake) {
-      return;
-    }
-    if (onTake) {
-      onTake();
-    } else if (onTakeDiscard) {
-      onTakeDiscard();
-    }
+    if (disableTake) return;
+    if (onTake) onTake();
+    else if (onTakeDiscard) onTakeDiscard();
   };
 
+  // Determine pile count, preferring drawPileCount then drawCount.
   const pileCount = drawPileCount ?? drawCount ?? 0;
+
+  // Determine card dimensions based on metrics.
+  const cardW = metrics ? metrics.cardW : 60;
+  const cardH = metrics ? metrics.cardH : 90;
+  const margin = metrics ? metrics.gap / 2 : 4;
 
   return (
     <View style={styles.container}>
       <Pressable onPress={onDraw} style={styles.pile}>
-        <Card card={null} />
+        <Card card={null} width={cardW} height={cardH} margin={margin} />
         <Text style={styles.label}>Deck</Text>
         <Text style={styles.count}>{pileCount}</Text>
       </Pressable>
-      <Pressable onPress={handleTake} style={[styles.pile, disableTake && styles.disabled]}>
-        <Card card={topDiscard} />
+      <Pressable
+        onPress={handleTake}
+        style={[styles.pile, disableTake && styles.disabled]}
+      >
+        <Card
+          card={topDiscard}
+          width={cardW}
+          height={cardH}
+          margin={margin}
+        />
         <Text style={styles.label}>Discard</Text>
         <Text style={styles.count}>{topDiscard ? '' : 'Empty'}</Text>
       </Pressable>

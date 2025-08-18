@@ -1,5 +1,5 @@
 // client/src/App.tsx
-// Purpose: Root component that sets up navigation, global providers and screens.
+// Purpose: Root navigation with hidden status bar and immersive nav bar.
 
 import React, { useEffect } from 'react';
 import { NavigationContainer, DefaultTheme, Theme } from '@react-navigation/native';
@@ -9,7 +9,6 @@ import { StatusBar } from 'expo-status-bar';
 import * as NavigationBar from 'expo-navigation-bar';
 import { AppState } from 'react-native';
 
-// Import all screens from the index file in ./screens
 import {
   LoginScreen,
   LobbyScreen,
@@ -19,7 +18,6 @@ import {
   SettingsScreen,
 } from './screens';
 
-// Define the shape of the navigation stack parameters.
 export type RootStackParamList = {
   Login: undefined;
   Lobby: undefined;
@@ -31,25 +29,23 @@ export type RootStackParamList = {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-// Custom dark theme matching the concept art.
 const theme: Theme = {
   ...DefaultTheme,
   colors: {
     ...DefaultTheme.colors,
-    background: '#0B1023', // deep navy
-    card: '#121737',       // panel background
-    primary: '#52E5A7',    // green accent
-    text: '#E8ECF1',       // light text
+    background: '#0B1023',
+    card: '#121737',
+    primary: '#52E5A7',
+    text: '#E8ECF1',
     border: '#2A2F57',
     notification: '#FFCC66',
   },
 };
 
-// Hide Android navigation bar for a more immersive experience.
 async function applyImmersive() {
   try {
-    await NavigationBar.setVisibilityAsync('hidden');
-    await NavigationBar.setBehaviorAsync('inset-swipe'); // swipe from edge to reveal temporarily
+    await NavigationBar.setVisibilityAsync('hidden');   // hide Android nav bar
+    await NavigationBar.setBehaviorAsync('inset-swipe');
     await NavigationBar.setPositionAsync('absolute');
     await NavigationBar.setBackgroundColorAsync('transparent');
   } catch {}
@@ -64,7 +60,8 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="light" />
+      {/* Hide the OS status bar */}
+      <StatusBar hidden />
       <NavigationContainer theme={theme}>
         <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="Login">
           <Stack.Screen name="Login" component={LoginScreen} />
