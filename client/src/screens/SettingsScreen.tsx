@@ -1,6 +1,6 @@
-// src/screens/SettingsScreen.tsx
-// Purpose: Provide toggles for sound and vibration effects as well as a logout
-// option.  Adjust settings in your state or persist them as needed.
+// client/src/screens/SettingsScreen.tsx
+// Purpose: Provide toggles for sound and vibration effects and a back button.
+// You could extend this to persist settings or handle logout.
 
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Switch, TouchableOpacity } from 'react-native';
@@ -9,7 +9,7 @@ import type { RootStackParamList } from '../App';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
 
-export default function SettingsScreen({ navigation }: Props) {
+const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   const [sound, setSound] = useState(true);
   const [vibrate, setVibrate] = useState(true);
 
@@ -37,7 +37,6 @@ export default function SettingsScreen({ navigation }: Props) {
         />
       </View>
 
-      {/* You could implement an actual logout by clearing session state here */}
       <TouchableOpacity
         style={styles.button}
         onPress={() => navigation.goBack()}
@@ -46,42 +45,44 @@ export default function SettingsScreen({ navigation }: Props) {
       </TouchableOpacity>
     </View>
   );
-}
+};
+
+export default SettingsScreen;
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0B1023',
     alignItems: 'center',
-    paddingTop: 80
+    paddingTop: 80,
   },
   title: {
     fontSize: 32,
     fontWeight: 'bold',
     color: '#52E5A7',
-    marginBottom: 32
+    marginBottom: 32,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     width: '80%',
-    marginBottom: 24
+    marginBottom: 24,
   },
   label: {
     color: '#E8ECF1',
-    fontSize: 18
+    fontSize: 18,
   },
   button: {
     backgroundColor: '#52E5A7',
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 8,
-    marginTop: 40
+    marginTop: 40,
   },
   buttonText: {
     color: '#0B1023',
     fontSize: 16,
-    fontWeight: 'bold'
-  }
+    fontWeight: 'bold',
+  },
 });

@@ -1,47 +1,45 @@
-// src/components/Grid.tsx
-// Purpose: Renders a 3x3 grid. Supports blue highlight around an "active" cell.
+// client/src/components/Grid.tsx
+// Purpose: Display a 3×3 grid of cards. Calls back when a card is selected.
 
 import React from 'react';
-import { View } from 'react-native';
-import type { Grid } from '../game/types';
-import CardView from './Card';
-import type { Metrics } from '../utils/scaling';
+import { View, StyleSheet } from 'react-native';
+import Card from './Card';
+import type { Grid as CardGrid } from '../game/types';
 
-type Props = {
-  grid: Grid;
-  metrics: Metrics;
-  onPressCard?: (r: number, c: number) => void;
-  activeCell?: { r: number; c: number } | null;
+export type GridProps = {
+  grid: CardGrid;
+  // Callback for when the user selects a card (row, col).
+  onSelect?: (row: number, col: number) => void;
 };
 
-export default function Grid({ grid, metrics, onPressCard, activeCell }: Props) {
-  const { cardW, cardH, gap } = metrics;
+const Grid: React.FC<GridProps> = ({ grid, onSelect }) => {
   return (
-    <View style={{ gap }}>
+    <View style={styles.container}>
       {grid.map((row, r) => (
-        <View key={r} style={{ flexDirection: 'row', gap, justifyContent: 'center' }}>
-          {row.map((card, c) => {
-            const isActive = !!activeCell && activeCell.r === r && activeCell.c === c;
-            return (
-              <View
-                key={c}
-                style={{
-                  borderRadius: 14,
-                  borderWidth: isActive ? 2 : 0,
-                  borderColor: isActive ? '#4DA3FF' : 'transparent',
-                }}
-              >
-                <CardView
-                  card={card}
-                  width={cardW}
-                  height={cardH}
-                  onPress={onPressCard ? () => onPressCard(r, c) : undefined}
-                />
-              </View>
-            );
-          })}
+        <View key={r} style={styles.row}>
+          {row.map((card, c) => (
+            <Card
+              key={c}
+              card={card}
+              onPress={() => {
+                if (onSelect) onSelect(r, c);
+              }}
+            />
+          ))}
         </View>
       ))}
     </View>
   );
-}
+};
+
+export default Grid;
+
+const styles = StyleSheet.create({
+  container: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  row: {
+    flexDirection: 'row',
+  },
+});

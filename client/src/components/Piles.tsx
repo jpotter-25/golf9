@@ -1,107 +1,70 @@
-// src/components/Piles.tsx
-// Purpose: Unified Draw/Discard piles with matching visuals.
-// Change in this pass:
-//  - The full-card preview is shown ONLY when the active source is "draw".
-//    If a player takes from the discard pile, nothing appears on the draw pile.
+// client/src/components/Piles.tsx
+// Purpose: Render the draw pile and discard pile with counts. Allows the user
+// to draw from the deck or take the top discard card.
 
 import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
-import type { Card } from '../game/types';
-import CardView from './Card';
-import type { Metrics } from '../utils/scaling';
+import Card from './Card';
+import type { Card as GameCard } from '../game/types';
 
-type Props = {
-  drawCount: number; // kept for logic; not displayed
-  topDiscard: Card | null;
-  held: Card | null;
-  metrics: Metrics;
+export type PilesProps = {
+  topDiscard: GameCard | null;
+  drawPileCount: number;
+  // Callbacks for drawing a card or taking the discard card.
   onDraw: () => void;
-  onTakeDiscard: () => void;
-  activeSource?: 'draw' | 'discard' | null;
+  onTake: () => void;
+  // Optionally disable taking from the discard pile (forced draw).
+  disableTake?: boolean;
 };
 
-export default function Piles({
-  drawCount, // eslint-disable-line @typescript-eslint/no-unused-vars
+const Piles: React.FC<PilesProps> = ({
   topDiscard,
-  held,
-  metrics,
+  drawPileCount,
   onDraw,
-  onTakeDiscard,
-  activeSource,
-}: Props) {
-  const { cardW, cardH, gap } = metrics;
-
-  // Blue ring sized to hug the card’s outer edge
-  const RING_W = 2;
-  const ringStyle = {
-    width: cardW + RING_W * 2,
-    height: cardH + RING_W * 2,
-    borderRadius: 12 + RING_W,
-    left: -RING_W,
-    top: -RING_W,
-  } as const;
-
+  onTake,
+  disableTake = false,
+}) => {
   return (
-    <View style={{ flexDirection: 'row', gap: gap * 2, alignItems: 'flex-end', justifyContent: 'center' }}>
-      {/* Draw */}
-      <Pressable onPress={onDraw}>
-        <View style={styles.pileWrap}>
-          <Text style={styles.label}>Draw</Text>
-
-          <View style={{ position: 'relative' }}>
-            <CardView card={null} width={cardW} height={cardH} />
-            {/* Active ring (outer edge) */}
-            <View
-              pointerEvents="none"
-              style={[
-                styles.activeRing,
-                ringStyle,
-                activeSource === 'draw' && styles.activeVisible,
-              ]}
-            />
-            {/* Full-size preview appears ONLY when pulling from draw */}
-            {held && activeSource === 'draw' && (
-              <View style={styles.fullOverlay}>
-                <CardView card={held} width={cardW} height={cardH} />
-              </View>
-            )}
-          </View>
-        </View>
+    <View style={styles.container}>
+      <Pressable onPress={onDraw} style={styles.pile}>
+        <Card card={null} />
+        <Text style={styles.label}>Deck</Text>
+        <Text style={styles.count}>{drawPileCount}</Text>
       </Pressable>
-
-      {/* Discard */}
-      <Pressable onPress={onTakeDiscard} disabled={!topDiscard}>
-        <View style={styles.pileWrap}>
-          <Text style={styles.label}>Discard</Text>
-          <View style={{ position: 'relative' }}>
-            <CardView card={topDiscard ?? null} width={cardW} height={cardH} />
-            <View
-              pointerEvents="none"
-              style={[
-                styles.activeRing,
-                ringStyle,
-                activeSource === 'discard' && styles.activeVisible,
-              ]}
-            />
-          </View>
-        </View>
+      <Pressable
+        onPress={() => {
+          if (!disableTake) onTake();
+        }}
+        style={[styles.pile, disableTake && styles.disabled]}
+      >
+        <Card card={topDiscard} />
+        <Text style={styles.label}>Discard</Text>
+        <Text style={styles.count}>{topDiscard ? '' : 'Empty'}</Text>
       </Pressable>
     </View>
   );
-}
+};
+
+export default Piles;
 
 const styles = StyleSheet.create({
-  pileWrap: { alignItems: 'center', justifyContent: 'flex-end' },
-  label: { color: '#9BA3C7', marginBottom: 6, textAlign: 'center' },
-
-  activeRing: {
-    position: 'absolute',
-    borderWidth: 0,
-    borderColor: '#4DA3FF',
-    zIndex: 3,
-    borderRadius: 12,
+  container: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginVertical: 16,
   },
-  activeVisible: { borderWidth: 2 },
-
-  fullOverlay: { position: 'absolute', top: 0, left: 0, zIndex: 2 },
+  pile: {
+    alignItems: 'center',
+  },
+  disabled: {
+    opacity: 0.5,
+  },
+  label: {
+    color: '#E8ECF1',
+    marginTop: 4,
+  },
+  count: {
+    color: '#E8ECF1',
+    fontSize: 12,
+  },
 });
