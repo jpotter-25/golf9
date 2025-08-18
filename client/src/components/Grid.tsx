@@ -1,5 +1,7 @@
 // client/src/components/Grid.tsx
-// Purpose: Display a 3×3 grid of cards. Calls back when a card is selected.
+// Purpose: Display a 3×3 grid of cards.  Supports callbacks for both legacy
+// 'onPressCard' props (used in GameScreen) and the newer 'onSelect' prop.
+// Extra props such as 'metrics' and 'activeCell' are accepted but not used.
 
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
@@ -8,11 +10,30 @@ import type { Grid as CardGrid } from '../game/types';
 
 export type GridProps = {
   grid: CardGrid;
-  // Callback for when the user selects a card (row, col).
+  /** Callback when the user selects a card using the new API. */
   onSelect?: (row: number, col: number) => void;
+  /** Legacy callback used in GameScreen. */
+  onPressCard?: (row: number, col: number) => void;
+  /** Metrics and activeCell are accepted for compatibility but unused here. */
+  metrics?: unknown;
+  activeCell?: { r: number; c: number } | null;
+  [key: string]: unknown; // allow any other props without error
 };
 
-const Grid: React.FC<GridProps> = ({ grid, onSelect }) => {
+const Grid: React.FC<GridProps> = ({
+  grid,
+  onSelect,
+  onPressCard,
+}) => {
+  // Use whichever callback is provided.
+  const handleSelect = (r: number, c: number) => {
+    if (onSelect) {
+      onSelect(r, c);
+    } else if (onPressCard) {
+      onPressCard(r, c);
+    }
+  };
+
   return (
     <View style={styles.container}>
       {grid.map((row, r) => (
@@ -21,9 +42,7 @@ const Grid: React.FC<GridProps> = ({ grid, onSelect }) => {
             <Card
               key={c}
               card={card}
-              onPress={() => {
-                if (onSelect) onSelect(r, c);
-              }}
+              onPress={() => handleSelect(r, c)}
             />
           ))}
         </View>
