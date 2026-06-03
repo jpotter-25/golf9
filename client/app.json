@@ -15,19 +15,30 @@
       "backgroundColor": "#0B1023"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.golf9.app",
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0B1023"
-      }
+      },
+      "package": "com.golf9.app",
+      "versionCode": 1,
+      "permissions": []
     },
     "web": {
       "bundler": "metro",
       "output": "single",
       "favicon": "./assets/favicon.png"
     },
-    "plugins": []
+    "plugins": [],
+    "owner": "golf9",
+    "extra": {
+      "eas": {
+        "projectId": "00000000-0000-0000-0000-000000000000"
+      }
+    }
   }
 }
