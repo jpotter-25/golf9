@@ -1,42 +1,76 @@
 // src/services/network.ts
-// Purpose: Socket.IO wrapper for online play (LAN).
+// Purpose: Socket.IO wrapper for authoritative online play.
 
 import { io, Socket } from 'socket.io-client';
-import { SERVER_URL } from '../config';
+import { SOCKET_URL } from '../config';
 import type { GameState } from '../game/types';
+import type { RoomSummary } from './api';
 
 let socket: Socket | null = null;
+let activeToken: string | null = null;
 
-/** Connect or return existing socket */
-export function connect(): Socket {
-  if (socket) return socket;
-  socket = io(SERVER_URL, { transports: ['websocket'] });
+export function connect(token: string): Socket {
+  if (socket && activeToken === token) return socket;
+  if (socket) socket.disconnect();
+  activeToken = token;
+  socket = io(SOCKET_URL, { transports: ['websocket'], auth: { token }, reconnection: true });
   return socket;
 }
 
-/** Create a room; server replies with a short code */
-export function createRoom(): Promise<string> {
-  const s = connect();
-  return new Promise((resolve) => {
-    s.emit('create', {}, (code: string) => resolve(code));
+export function disconnect() {
+  socket?.disconnect();
+  socket = null;
+  activeToken = null;
+}
+
+export function joinRoomSocket(token: string, code: string): Promise<{ room: RoomSummary; game: GameState | null }> {
+  const s = connect(token);
+  return new Promise((resolve, reject) => {
+    s.emit('room:join', { code }, (res: { room?: RoomSummary; game?: GameState | null; error?: string }) => {
+      if (res.error) reject(new Error(res.error));
+      else resolve({ room: res.room!, game: res.game ?? null });
+    });
   });
 }
 
-/** Join a room by code with a display name */
-export function joinRoom(room: string, name: string) {
-  const s = connect();
-  s.emit('join', { room, name });
+export function setReady(token: string, code: string, ready: boolean): Promise<void> {
+  const s = connect(token);
+  return new Promise((resolve, reject) => {
+    s.emit('room:ready', { code, ready }, (res: { error?: string }) => res.error ? reject(new Error(res.error)) : resolve());
+  });
 }
 
-/** Subscribe to authoritative game state (future use) */
+export function startOnlineGame(token: string, code: string): Promise<void> {
+  const s = connect(token);
+  return new Promise((resolve, reject) => {
+    s.emit('room:start', { code }, (res: { error?: string }) => res.error ? reject(new Error(res.error)) : resolve());
+  });
+}
+
+export function leaveOnlineRoom(token: string, code: string): Promise<void> {
+  const s = connect(token);
+  return new Promise((resolve) => {
+    s.emit('room:leave', { code }, () => resolve());
+  });
+}
+
+export function onRoomUpdate(cb: (room: RoomSummary) => void) {
+  socket?.on('room:update', cb);
+  return () => { socket?.off('room:update', cb); };
+}
+
 export function onGameUpdate(cb: (state: GameState) => void) {
-  const s = connect();
-  s.on('state', cb);
-  return () => s.off('state', cb);
+  socket?.on('game:state', cb);
+  return () => { socket?.off('game:state', cb); };
 }
 
-/** Send a generic action (future use) */
-export function sendAction(action: unknown) {
-  const s = connect();
-  s.emit('action', action);
+export function sendGameIntent(token: string, code: string, type: string, payload: Record<string, unknown> = {}): Promise<{ drawn?: unknown }> {
+  const s = connect(token);
+  const actionId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    s.emit('game:intent', { code, actionId, type, payload }, (res: { error?: string; drawn?: unknown }) => {
+      if (res.error) reject(new Error(res.error));
+      else resolve({ drawn: res.drawn });
+    });
+  });
 }

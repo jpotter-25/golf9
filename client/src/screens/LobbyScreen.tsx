@@ -50,7 +50,7 @@ export default function LobbyScreen({ navigation }: Props) {
       <View style={{ height: 12 }} />
       <Pressable
         style={[styles.cta, { backgroundColor: '#52E5A7' }]}
-        onPress={() => navigation.navigate('Game' as any, { players, mode: 'passplay', rounds } as any)}
+        onPress={() => navigation.navigate('Game', { players, mode: 'passplay', rounds })}
       >
         <Text style={styles.ctaText}>Pass & Play</Text>
       </Pressable>
@@ -58,23 +58,22 @@ export default function LobbyScreen({ navigation }: Props) {
       <View style={{ height: 10 }} />
       <Pressable
         style={[styles.cta, { backgroundColor: '#4DA3FF' }]}
-        onPress={() => navigation.navigate('Game' as any, { players, mode: 'solo', rounds } as any)}
+        onPress={() => navigation.navigate('Game', { players, mode: 'solo', rounds })}
       >
         <Text style={styles.ctaText}>Solo vs AI</Text>
       </Pressable>
 
       <View style={{ height: 10 }} />
       <Pressable
-        style={[styles.ctaOutline, { opacity: 0.6 }]}
-        disabled
-        onPress={() => {}}
+        style={styles.ctaOutline}
+        onPress={() => navigation.navigate('OnlineRoom', { players, rounds, create: true })}
       >
-        <Text style={styles.ctaOutlineText}>Online Multiplayer (coming soon)</Text>
+        <Text style={styles.ctaOutlineText}>Online Multiplayer</Text>
       </Pressable>
 
       {/* Footer links */}
       <View style={{ height: 14 }} />
-      <Pressable onPress={() => navigation.navigate('Rules' as any)} style={{ alignSelf: 'center', padding: 6 }}>
+      <Pressable onPress={() => navigation.navigate('Rules')} style={{ alignSelf: 'center', padding: 6 }}>
         <Text style={styles.rulesLink}>Rules</Text>
       </Pressable>
     </View>

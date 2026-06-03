@@ -4,7 +4,15 @@
     "universe/native",
     "universe/shared/typescript-analysis"
   ],
+  "parserOptions": {
+    "project": "./tsconfig.json",
+    "tsconfigRootDir": "."
+  },
   "rules": {
     "react-hooks/exhaustive-deps": "off"
-  }
+  },
+  "ignorePatterns": [
+    "node_modules/",
+    ".expo/"
+  ]
 }

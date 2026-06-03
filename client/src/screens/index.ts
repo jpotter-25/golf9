@@ -8,3 +8,4 @@ export { default as GameScreen } from './GameScreen';
 export { default as RulesScreen } from './RulesScreen';
 export { default as ProfileScreen } from './ProfileScreen';
 export { default as SettingsScreen } from './SettingsScreen';
+export { default as OnlineRoomScreen } from './OnlineRoomScreen';
