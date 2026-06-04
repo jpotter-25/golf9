@@ -379,9 +379,10 @@ export function pickTarget(grid, incoming) {
   return { r: 0, c: 0 };
 }
 
-export function publicGameState(state, viewerUserId = null) {
+export function publicGameState(state, viewerUserId = null, viewerHeldCard = null) {
   const next = cloneState(state);
   next.drawPile = Array.from({ length: next.drawPile.length }, (_, index) => ({ id: `draw-${index}`, suit: '♠', rank: 'A', faceUp: false }));
+  next.viewerHeldCard = viewerHeldCard;
   next.players = next.players.map(player => ({
     ...player,
     grid: player.grid.map(row => row.map(card => {

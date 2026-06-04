@@ -28,6 +28,7 @@ const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const ROOM_TTL_MS = 1000 * 60 * 60 * 2;
 const PORT = process.env.PORT || 3001;
 const CLIENT_ORIGINS = (process.env.CLIENT_ORIGINS || '*').split(',');
+const MAX_PROCESSED_ACTION_IDS = 500;
 
 const app = express();
 app.use(cors({ origin: CLIENT_ORIGINS.includes('*') ? '*' : CLIENT_ORIGINS, credentials: true }));
@@ -133,13 +134,35 @@ function broadcastRoom(room) {
   io.to(room.code).emit('room:update', roomSummary(room));
   if (room.game) {
     for (const player of room.players) {
-      io.to(`${room.code}:${player.userId}`).emit('game:state', publicGameState(room.game, player.userId));
+      io.to(`${room.code}:${player.userId}`).emit('game:state', gameViewFor(room, player.userId));
     }
   }
 }
 
+function gameViewFor(room, userId) {
+  return publicGameState(room.game, userId, room.held.get(userId) || null);
+}
+
 function getRoomPlayerIndex(room, userId) {
   return room.game?.players.findIndex(player => player.userId === userId) ?? -1;
+}
+
+function isValidActionId(actionId) {
+  return typeof actionId === 'string' && /^[a-z0-9-]{8,80}$/i.test(actionId);
+}
+
+function isGridCoordinate(payload) {
+  return Number.isInteger(payload?.r) && Number.isInteger(payload?.c)
+    && payload.r >= 0 && payload.r < 3
+    && payload.c >= 0 && payload.c < 3;
+}
+
+function rememberActionId(room, actionId) {
+  room.processedActionIds.add(actionId);
+  while (room.processedActionIds.size > MAX_PROCESSED_ACTION_IDS) {
+    const oldest = room.processedActionIds.values().next().value;
+    room.processedActionIds.delete(oldest);
+  }
 }
 
 function makeRoom(hostUser, { maxPlayers = 4, rounds = 9 } = {}) {
@@ -254,7 +277,7 @@ io.on('connection', (socket) => {
     room.connected.set(userId, true);
     room.updatedAt = Date.now();
     broadcastRoom(room);
-    return cb({ room: roomSummary(room), game: room.game ? publicGameState(room.game, userId) : null });
+    return cb({ room: roomSummary(room), game: room.game ? gameViewFor(room, userId) : null });
   });
 
   socket.on('room:ready', ({ code, ready }, cb = () => {}) => {
@@ -301,6 +324,9 @@ io.on('connection', (socket) => {
     const room = rooms.get(String(code || '').toUpperCase());
     const userId = socket.auth.user.userId;
     if (!room || !room.game) return cb({ error: 'Game not found.' });
+    if (!isValidActionId(actionId)) return cb({ error: 'Invalid action id.' });
+    if (!['peek', 'draw', 'takeDiscard', 'replace', 'discard'].includes(type)) return cb({ error: 'Unknown action.' });
+    if ((type === 'peek' || type === 'replace') && !isGridCoordinate(payload)) return cb({ error: 'Invalid grid coordinate.' });
     if (room.processedActionIds.has(actionId)) return cb({ ok: true, duplicate: true });
     room.game = resolveExpiredTimers(room.game);
     const idx = getRoomPlayerIndex(room, userId);
@@ -325,7 +351,7 @@ io.on('connection', (socket) => {
     }
     if (result.error) return cb({ error: result.error });
     room.game = result.state;
-    room.processedActionIds.add(actionId);
+    rememberActionId(room, actionId);
     room.updatedAt = Date.now();
     broadcastRoom(room);
     return cb({ ok: true, drawn });

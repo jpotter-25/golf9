@@ -55,10 +55,14 @@ export default function GameScreen({ route, navigation }: Props) {
 
   useEffect(() => {
     if (!isOnline || !token || !roomCode) return;
+    const applyOnlineGameState = (next: GameState) => {
+      setState(next);
+      setHeld(next.viewerHeldCard ?? null);
+    };
     joinRoomSocket(token, roomCode).then(({ game }) => {
-      if (game) setState(game);
+      if (game) applyOnlineGameState(game);
     }).catch(error => Alert.alert('Connection error', error instanceof Error ? error.message : 'Unable to join game.'));
-    return onGameUpdate(next => setState(next));
+    return onGameUpdate(applyOnlineGameState);
   }, [isOnline, roomCode, token]);
 
   // ===== Opponent panel sizing =====

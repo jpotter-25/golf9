@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
-const { io } = require('../../client/node_modules/socket.io-client');
+const { io } = require('socket.io-client');
 
 function port() {
   return 4300 + Math.floor(Math.random() * 1000);
