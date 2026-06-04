@@ -56,15 +56,9 @@ export default function GameScreen({ route, navigation }: Props) {
   useEffect(() => {
     if (!isOnline || !token || !roomCode) return;
     joinRoomSocket(token, roomCode).then(({ game }) => {
-      if (game) {
-        setState(game);
-        setHeld(game.viewerHeldCard ?? null);
-      }
+      if (game) setState(game);
     }).catch(error => Alert.alert('Connection error', error instanceof Error ? error.message : 'Unable to join game.'));
-    return onGameUpdate(next => {
-      setState(next);
-      setHeld(next.viewerHeldCard ?? null);
-    });
+    return onGameUpdate(next => setState(next));
   }, [isOnline, roomCode, token]);
 
   // ===== Opponent panel sizing =====
@@ -335,7 +329,7 @@ export default function GameScreen({ route, navigation }: Props) {
         return;
       }
       if (held) {
-        sendGameIntent(token, roomCode, 'replace', { r, c }).catch(error => Alert.alert('Move rejected', error instanceof Error ? error.message : 'Try again.'));
+        sendGameIntent(token, roomCode, 'replace', { r, c, card: held }).catch(error => Alert.alert('Move rejected', error instanceof Error ? error.message : 'Try again.'));
         setHeld(null);
         setPending(null);
         setActiveSource(null);
@@ -413,7 +407,7 @@ export default function GameScreen({ route, navigation }: Props) {
       return;
     }
     if (isOnline && token && roomCode) {
-      sendGameIntent(token, roomCode, 'discard').catch(error => Alert.alert('Discard rejected', error instanceof Error ? error.message : 'Try again.'));
+      sendGameIntent(token, roomCode, 'discard', { card: held }).catch(error => Alert.alert('Discard rejected', error instanceof Error ? error.message : 'Try again.'));
     } else {
       setState(s => discardDrawn(s, held));
     }
@@ -425,7 +419,7 @@ export default function GameScreen({ route, navigation }: Props) {
   const onKeepRevealed = () => {
     if (!isHumanTurn || !held || !pending) return;
     if (isOnline && token && roomCode) {
-      sendGameIntent(token, roomCode, 'discard').catch(error => Alert.alert('Discard rejected', error instanceof Error ? error.message : 'Try again.'));
+      sendGameIntent(token, roomCode, 'discard', { card: held }).catch(error => Alert.alert('Discard rejected', error instanceof Error ? error.message : 'Try again.'));
     } else {
       setState(s => discardDrawn(s, held));
     }
@@ -437,7 +431,7 @@ export default function GameScreen({ route, navigation }: Props) {
   const onKeepDrawn = () => {
     if (!isHumanTurn || !held || !pending) return;
     if (isOnline && token && roomCode) {
-      sendGameIntent(token, roomCode, 'replace', { r: pending.r, c: pending.c }).catch(error => Alert.alert('Move rejected', error instanceof Error ? error.message : 'Try again.'));
+      sendGameIntent(token, roomCode, 'replace', { r: pending.r, c: pending.c, card: held }).catch(error => Alert.alert('Move rejected', error instanceof Error ? error.message : 'Try again.'));
     } else {
       setState(s => replaceGridCard(s, s.currentPlayerIndex, pending.r, pending.c, held));
     }

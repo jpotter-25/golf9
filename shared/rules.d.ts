@@ -8,7 +8,7 @@ export type GameState = {
   id: string; players: Player[]; currentPlayerIndex: number; drawPile: Card[]; discardPile: Card[];
   phase: 'peek' | 'turn' | 'roundEnd'; topDiscard: Card | null; turnEndsAt?: number; peekTurnIndex?: number;
   peekEndsAt?: number; mustDrawOnlyForPlayerIndex?: number; round?: number; totalRounds?: number; totals?: number[];
-  sweepActive?: boolean; sweepStarterIndex?: number | null; completed?: boolean; revision?: number; lastRoundScores?: number[]; viewerHeldCard?: Card | null;
+  sweepActive?: boolean; sweepStarterIndex?: number | null; completed?: boolean; revision?: number; lastRoundScores?: number[];
 };
 export const ROWS: number;
 export const COLS: number;
@@ -37,4 +37,4 @@ export function discardDrawn(state: GameState, playerIndex: number, card: Card):
 export function resolveExpiredTimers(state: GameState): GameState;
 export function isRoundOver(state: GameState): boolean;
 export function pickTarget(grid: Grid, incoming: Card): { r: number; c: number };
-export function publicGameState(state: GameState, viewerUserId?: string | null, viewerHeldCard?: Card | null): GameState;
+export function publicGameState(state: GameState, viewerUserId?: string | null): GameState;

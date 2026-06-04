@@ -133,39 +133,13 @@ function broadcastRoom(room) {
   io.to(room.code).emit('room:update', roomSummary(room));
   if (room.game) {
     for (const player of room.players) {
-      io.to(`${room.code}:${player.userId}`).emit('game:state', publicGameState(room.game, player.userId, room.held.get(player.userId) || null));
+      io.to(`${room.code}:${player.userId}`).emit('game:state', publicGameState(room.game, player.userId));
     }
   }
 }
 
 function getRoomPlayerIndex(room, userId) {
   return room.game?.players.findIndex(player => player.userId === userId) ?? -1;
-}
-
-function isObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function isGridCoord(value) {
-  return Number.isInteger(value) && value >= 0 && value < 3;
-}
-
-function validateIntent({ actionId, type, payload }) {
-  if (typeof actionId !== 'string' || actionId.length < 8 || actionId.length > 80) return 'Invalid action id.';
-  if (!['peek', 'draw', 'takeDiscard', 'replace', 'discard'].includes(type)) return 'Unknown action.';
-  if (payload !== undefined && !isObject(payload)) return 'Invalid action payload.';
-  if (type === 'peek' || type === 'replace') {
-    if (!isGridCoord(payload?.r) || !isGridCoord(payload?.c)) return 'Invalid grid coordinates.';
-  }
-  return null;
-}
-
-function rememberActionId(room, actionId) {
-  room.processedActionIds.add(actionId);
-  if (room.processedActionIds.size > 250) {
-    const oldest = room.processedActionIds.values().next().value;
-    room.processedActionIds.delete(oldest);
-  }
 }
 
 function makeRoom(hostUser, { maxPlayers = 4, rounds = 9 } = {}) {
@@ -280,7 +254,7 @@ io.on('connection', (socket) => {
     room.connected.set(userId, true);
     room.updatedAt = Date.now();
     broadcastRoom(room);
-    return cb({ room: roomSummary(room), game: room.game ? publicGameState(room.game, userId, room.held.get(userId) || null) : null });
+    return cb({ room: roomSummary(room), game: room.game ? publicGameState(room.game, userId) : null });
   });
 
   socket.on('room:ready', ({ code, ready }, cb = () => {}) => {
@@ -323,9 +297,7 @@ io.on('connection', (socket) => {
     return cb({ ok: true });
   });
 
-  socket.on('game:intent', ({ code, actionId, type, payload = {} }, cb = () => {}) => {
-    const validationError = validateIntent({ actionId, type, payload });
-    if (validationError) return cb({ error: validationError });
+  socket.on('game:intent', ({ code, actionId, type, payload }, cb = () => {}) => {
     const room = rooms.get(String(code || '').toUpperCase());
     const userId = socket.auth.user.userId;
     if (!room || !room.game) return cb({ error: 'Game not found.' });
@@ -353,7 +325,7 @@ io.on('connection', (socket) => {
     }
     if (result.error) return cb({ error: result.error });
     room.game = result.state;
-    rememberActionId(room, actionId);
+    room.processedActionIds.add(actionId);
     room.updatedAt = Date.now();
     broadcastRoom(room);
     return cb({ ok: true, drawn });
