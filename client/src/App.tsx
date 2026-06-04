@@ -16,12 +16,15 @@ import {
   RulesScreen,
   ProfileScreen,
   SettingsScreen,
+  OnlineRoomScreen,
 } from './screens';
+import { AuthProvider, useAuth } from './context/AuthContext';
 
 export type RootStackParamList = {
   Login: undefined;
   Lobby: undefined;
-  Game: { players: number; mode: 'passplay' | 'solo' | 'online'; roomCode?: string };
+  OnlineRoom: { players: number; rounds: 5 | 9; create?: boolean; joinCode?: string };
+  Game: { players: number; rounds: 5 | 9; mode: 'passplay' | 'solo' | 'online'; roomCode?: string; roomId?: string; online?: boolean };
   Rules: undefined;
   Profile: undefined;
   Settings: undefined;
@@ -51,6 +54,33 @@ async function applyImmersive() {
   } catch {}
 }
 
+function AppNavigator() {
+  const { token, loading } = useAuth();
+  if (loading) return null;
+
+  return (
+    <NavigationContainer theme={theme}>
+      <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={token ? 'Lobby' : 'Login'}>
+        {!token ? (
+          <>
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="Rules" component={RulesScreen} />
+          </>
+        ) : (
+          <>
+            <Stack.Screen name="Lobby" component={LobbyScreen} />
+            <Stack.Screen name="OnlineRoom" component={OnlineRoomScreen} />
+            <Stack.Screen name="Game" component={GameScreen} />
+            <Stack.Screen name="Rules" component={RulesScreen} />
+            <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="Settings" component={SettingsScreen} />
+          </>
+        )}
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
+
 export default function App() {
   useEffect(() => {
     applyImmersive();
@@ -62,16 +92,9 @@ export default function App() {
     <SafeAreaProvider>
       {/* Hide the OS status bar */}
       <StatusBar hidden />
-      <NavigationContainer theme={theme}>
-        <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="Login">
-          <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="Lobby" component={LobbyScreen} />
-          <Stack.Screen name="Game" component={GameScreen} />
-          <Stack.Screen name="Rules" component={RulesScreen} />
-          <Stack.Screen name="Profile" component={ProfileScreen} />
-          <Stack.Screen name="Settings" component={SettingsScreen} />
-        </Stack.Navigator>
-      </NavigationContainer>
+      <AuthProvider>
+        <AppNavigator />
+      </AuthProvider>
     </SafeAreaProvider>
   );
 }

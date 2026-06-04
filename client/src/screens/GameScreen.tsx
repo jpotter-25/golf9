@@ -18,12 +18,17 @@ import {
 import GridView from '../components/Grid';
 import Piles from '../components/Piles';
 import { useBoardMetrics } from '../utils/scaling';
+import { useAuth } from '../context/AuthContext';
+import { joinRoomSocket, onGameUpdate, sendGameIntent } from '../services/network';
+import { cardValue, pickTarget as sharedPickTarget, scoreGrid } from '../../../shared/rules';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Game'>;
 
 export default function GameScreen({ route, navigation }: Props) {
-  const { players, mode, rounds: roundsFromLobby } = route.params as any;
-  const TOTAL_ROUNDS: number = typeof roundsFromLobby === 'number' ? roundsFromLobby : 9;
+  const { players, mode, rounds, roomCode } = route.params;
+  const TOTAL_ROUNDS: number = rounds;
+  const { token, user } = useAuth();
+  const isOnline = mode === 'online' && !!roomCode && !!token;
 
   const insets = useSafeAreaInsets();
   const { width: winW, height: winH } = useWindowDimensions();
@@ -48,6 +53,20 @@ export default function GameScreen({ route, navigation }: Props) {
 
   const metrics = useBoardMetrics(state.players.length);
 
+  useEffect(() => {
+    if (!isOnline || !token || !roomCode) return;
+    joinRoomSocket(token, roomCode).then(({ game }) => {
+      if (game) {
+        setState(game);
+        setHeld(game.viewerHeldCard ?? null);
+      }
+    }).catch(error => Alert.alert('Connection error', error instanceof Error ? error.message : 'Unable to join game.'));
+    return onGameUpdate(next => {
+      setState(next);
+      setHeld(next.viewerHeldCard ?? null);
+    });
+  }, [isOnline, roomCode, token]);
+
   // ===== Opponent panel sizing =====
   const OPP_INNER_PAD = 8;
   const footprint = (cw: number, gap: number) => cw * 3 + gap * 2 + OPP_INNER_PAD * 2;
@@ -63,8 +82,10 @@ export default function GameScreen({ route, navigation }: Props) {
 
   // ===== Solo vs AI flags =====
   const isSolo = mode === 'solo';
-  const isHumanTurn = !(isSolo && state.phase === 'turn' && state.currentPlayerIndex !== 0);
-  const isHumanPeek = !(isSolo && state.phase === 'peek' && (state.peekTurnIndex ?? 0) !== 0);
+  const isOnlineTurn = isOnline ? state.players[state.currentPlayerIndex]?.userId === user?.userId : true;
+  const isOnlinePeek = isOnline ? state.players[state.peekTurnIndex ?? 0]?.userId === user?.userId : true;
+  const isHumanTurn = isOnlineTurn && !(isSolo && state.phase === 'turn' && state.currentPlayerIndex !== 0);
+  const isHumanPeek = isOnlinePeek && !(isSolo && state.phase === 'peek' && (state.peekTurnIndex ?? 0) !== 0);
 
   // ===== Hide Android navigation bar while in-game =====
   useEffect(() => {
@@ -76,7 +97,7 @@ export default function GameScreen({ route, navigation }: Props) {
 
   // ===== Idle / peek timers (for Pass & Play) =====
   useEffect(() => {
-    if (locked) return;
+    if (isOnline || locked) return;
     const id = setInterval(() => {
       setState(s => {
         if (s.phase !== 'turn' || !s.turnEndsAt) return s;
@@ -139,10 +160,10 @@ export default function GameScreen({ route, navigation }: Props) {
       });
     }, 1000);
     return () => clearInterval(id);
-  }, [held, locked]);
+  }, [held, isOnline, locked]);
 
   useEffect(() => {
-    if (locked) return;
+    if (isOnline || locked) return;
     const id = setInterval(() => {
       setState(s => {
         if (s.phase !== 'peek' || !s.peekEndsAt) return s;
@@ -152,11 +173,11 @@ export default function GameScreen({ route, navigation }: Props) {
       });
     }, 250);
     return () => clearInterval(id);
-  }, [locked]);
+  }, [isOnline, locked]);
 
   // ===== SOLO: auto-advance peeks (no taps) =====
   useEffect(() => {
-    if (!isSolo || locked) return;
+    if (isOnline || !isSolo || locked) return;
     if (state.phase !== 'peek') return;
     const idx = state.peekTurnIndex ?? 0;
 
@@ -174,11 +195,11 @@ export default function GameScreen({ route, navigation }: Props) {
       }, 150);
       return () => clearTimeout(t);
     }
-  }, [state, isSolo, locked]);
+  }, [state, isOnline, isSolo, locked]);
 
   // ===== SOLO: AI plays turns automatically =====
   useEffect(() => {
-    if (!isSolo || locked) return;
+    if (isOnline || !isSolo || locked) return;
     if (state.phase !== 'turn') return;
     const i = state.currentPlayerIndex;
     if (i === 0) return;
@@ -205,21 +226,21 @@ export default function GameScreen({ route, navigation }: Props) {
       setLocked(false);
     }, 4000);
     return () => clearTimeout(t);
-  }, [state, isSolo, locked]);
+  }, [state, isOnline, isSolo, locked]);
 
   // ===== Final sweep detection =====
   useEffect(() => {
-    if (locked || state.phase !== 'turn') return;
+    if (isOnline || locked || state.phase !== 'turn') return;
     const i = state.currentPlayerIndex;
     const allUp = state.players[i].grid.every(row => row.every(c => c?.faceUp));
     if (allUp && !sweepActive && sweepStarter.current == null) {
       sweepStarter.current = i;
       setSweepActive(true);
     }
-  }, [state, sweepActive, locked]);
+  }, [state, sweepActive, isOnline, locked]);
 
   useEffect(() => {
-    if (locked || state.phase !== 'turn') return;
+    if (isOnline || locked || state.phase !== 'turn') return;
     const i = state.currentPlayerIndex;
     if (sweepActive && sweepStarter.current != null) {
       if (lastTurnIndex.current !== i && i === sweepStarter.current) {
@@ -227,30 +248,9 @@ export default function GameScreen({ route, navigation }: Props) {
       }
     }
     lastTurnIndex.current = i;
-  }, [state, sweepActive, locked]);
+  }, [state, sweepActive, isOnline, locked]);
 
-  // ===== Scoring (5 = −5) & round transition =====
-  const scoreGrid = (grid: Grid): number => {
-    let total = 0;
-    for (let r = 0; r < 3; r++) {
-      for (let c = 0; c < 3; c++) {
-        const card = grid[r][c];
-        if (!card || card.zeroed) continue;
-        const rank = card.rank;
-        let val = 0;
-        if (rank === 'A') val = 1;
-        else if (rank === 'J' || rank === 'Q') val = 10;
-        else if (rank === 'K') val = 0;
-        else {
-          const n = parseInt(rank as string, 10);
-          if (!isNaN(n)) val = n === 5 ? -5 : n;
-        }
-        total += val;
-      }
-    }
-    return total;
-  };
-
+  // ===== Scoring & round transition =====
   function endRoundAndMaybeContinue() {
     setLocked(true);
     const roundScores = state.players.map(p => scoreGrid(p.grid));
@@ -329,6 +329,19 @@ export default function GameScreen({ route, navigation }: Props) {
   // ===== Actions =====
   const onPressGrid = (r: number, c: number) => {
     if (!isHumanTurn || !isHumanPeek) return;
+    if (isOnline && token && roomCode) {
+      if (state.phase === 'peek') {
+        sendGameIntent(token, roomCode, 'peek', { r, c }).catch(error => Alert.alert('Move rejected', error instanceof Error ? error.message : 'Try again.'));
+        return;
+      }
+      if (held) {
+        sendGameIntent(token, roomCode, 'replace', { r, c }).catch(error => Alert.alert('Move rejected', error instanceof Error ? error.message : 'Try again.'));
+        setHeld(null);
+        setPending(null);
+        setActiveSource(null);
+      }
+      return;
+    }
     setState(s => {
       if (s.phase === 'peek') {
         if (s.peekTurnIndex == null) return s;
@@ -358,6 +371,12 @@ export default function GameScreen({ route, navigation }: Props) {
   const onDraw = () => {
     if (!isHumanTurn) return;
     if (state.phase !== 'turn' || held) return;
+    if (isOnline && token && roomCode) {
+      sendGameIntent(token, roomCode, 'draw').then(res => setHeld(res.drawn as Card)).catch(error => Alert.alert('Draw rejected', error instanceof Error ? error.message : 'Try again.'));
+      setActiveSource('draw');
+      setPending(null);
+      return;
+    }
     const { state: next, drawn } = drawFromDeck(state);
     setHeld(drawn);
     setActiveSource('draw');
@@ -368,6 +387,12 @@ export default function GameScreen({ route, navigation }: Props) {
   const onTakeDiscard = () => {
     if (!isHumanTurn) return;
     if (state.phase !== 'turn' || held) return;
+    if (isOnline && token && roomCode) {
+      sendGameIntent(token, roomCode, 'takeDiscard').then(res => { if (res.drawn) setHeld(res.drawn as Card); }).catch(error => Alert.alert('Take rejected', error instanceof Error ? error.message : 'Try again.'));
+      setActiveSource('discard');
+      setPending(null);
+      return;
+    }
     const { state: next, drawn } = takeDiscard(state);
     if (drawn) setHeld(drawn);
     setActiveSource('discard');
@@ -387,7 +412,11 @@ export default function GameScreen({ route, navigation }: Props) {
       Alert.alert('Choose a slot', 'You can only discard the held card when one slot remains face-down.');
       return;
     }
-    setState(s => discardDrawn(s, held));
+    if (isOnline && token && roomCode) {
+      sendGameIntent(token, roomCode, 'discard').catch(error => Alert.alert('Discard rejected', error instanceof Error ? error.message : 'Try again.'));
+    } else {
+      setState(s => discardDrawn(s, held));
+    }
     setHeld(null);
     setPending(null);
     setActiveSource(null);
@@ -395,7 +424,11 @@ export default function GameScreen({ route, navigation }: Props) {
 
   const onKeepRevealed = () => {
     if (!isHumanTurn || !held || !pending) return;
-    setState(s => discardDrawn(s, held));
+    if (isOnline && token && roomCode) {
+      sendGameIntent(token, roomCode, 'discard').catch(error => Alert.alert('Discard rejected', error instanceof Error ? error.message : 'Try again.'));
+    } else {
+      setState(s => discardDrawn(s, held));
+    }
     setHeld(null);
     setPending(null);
     setActiveSource(null);
@@ -403,7 +436,11 @@ export default function GameScreen({ route, navigation }: Props) {
 
   const onKeepDrawn = () => {
     if (!isHumanTurn || !held || !pending) return;
-    setState(s => replaceGridCard(s, s.currentPlayerIndex, pending.r, pending.c, held));
+    if (isOnline && token && roomCode) {
+      sendGameIntent(token, roomCode, 'replace', { r: pending.r, c: pending.c }).catch(error => Alert.alert('Move rejected', error instanceof Error ? error.message : 'Try again.'));
+    } else {
+      setState(s => replaceGridCard(s, s.currentPlayerIndex, pending.r, pending.c, held));
+    }
     setHeld(null);
     setPending(null);
     setActiveSource(null);
@@ -547,12 +584,7 @@ function getNextPeekLabel(s: GameState): string {
 }
 
 function value(card: Card): number {
-  if (card.rank === 'K') return 0;
-  if (card.rank === 'A') return 1;
-  if (card.rank === 'J' || card.rank === 'Q') return 10;
-  const n = parseInt(card.rank as string, 10);
-  if (!isNaN(n)) return n === 5 ? -5 : n;
-  return 0;
+  return cardValue(card);
 }
 
 function colHasPairFor(card: Card, grid: Grid): boolean {
@@ -595,34 +627,7 @@ function shouldTakeDiscard(s: GameState, idx: number, top: Card): boolean {
 }
 
 function pickTarget(grid: Grid, incoming: Card): { r: number; c: number } {
-  // 1) Finish a triple if possible
-  for (let c = 0; c < 3; c++) {
-    const cells = [grid[0][c], grid[1][c], grid[2][c]];
-    const ranks = cells.map(x => x?.rank ?? null);
-    const ups = cells.map(x => !!x?.faceUp);
-    const same = ranks.filter(r => r === incoming.rank).length;
-    if (same >= 2) {
-      for (let r = 0; r < 3; r++) {
-        const cur = grid[r][c];
-        if (!cur) continue;
-        if (!ups[r] || cur.rank !== incoming.rank) return { r, c };
-      }
-    }
-  }
-  // 2) Replace current worst face-up if incoming is better
-  const worst = worstFaceUp(grid);
-  if (worst && value(incoming) < worst.score) return { r: worst.r, c: worst.c };
-
-  // 3) Otherwise reveal any face-down
-  const fd = anyFaceDown(grid);
-  if (fd) return fd;
-
-  // 4) Fallback: first non-zeroed face-up
-  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
-    const cell = grid[r][c];
-    if (cell && cell.faceUp && !cell.zeroed) return { r, c };
-  }
-  return { r: 0, c: 0 };
+  return sharedPickTarget(grid, incoming);
 }
 
 function aiPlayTurn(s: GameState, idx: number): GameState {
