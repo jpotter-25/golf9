@@ -30,12 +30,18 @@ Status: 🟡 In progress
 
 ## Iteration 2 — Durable backend persistence
 
-Status: ⬜ Not started
+Status: 🟡 In progress
 
 ### Goals
 - Replace JSON-file users/sessions and in-memory rooms with a real persistence layer.
 - Add migrations and test fixtures.
 - Persist completed game results and stats.
+
+### Completed in this iteration
+- ✅ Completed online game results are recorded durably in the server auth store.
+- ✅ User profile stats update once per completed room and survive server restart.
+- ✅ Authenticated users can query their completed result history via `GET /results/me`.
+- ✅ Server tests cover loading persisted stats and completed results from disk.
 
 ### Candidate acceptance criteria
 - Users and sessions survive server restarts.

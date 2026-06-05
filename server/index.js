@@ -41,6 +41,8 @@ const io = new Server(server, { cors: { origin: CLIENT_ORIGINS.includes('*') ? '
 const users = new Map();
 /** @type {Map<string, { token: string; userId: string; expiresAt: number }>} */
 const sessions = new Map();
+/** @type {Array<{ resultId: string; completedAt: number; roomCode: string; round: number; totalRounds: number; players: Array<{ userId: string; displayName: string; total: number; won: boolean }> }>} */
+const results = [];
 /** @type {Map<string, any>} */
 const rooms = new Map();
 /** @type {Map<string, { roomCode: string; userId: string }>} */
@@ -54,6 +56,7 @@ function loadStore() {
     for (const session of parsed.sessions || []) {
       if (session.expiresAt > Date.now()) sessions.set(session.token, session);
     }
+    results.push(...(parsed.results || []));
   } catch {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     saveStore();
@@ -62,7 +65,7 @@ function loadStore() {
 
 function saveStore() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(DATA_FILE, JSON.stringify({ users: [...users.values()], sessions: [...sessions.values()] }, null, 2));
+  fs.writeFileSync(DATA_FILE, JSON.stringify({ users: [...users.values()], sessions: [...sessions.values()], results }, null, 2));
 }
 
 function makeCode() {
@@ -83,6 +86,12 @@ function safeUser(user) {
     avatarInitial: user.displayName.trim().slice(0, 1).toUpperCase(),
     stats: user.stats || { gamesPlayed: 0, wins: 0 },
   };
+}
+
+function userResults(userId) {
+  return results
+    .filter(result => result.players.some(player => player.userId === userId))
+    .sort((a, b) => b.completedAt - a.completedAt);
 }
 
 function createSession(userId) {
@@ -192,7 +201,38 @@ function startRoomGame(room) {
   room.status = 'playing';
   room.held = new Map();
   room.game = createGameState(room.players.map(sanitizePlayerIdentity), { totalRounds: room.rounds });
+  room.resultRecorded = false;
   room.updatedAt = Date.now();
+}
+
+function recordCompletedGame(room) {
+  if (!room.game?.completed || room.resultRecorded) return;
+  const totals = room.game.totals || room.game.players.map(player => 0);
+  const winningTotal = Math.min(...totals);
+  const result = {
+    resultId: crypto.randomUUID(),
+    completedAt: Date.now(),
+    roomCode: room.code,
+    round: room.game.round,
+    totalRounds: room.game.totalRounds,
+    players: room.game.players.map((player, index) => ({
+      userId: player.userId,
+      displayName: player.name,
+      total: totals[index] || 0,
+      won: (totals[index] || 0) === winningTotal,
+    })),
+  };
+
+  results.push(result);
+  for (const player of result.players) {
+    const user = users.get(player.userId);
+    if (!user) continue;
+    user.stats = user.stats || { gamesPlayed: 0, wins: 0 };
+    user.stats.gamesPlayed += 1;
+    if (player.won) user.stats.wins += 1;
+  }
+  room.resultRecorded = true;
+  saveStore();
 }
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
@@ -231,6 +271,8 @@ app.post('/auth/logout', requireAuth, (req, res) => {
 });
 
 app.get('/auth/me', requireAuth, (req, res) => res.json({ user: safeUser(req.auth.user) }));
+
+app.get('/results/me', requireAuth, (req, res) => res.json({ results: userResults(req.auth.user.userId) }));
 
 app.post('/rooms', requireAuth, (req, res) => {
   const room = makeRoom(req.auth.user, req.body || {});
@@ -351,6 +393,7 @@ io.on('connection', (socket) => {
     }
     if (result.error) return cb({ error: result.error });
     room.game = result.state;
+    recordCompletedGame(room);
     rememberActionId(room, actionId);
     room.updatedAt = Date.now();
     broadcastRoom(room);
@@ -375,6 +418,7 @@ setInterval(() => {
   for (const [token, session] of sessions) if (session.expiresAt <= now) sessions.delete(token);
   for (const [code, room] of rooms) {
     if (room.game) room.game = resolveExpiredTimers(room.game);
+    recordCompletedGame(room);
     if (now - room.updatedAt > ROOM_TTL_MS) rooms.delete(code);
     else broadcastRoom(room);
   }

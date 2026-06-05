@@ -1,8 +1,9 @@
 // client/src/screens/ProfileScreen.tsx
 // Purpose: Authenticated user profile and stats-ready identity record.
 
-import React from 'react';
+import React, { useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
@@ -10,7 +11,12 @@ import { useAuth } from '../context/AuthContext';
 type Props = NativeStackScreenProps<RootStackParamList, 'Profile'>;
 
 const ProfileScreen: React.FC<Props> = ({ navigation }) => {
-  const { user, signOut } = useAuth();
+  const { user, signOut, refreshProfile } = useAuth();
+
+  useFocusEffect(useCallback(() => {
+    refreshProfile().catch(() => {});
+  }, [refreshProfile]));
+
   return (
     <View style={styles.container}>
       <View style={styles.avatar}><Text style={styles.avatarText}>{user?.avatarInitial ?? '?'}</Text></View>

@@ -13,6 +13,14 @@ export type UserProfile = {
 export type AuthResponse = { token: string; user: UserProfile };
 export type RoomPlayer = { userId: string; displayName: string; avatarInitial: string; ready: boolean; connected: boolean; isHost: boolean };
 export type RoomSummary = { code: string; hostUserId: string; status: 'lobby' | 'playing'; maxPlayers: number; rounds: number; players: RoomPlayer[] };
+export type GameResult = {
+  resultId: string;
+  completedAt: number;
+  roomCode: string;
+  round: number;
+  totalRounds: number;
+  players: Array<{ userId: string; displayName: string; total: number; won: boolean }>;
+};
 
 async function request<T>(path: string, options: RequestInit = {}, token?: string | null): Promise<T> {
   const res = await fetch(`${SERVER_URL}${path}`, {
@@ -42,6 +50,10 @@ export function logout(token: string): Promise<{ ok: boolean }> {
 
 export function me(token: string): Promise<{ user: UserProfile }> {
   return request<{ user: UserProfile }>('/auth/me', {}, token);
+}
+
+export function myResults(token: string): Promise<{ results: GameResult[] }> {
+  return request<{ results: GameResult[] }>('/results/me', {}, token);
 }
 
 export function createOnlineRoom(token: string, maxPlayers: number, rounds: number): Promise<{ room: RoomSummary }> {
