@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -54,6 +54,10 @@ async function signup(baseUrl, displayName) {
 async function withServer(fn) {
   const serverPort = port();
   const dataDir = await mkdtemp(path.join(tmpdir(), 'golf9-server-test-'));
+  await fnWithServer(dataDir, serverPort, fn);
+}
+
+async function fnWithServer(dataDir, serverPort, fn) {
   const child = spawn(process.execPath, ['index.js'], {
     cwd: path.resolve('..', 'server'),
     env: { ...process.env, PORT: String(serverPort), DATA_DIR: dataDir, CLIENT_ORIGINS: '*' },
@@ -71,6 +75,14 @@ async function withServer(fn) {
     await rm(dataDir, { recursive: true, force: true });
     if (stderr.length) console.error(stderr.join(''));
   }
+}
+
+async function withSeededServer(seed, fn) {
+  const serverPort = port();
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'golf9-server-test-'));
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(path.join(dataDir, 'auth-store.json'), JSON.stringify(seed, null, 2));
+  await fnWithServer(dataDir, serverPort, fn);
 }
 
 test('auth, room readiness, authoritative intents, duplicate rejection, and held-card reconnect', async () => {
@@ -142,5 +154,35 @@ test('auth, room readiness, authoritative intents, duplicate rejection, and held
       socketOne.disconnect();
       socketTwo.disconnect();
     }
+  });
+});
+
+test('loads durable profile stats and completed results', async () => {
+  const token = 'seed-token';
+  const userId = 'seed-user';
+  await withSeededServer({
+    users: [{
+      userId,
+      displayName: 'Seed',
+      passwordHash: 'unused',
+      salt: 'unused',
+      stats: { gamesPlayed: 3, wins: 2 },
+    }],
+    sessions: [{ token, userId, expiresAt: Date.now() + 60_000 }],
+    results: [{
+      resultId: 'result-one',
+      completedAt: Date.now(),
+      roomCode: 'ABCD',
+      round: 5,
+      totalRounds: 5,
+      players: [{ userId, displayName: 'Seed', total: 12, won: true }],
+    }],
+  }, async (baseUrl) => {
+    const profile = await json(await fetch(`${baseUrl}/auth/me`, { headers: authHeaders(token) }));
+    assert.deepEqual(profile.user.stats, { gamesPlayed: 3, wins: 2 });
+
+    const completed = await json(await fetch(`${baseUrl}/results/me`, { headers: authHeaders(token) }));
+    assert.equal(completed.results.length, 1);
+    assert.equal(completed.results[0].resultId, 'result-one');
   });
 });
