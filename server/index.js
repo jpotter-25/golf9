@@ -145,7 +145,13 @@ const ADMIN_PUBLIC_URL = process.env.ADMIN_PUBLIC_URL || 'https://games.joinup.u
 const PUBLIC_ENV = (process.env.APP_ENV || process.env.EXPO_PUBLIC_APP_ENV || (IS_PRODUCTION ? 'production' : 'development')).toLowerCase();
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const ROOM_TTL_MS = 1000 * 60 * 60 * 2;
-const PORT = process.env.PORT || 3001;
+const PORT = String(process.env.PORT || 3001);
+const EXTRA_LISTEN_PORTS = [...new Set(
+  (process.env.EXTRA_LISTEN_PORTS || (IS_PRODUCTION ? '3001' : ''))
+    .split(',')
+    .map(port => port.trim())
+    .filter(port => port && port !== PORT)
+)];
 const CLIENT_ORIGINS = (process.env.CLIENT_ORIGINS || '*').split(',');
 const MAX_PROCESSED_ACTION_IDS = 500;
 const ROOM_COUNTDOWN_MS = Number(process.env.ROOM_COUNTDOWN_MS || 3000);
@@ -224,6 +230,7 @@ app.use('/admin/api', (req, res, next) => {
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: CLIENT_ORIGINS.includes('*') ? '*' : CLIENT_ORIGINS } });
+const listeningServers = [server];
 
 /** @type {Map<string, { userId: string; displayName: string; passwordHash: string; salt: string; stats: { gamesPlayed: number; wins: number } }>} */
 const users = new Map();
@@ -3308,6 +3315,14 @@ async function startServer() {
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Golf9 authoritative server listening on port ${PORT}`);
   });
+  for (const extraPort of EXTRA_LISTEN_PORTS) {
+    const extraServer = http.createServer(app);
+    io.attach(extraServer, { cors: { origin: CLIENT_ORIGINS.includes('*') ? '*' : CLIENT_ORIGINS } });
+    listeningServers.push(extraServer);
+    extraServer.listen(extraPort, '0.0.0.0', () => {
+      console.log(`Golf9 fallback listener active on port ${extraPort}`);
+    });
+  }
   try {
     await loadStore();
     seedLocalTestAccounts();
@@ -3335,7 +3350,12 @@ async function shutdown() {
     saveStore();
     if (postgresStore) await postgresStore.close();
   } finally {
-    server.close(() => process.exit(0));
+    let remaining = listeningServers.length;
+    const finish = () => {
+      remaining -= 1;
+      if (remaining <= 0) process.exit(0);
+    };
+    for (const activeServer of listeningServers) activeServer.close(finish);
     setTimeout(() => process.exit(0), 1000).unref();
   }
 }
