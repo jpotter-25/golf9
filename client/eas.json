@@ -8,12 +8,18 @@
     },
     "staging": {
       "distribution": "internal",
-      "env": { "EXPO_PUBLIC_APP_ENV": "staging" },
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "staging",
+        "EXPO_PUBLIC_STAGING_SERVER_URL": "https://games.joinup.us"
+      },
       "ios": { "simulator": false },
       "android": { "buildType": "apk" }
     },
     "production": {
-      "env": { "EXPO_PUBLIC_APP_ENV": "production" },
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "production",
+        "EXPO_PUBLIC_PROD_SERVER_URL": "https://games.joinup.us"
+      },
       "android": { "buildType": "app-bundle" }
     }
   },
