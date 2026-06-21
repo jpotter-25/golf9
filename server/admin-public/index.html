@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Golf 9 Admin</title>
+    <link rel="stylesheet" href="/admin/styles.css" />
+  </head>
+  <body>
+    <main id="app">
+      <section class="login shell">
+        <p class="eyebrow">Golf 9 Operations</p>
+        <h1>Admin Console</h1>
+        <p class="muted">Sign in with an admin account. Local development defaults are admin / admin9 / 000000 unless bootstrap env vars are set.</p>
+        <form id="loginForm" class="panel">
+          <label>Admin name <input name="displayName" autocomplete="username" required /></label>
+          <label>Password <input name="password" type="password" autocomplete="current-password" required /></label>
+          <label>MFA code <input name="mfaCode" inputmode="numeric" placeholder="000000" /></label>
+          <button type="submit">Sign In</button>
+          <p id="loginError" class="error"></p>
+        </form>
+      </section>
+    </main>
+    <template id="consoleTemplate">
+      <section class="shell">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Golf 9 Operations</p>
+            <h1>Admin Console</h1>
+          </div>
+          <button id="logoutButton" class="ghost">Log Out</button>
+        </header>
+        <nav class="tabs">
+          <button data-tab="players" class="active">Players</button>
+          <button data-tab="invites">Invites</button>
+          <button data-tab="support">Support</button>
+          <button data-tab="economy">Economy</button>
+          <button data-tab="competitive">Competitive</button>
+          <button data-tab="catalog">Catalog</button>
+          <button data-tab="clubs">Clubs</button>
+          <button data-tab="audit">Audit</button>
+        </nav>
+        <p id="status" class="status"></p>
+        <section id="players" class="tab active">
+          <div class="panel">
+            <h2>Player Lookup</h2>
+            <div class="row">
+              <input id="playerSearch" placeholder="Search display name or user id" />
+              <button id="searchPlayers">Search</button>
+            </div>
+            <div id="playerResults" class="grid"></div>
+          </div>
+          <div id="playerDetail" class="panel hidden"></div>
+        </section>
+        <section id="invites" class="tab">
+          <div class="panel">
+            <div class="split-header">
+              <div>
+                <h2>Pre-Alpha Invites</h2>
+                <p class="muted">Create, inspect, and disable invite codes for private tester access.</p>
+              </div>
+              <button id="loadInvites">Refresh Invites</button>
+            </div>
+            <form id="inviteEditor" class="compact">
+              <div class="row two">
+                <input name="code" placeholder="Optional custom code" />
+                <input name="label" placeholder="Label, e.g. Friends wave 1" />
+              </div>
+              <div class="row two">
+                <input name="maxUses" type="number" min="1" max="500" placeholder="Max uses" />
+                <input name="expiresAt" type="date" />
+              </div>
+              <input name="note" placeholder="Internal note" />
+              <button type="submit">Create Invite</button>
+            </form>
+            <div id="inviteOutput" class="list"></div>
+          </div>
+        </section>
+        <section id="support" class="tab">
+          <div class="panel">
+            <h2>Support Inbox</h2>
+            <button id="loadTickets">Refresh Tickets</button>
+            <div id="tickets" class="list"></div>
+          </div>
+        </section>
+        <section id="economy" class="tab">
+          <div class="panel">
+            <h2>Economy</h2>
+            <button id="loadEconomy">Refresh Economy</button>
+            <pre id="economyOutput"></pre>
+          </div>
+        </section>
+        <section id="competitive" class="tab">
+          <div class="panel">
+            <div class="split-header">
+              <div>
+                <h2>Competitive Operations</h2>
+                <p class="muted">Manage seasons, league math, ranked queues, and competitive support corrections.</p>
+              </div>
+              <div class="actions-inline">
+                <button id="loadCompetitive">Refresh</button>
+                <button id="publishCompetitive">Publish Draft</button>
+                <button id="rollbackCompetitive" class="ghost">Rollback</button>
+              </div>
+            </div>
+            <div id="competitiveOverview" class="grid"></div>
+          </div>
+          <div class="workspace">
+            <form id="competitiveConfigEditor" class="panel compact">
+              <h3>League Studio</h3>
+              <div class="row two">
+                <label>Placement matches <input name="placementMatchesRequired" type="number" min="1" /></label>
+                <label>Placement multiplier <input name="placementMultiplier" type="number" min="0" step="0.01" /></label>
+              </div>
+              <div class="row two">
+                <label>Strength cap <input name="strengthAdjustmentCap" type="number" min="0" /></label>
+                <label>Performance cap <input name="performanceBonusCap" type="number" min="0" /></label>
+              </div>
+              <div class="row two">
+                <label>Season days <input name="seasonLengthDays" type="number" min="1" /></label>
+                <label>Reward grace days <input name="rewardGraceDays" type="number" min="0" /></label>
+              </div>
+              <label>MMR deltas JSON <textarea name="mmrDeltas" rows="4"></textarea></label>
+              <label>Matchmaking JSON <textarea name="matchmaking" rows="5"></textarea></label>
+              <label>League bands JSON <textarea name="leagueBands" rows="8"></textarea></label>
+              <label>Season rewards JSON <textarea name="rewards" rows="8"></textarea></label>
+              <div class="actions">
+                <button type="submit">Save Draft</button>
+              </div>
+            </form>
+            <div class="panel compact">
+              <h3>Season Studio</h3>
+              <div class="row">
+                <input id="seasonName" placeholder="Season name" />
+                <button id="createSeason">Create Season</button>
+              </div>
+              <div id="seasonOutput" class="list"></div>
+            </div>
+          </div>
+          <div class="workspace">
+            <div class="panel compact">
+              <h3>Ranked Queues</h3>
+              <button id="loadRankedQueues">Refresh Queues</button>
+              <div id="rankedQueuesOutput" class="list"></div>
+            </div>
+            <form id="competitivePlayerEditor" class="panel compact">
+              <h3>Ranked Player Tools</h3>
+              <input name="userId" placeholder="Player user id or display name" />
+              <div class="row two">
+                <input name="mmr" type="number" min="0" placeholder="MMR" />
+                <input name="seasonBestMmr" type="number" min="0" placeholder="Season best MMR" />
+              </div>
+              <div class="row two">
+                <input name="placementsPlayed" type="number" min="0" placeholder="Placements played" />
+                <input name="rankedGames" type="number" min="0" placeholder="Ranked games" />
+              </div>
+              <div class="row two">
+                <input name="wins" type="number" min="0" placeholder="Ranked wins" />
+                <input name="losses" type="number" min="0" placeholder="Ranked losses" />
+              </div>
+              <label><input name="clearHistory" type="checkbox" /> Clear ranked history before adding admin adjustment</label>
+              <button type="submit">Apply Competitive Adjustment</button>
+            </form>
+          </div>
+        </section>
+        <section id="catalog" class="tab">
+          <div class="panel">
+            <div class="split-header">
+              <div>
+                <h2>Catalog Studio</h2>
+                <p class="muted">Edit draft cosmetics, preview assets, then publish when ready.</p>
+              </div>
+              <div class="actions-inline">
+                <button id="newCatalogItem" class="ghost">New Item</button>
+                <button id="publishCatalog">Publish Draft</button>
+                <button id="loadCatalog">Refresh</button>
+              </div>
+            </div>
+            <div class="toolbar">
+              <select id="catalogFilter">
+                <option value="">All categories</option>
+                <option value="cardBack">Card backs</option>
+                <option value="avatarFrame">Avatar frames</option>
+                <option value="title">Titles</option>
+                <option value="tableTheme">Table themes</option>
+              </select>
+              <select id="catalogStateFilter">
+                <option value="">All states</option>
+                <option value="enabled">Enabled</option>
+                <option value="disabled">Disabled</option>
+                <option value="sale">On sale</option>
+                <option value="archived">Archived</option>
+              </select>
+            </div>
+            <div class="workspace">
+              <div id="catalogOutput" class="list"></div>
+              <form id="catalogEditor" class="panel compact hidden">
+                <h3>Cosmetic Editor</h3>
+                <label>ID <input name="id" readonly /></label>
+                <label>Name <input name="name" required /></label>
+                <label>Description <textarea name="description"></textarea></label>
+                <div class="row two">
+                  <label>Type
+                    <select name="type">
+                      <option value="cardBack">Card Back</option>
+                      <option value="avatarFrame">Avatar Frame</option>
+                      <option value="title">Title</option>
+                      <option value="tableTheme">Table Theme</option>
+                    </select>
+                  </label>
+                  <label>Source
+                    <select name="shopCategory">
+                      <option value="starter">Starter</option>
+                      <option value="coin">Coin</option>
+                      <option value="ranked">Ranked</option>
+                      <option value="club">Club</option>
+                      <option value="event">Event</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="row two">
+                  <label>Price <input name="price" type="number" min="0" /></label>
+                  <label>Sale price <input name="salePrice" type="number" min="0" /></label>
+                </div>
+                <div class="row two">
+                  <label>Unlock
+                    <select name="unlockRequirement">
+                      <option value="">None</option>
+                      <option value="rank">Rank</option>
+                      <option value="club">Club</option>
+                      <option value="event">Event</option>
+                      <option value="season">Season</option>
+                      <option value="achievement">Achievement</option>
+                      <option value="level">Level</option>
+                    </select>
+                  </label>
+                  <label>Required MMR <input name="requiredMmr" type="number" min="0" /></label>
+                </div>
+                <label>Required league <input name="requiredLeague" /></label>
+                <label>Season ID <input name="seasonId" /></label>
+                <div class="row two">
+                  <label>Background <input name="backgroundColor" placeholder="#132a40" /></label>
+                  <label>Border <input name="borderColor" placeholder="#55e0a3" /></label>
+                </div>
+                <div class="row two">
+                  <label>Accent <input name="accentColor" placeholder="#ffd166" /></label>
+                  <label>Mark <input name="mark" placeholder="G9" /></label>
+                </div>
+                <div class="checks">
+                  <label><input name="enabled" type="checkbox" /> Enabled</label>
+                  <label><input name="sale" type="checkbox" /> On sale</label>
+                  <label><input name="featured" type="checkbox" /> Featured</label>
+                </div>
+                <label>Preview asset <input id="catalogAsset" type="file" accept="image/png,image/jpeg,image/webp" /></label>
+                <div class="actions">
+                  <button type="submit">Save Draft</button>
+                  <button type="button" id="uploadCatalogAsset" class="ghost">Upload Asset</button>
+                  <button type="button" id="duplicateCatalogItem" class="ghost">Duplicate</button>
+                  <button type="button" id="archiveCatalogItem" class="danger">Archive</button>
+                </div>
+              </form>
+            </div>
+          </div>
+          <div class="panel">
+            <h2>Asset Guide</h2>
+            <div class="guide">
+              <p><strong>Card backs:</strong> use PNG/WebP, portrait 512x768 preferred, under 2 MB. The preset colors still control live in-game rendering unless an image-backed cosmetic is supported for that slot.</p>
+              <p><strong>Avatar frames:</strong> use transparent PNG/WebP, square 512x512 preferred. Keep the middle clear so player initials remain readable.</p>
+              <p><strong>Table themes:</strong> use preset colors first. Uploaded art is a preview/reference asset for now.</p>
+              <p><strong>Naming:</strong> keep IDs lowercase with dashes. Never rename an ID after players own it; edit the title instead.</p>
+            </div>
+          </div>
+        </section>
+        <section id="clubs" class="tab">
+          <div class="panel">
+            <div class="split-header">
+              <div>
+                <h2>Club Operations</h2>
+                <p class="muted">Search clubs, inspect members, handle requests, and resolve club support issues.</p>
+              </div>
+              <button id="loadClubs">Refresh Clubs</button>
+            </div>
+            <div class="row">
+              <input id="clubSearch" placeholder="Search club name, tag, or id" />
+              <button id="searchClubs">Search</button>
+            </div>
+            <div class="workspace">
+              <div id="clubsOutput" class="list"></div>
+              <div id="clubDetail" class="panel compact hidden"></div>
+            </div>
+          </div>
+        </section>
+        <section id="audit" class="tab">
+          <div class="panel">
+            <h2>Audit Log</h2>
+            <button id="loadAudit">Refresh Audit</button>
+            <div id="auditOutput" class="list"></div>
+          </div>
+        </section>
+      </section>
+    </template>
+    <script src="/admin/app.js" type="module"></script>
+  </body>
+</html>

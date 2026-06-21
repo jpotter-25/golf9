@@ -1,0 +1,146 @@
+export const WAGER_TABLES = [
+  { id: 'free', label: 'Free Play', buyIn: 0, description: 'No entry fee. Earn coins slowly through match rewards.' },
+  { id: 'casual-50', label: 'Casual Stakes', buyIn: 50, description: 'A light coin table.' },
+  { id: 'competitive-100', label: 'Competitive', buyIn: 100, description: 'A standard wager table.' },
+  { id: 'high-250', label: 'High Stakes', buyIn: 250, description: 'A bigger table for confident players.' },
+  { id: 'elite-500', label: 'Elite', buyIn: 500, description: 'Top-end wager table.' },
+];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DAILY_TABLE_BONUS_BASE = 100;
+const DAILY_TABLE_BONUS_LOW_BALANCE = 150;
+const DAILY_TABLE_BONUS_STREAK_STEP = 25;
+const DAILY_TABLE_BONUS_STREAK_MAX = 100;
+const LOW_BALANCE_THRESHOLD = 100;
+
+function safeInteger(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.floor(number) : fallback;
+}
+
+function utcDayStart(now = Date.now()) {
+  const date = new Date(now);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+}
+
+function normalizeCurrency(user) {
+  user.currency ||= {};
+  user.currency.coins = Math.max(0, safeInteger(user.currency.coins, 0));
+  user.currency.lifetimeCoins = Math.max(user.currency.coins, safeInteger(user.currency.lifetimeCoins, user.currency.coins));
+  user.currency.dailyBonus ||= {};
+  user.currency.dailyBonus.lastClaimedAt = safeInteger(user.currency.dailyBonus.lastClaimedAt, 0) || null;
+  user.currency.dailyBonus.lastClaimDay = safeInteger(user.currency.dailyBonus.lastClaimDay, 0) || null;
+  user.currency.dailyBonus.streak = Math.max(0, safeInteger(user.currency.dailyBonus.streak, 0));
+  return user.currency;
+}
+
+export function publicDailyBonus(user, now = Date.now()) {
+  const currency = normalizeCurrency(user);
+  const today = utcDayStart(now);
+  const tomorrow = today + DAY_MS;
+  const lastClaimDay = currency.dailyBonus.lastClaimDay || null;
+  const claimedToday = lastClaimDay === today;
+  const consecutive = lastClaimDay === today - DAY_MS;
+  const nextStreak = claimedToday ? currency.dailyBonus.streak : consecutive ? currency.dailyBonus.streak + 1 : 1;
+  const baseReward = currency.coins < LOW_BALANCE_THRESHOLD ? DAILY_TABLE_BONUS_LOW_BALANCE : DAILY_TABLE_BONUS_BASE;
+  const streakBonus = Math.min(Math.max(0, nextStreak - 1) * DAILY_TABLE_BONUS_STREAK_STEP, DAILY_TABLE_BONUS_STREAK_MAX);
+  return {
+    canClaim: !claimedToday,
+    reward: claimedToday ? 0 : baseReward + streakBonus,
+    baseReward,
+    streakBonus: claimedToday ? 0 : streakBonus,
+    streak: currency.dailyBonus.streak,
+    nextStreak,
+    lowBalanceBoost: currency.coins < LOW_BALANCE_THRESHOLD,
+    lastClaimedAt: currency.dailyBonus.lastClaimedAt,
+    nextAvailableAt: claimedToday ? tomorrow : now,
+  };
+}
+
+export function claimDailyTableBonus(user, now = Date.now()) {
+  const currency = normalizeCurrency(user);
+  const bonus = publicDailyBonus(user, now);
+  if (!bonus.canClaim) return { error: 'Daily Table Bonus already claimed.', dailyBonus: bonus };
+  const today = utcDayStart(now);
+  currency.coins += bonus.reward;
+  currency.lifetimeCoins += bonus.reward;
+  currency.dailyBonus.lastClaimedAt = now;
+  currency.dailyBonus.lastClaimDay = today;
+  currency.dailyBonus.streak = bonus.nextStreak;
+  return {
+    reward: bonus.reward,
+    currency,
+    dailyBonus: publicDailyBonus(user, now),
+  };
+}
+
+export function publicEconomyCatalog(user = null) {
+  return {
+    wagerTables: WAGER_TABLES,
+    rankedFees: [],
+    coinSources: [
+      { id: 'daily-table-bonus', title: 'Daily Table Bonus', description: 'Claim free coins once per day, with a boost when your balance is low.' },
+      { id: 'free-play', title: 'Free Play', description: 'Play free online matches to earn modest coins without risking your stack.' },
+      { id: 'daily-challenges', title: 'Daily Challenges', description: 'Complete daily goals for XP and coin rewards.' },
+      { id: 'weekly-challenges', title: 'Weekly Challenges', description: 'Build bigger weekly payouts through steady play.' },
+      { id: 'wager-tables', title: 'Wager Tables', description: 'Risk coins for bigger pots once your balance is healthy.' },
+    ],
+    dailyBonus: user ? publicDailyBonus(user) : null,
+  };
+}
+
+export function normalizeBuyIn(value) {
+  const buyIn = Math.max(0, safeInteger(value, 0));
+  return WAGER_TABLES.some(table => table.buyIn === buyIn) ? buyIn : 0;
+}
+
+export function rankedBuyInForMmr(mmr) {
+  safeInteger(mmr, 1000);
+  return 0;
+}
+
+export function payoutSlotsFor(playerCount, buyIn) {
+  const safeCount = Math.max(2, Math.min(4, safeInteger(playerCount, 2)));
+  const safeBuyIn = Math.max(0, safeInteger(buyIn, 0));
+  const pot = safeBuyIn * safeCount;
+  if (!safeBuyIn) return Array.from({ length: safeCount }, () => 0);
+  if (safeCount === 2) return [pot, 0];
+  if (safeCount === 3) {
+    const second = Math.floor(safeBuyIn / 2);
+    return [pot - second, second, 0];
+  }
+  return [pot - safeBuyIn, safeBuyIn, 0, 0];
+}
+
+export function calculatePayouts(players, buyIn) {
+  const safeBuyIn = Math.max(0, safeInteger(buyIn, 0));
+  const ordered = players
+    .map(player => ({ ...player, total: safeInteger(player.total, 0) }))
+    .sort((a, b) => a.total - b.total || String(a.userId).localeCompare(String(b.userId)));
+  const slots = payoutSlotsFor(ordered.length, safeBuyIn);
+  const payouts = new Map(ordered.map(player => [player.userId, 0]));
+
+  let slotIndex = 0;
+  while (slotIndex < ordered.length) {
+    const tied = ordered.filter(player => player.total === ordered[slotIndex].total);
+    const groupStart = slotIndex;
+    const groupEnd = slotIndex + tied.length;
+    const pool = slots.slice(groupStart, groupEnd).reduce((sum, value) => sum + value, 0);
+    const share = tied.length ? Math.floor(pool / tied.length) : 0;
+    let remainder = pool - (share * tied.length);
+    for (const player of tied) {
+      const extra = remainder > 0 ? 1 : 0;
+      payouts.set(player.userId, share + extra);
+      remainder -= extra;
+    }
+    slotIndex = groupEnd;
+  }
+
+  return ordered.map((player, index) => ({
+    userId: player.userId,
+    placement: index + 1,
+    buyIn: safeBuyIn,
+    payout: payouts.get(player.userId) || 0,
+    net: (payouts.get(player.userId) || 0) - safeBuyIn,
+  }));
+}
