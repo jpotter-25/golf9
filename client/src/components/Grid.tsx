@@ -18,6 +18,7 @@ export type GridProps = {
   /** Optional metrics used to size cards and gaps dynamically. */
   metrics?: Metrics;
   activeCell?: { r: number; c: number } | null;
+  cardBackId?: string;
   [key: string]: unknown;
 };
 
@@ -26,6 +27,8 @@ const Grid: React.FC<GridProps> = ({
   onSelect,
   onPressCard,
   metrics,
+  activeCell,
+  cardBackId,
 }) => {
   const handleSelect = (r: number, c: number) => {
     if (onSelect) onSelect(r, c);
@@ -50,6 +53,8 @@ const Grid: React.FC<GridProps> = ({
               width={cardW}
               height={cardH}
               margin={margin}
+              selected={activeCell?.r === r && activeCell.c === c}
+              cardBackId={cardBackId}
             />
           ))}
         </View>

@@ -15,6 +15,14 @@
       "ios": { "simulator": false },
       "android": { "buildType": "apk" }
     },
+    "playtest": {
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "staging",
+        "EXPO_PUBLIC_STAGING_SERVER_URL": "https://games.joinup.us"
+      },
+      "ios": { "simulator": false },
+      "android": { "buildType": "app-bundle" }
+    },
     "production": {
       "env": {
         "EXPO_PUBLIC_APP_ENV": "production",

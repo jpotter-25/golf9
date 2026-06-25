@@ -11,7 +11,7 @@ type AuthContextValue = {
   token: string | null;
   user: api.UserProfile | null;
   signIn: (displayName: string, password: string) => Promise<void>;
-  signUp: (displayName: string, password: string) => Promise<void>;
+  signUp: (displayName: string, password: string, inviteCode?: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 };
@@ -56,7 +56,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     token,
     user,
     signIn: async (displayName, password) => applyAuth(await api.login(displayName, password)),
-    signUp: async (displayName, password) => applyAuth(await api.signup(displayName, password)),
+    signUp: async (displayName, password, inviteCode = '') => applyAuth(await api.signup(displayName, password, inviteCode)),
     refreshProfile,
     signOut: async () => {
       if (token) await api.logout(token).catch(error => logError(error, { area: 'logout' }));

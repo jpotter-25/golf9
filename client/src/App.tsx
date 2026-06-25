@@ -7,7 +7,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as NavigationBar from 'expo-navigation-bar';
-import { AppState } from 'react-native';
+import { ActivityIndicator, AppState, Text, View } from 'react-native';
 
 import {
   LoginScreen,
@@ -16,17 +16,29 @@ import {
   RulesScreen,
   ProfileScreen,
   SettingsScreen,
+  OnlineMenuScreen,
   OnlineRoomScreen,
+  RankedQueueScreen,
+  SocialScreen,
+  PlayerProfileScreen,
+  ClubScreen,
+  ShopScreen,
 } from './screens';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 export type RootStackParamList = {
   Login: undefined;
   Lobby: undefined;
-  OnlineRoom: { players: number; rounds: 5 | 9; create?: boolean; joinCode?: string };
-  Game: { players: number; rounds: 5 | 9; mode: 'passplay' | 'solo' | 'online'; roomCode?: string; roomId?: string; online?: boolean };
+  OnlineMenu: { players: 2 | 3 | 4; rounds: 5 | 9 };
+  OnlineRoom: { players: 2 | 3 | 4; rounds: 5 | 9; create?: boolean; joinCode?: string; quickPlay?: boolean; ranked?: boolean; wagerBuyIn?: number };
+  RankedQueue: { players: 2 | 3 | 4; rounds: 5 | 9 };
+  Game: { players: number; rounds: 5 | 9; mode: 'passplay' | 'solo' | 'online'; roomCode?: string; roomId?: string; online?: boolean; aiDifficulty?: 'easy' | 'hard' };
   Rules: undefined;
   Profile: undefined;
+  Shop: undefined;
+  Social: undefined;
+  Club: undefined;
+  PlayerProfile: { userId: string };
   Settings: undefined;
 };
 
@@ -56,7 +68,14 @@ async function applyImmersive() {
 
 function AppNavigator() {
   const { token, loading } = useAuth();
-  if (loading) return null;
+  if (loading) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0B1023' }}>
+        <ActivityIndicator color="#52E5A7" />
+        <Text style={{ color: '#E8ECF1', marginTop: 16 }}>Loading Golf 9...</Text>
+      </View>
+    );
+  }
 
   return (
     <NavigationContainer theme={theme}>
@@ -69,10 +88,16 @@ function AppNavigator() {
         ) : (
           <>
             <Stack.Screen name="Lobby" component={LobbyScreen} />
+            <Stack.Screen name="OnlineMenu" component={OnlineMenuScreen} />
             <Stack.Screen name="OnlineRoom" component={OnlineRoomScreen} />
+            <Stack.Screen name="RankedQueue" component={RankedQueueScreen} />
             <Stack.Screen name="Game" component={GameScreen} />
             <Stack.Screen name="Rules" component={RulesScreen} />
             <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="Shop" component={ShopScreen} />
+            <Stack.Screen name="Social" component={SocialScreen} />
+            <Stack.Screen name="Club" component={ClubScreen} />
+            <Stack.Screen name="PlayerProfile" component={PlayerProfileScreen} />
             <Stack.Screen name="Settings" component={SettingsScreen} />
           </>
         )}

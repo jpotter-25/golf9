@@ -1,7 +1,6 @@
 // src/utils/scaling.ts
-// Purpose: Percent-of-screen, no-scroll scaling that ALWAYS keeps
-// header, opponents, piles, my grid, and footer fully visible.
-// Now globally scales down the current player's grid by 20% to provide extra footer clearance.
+// Purpose: Percent-of-screen, no-scroll scaling that keeps the in-game
+// header, score strip, opponents, piles, player grid, and footer visible.
 
 import { useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,9 +12,11 @@ const CARD_ASPECT = 1.45; // height / width
 const SIDE_PAD = 16;
 
 // Percent-of-height buckets
-const HEADER_PCT = 0.07;
-const FOOTER_PCT = 0.11;
-const GUTTER_PCT = 0.018; // tighter vertical gutters
+const HEADER_PCT = 0.11;
+const FOOTER_PCT = 0.105;
+const GUTTER_PCT = 0.014;
+const MIN_HEADER = 86;
+const MIN_FOOTER = 72;
 
 export function computeMetrics(
   playerCount: number,
@@ -24,20 +25,20 @@ export function computeMetrics(
   safeTop: number,
   safeBottom: number
 ): BoardMetrics {
-  const hHeader = Math.round(height * HEADER_PCT);
-  const hFooter = Math.round(height * FOOTER_PCT);
+  const hHeader = Math.max(MIN_HEADER, Math.round(height * HEADER_PCT));
+  const hFooter = Math.max(MIN_FOOTER, Math.round(height * FOOTER_PCT));
   const hGutters = Math.round(height * GUTTER_PCT * 3);
 
-  const usableH = height - safeTop - safeBottom - hHeader - hFooter - hGutters;
+  const usableH = Math.max(260, height - safeTop - safeBottom - hHeader - hFooter - hGutters);
   const usableW = width - SIDE_PAD;
 
   const gap = Math.max(6, Math.min(10, Math.round(width * 0.018)));
 
   // Opponents are one row (3 in 4P). Make them smaller in 4P to guarantee fit.
   const OPP_SCALE =
-    playerCount === 2 ? 0.64 :
-    playerCount === 3 ? 0.53 :
-    0.40; // for 4-player mode
+    playerCount === 2 ? 0.58 :
+    playerCount === 3 ? 0.50 :
+    0.38; // for 4-player mode
 
   const widthBound = Math.floor((usableW - 2 * gap) / 3);
 
@@ -49,9 +50,9 @@ export function computeMetrics(
     const cardW_opp = Math.floor(cardW_me * OPP_SCALE);
     const cardH_opp = Math.round(cardW_opp * CARD_ASPECT);
 
-    const heightOpp = 3 * cardH_opp + 2 * gap;
-    const heightPiles = cardH_opp + Math.max(10, Math.round(cardH_opp * 0.06));
-    const heightMe = 3 * cardH_me + 2 * gap;
+    const heightOpp = 3 * cardH_opp + 2 * gap + 28;
+    const heightPiles = cardH_opp + 34;
+    const heightMe = 3 * cardH_me + 2 * gap + 32;
 
     return heightOpp + heightPiles + heightMe <= usableH;
   }
@@ -66,8 +67,7 @@ export function computeMetrics(
     }
   }
 
-  // Apply a 20% reduction to the current player's card size
-  const cardW_me = Math.floor(best * 0.8);
+  const cardW_me = Math.floor(best * 0.82);
   const cardH_me = Math.round(cardW_me * CARD_ASPECT);
   const cardW_opp = Math.floor(cardW_me * OPP_SCALE);
   const cardH_opp = Math.round(cardW_opp * CARD_ASPECT);

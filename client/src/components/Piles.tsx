@@ -4,11 +4,18 @@
 // aliases, and both 'onTake' and 'onTakeDiscard' callbacks for compatibility
 // with GameScreen.
 
-import React from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { Animated, View, Text, StyleSheet, Pressable } from 'react-native';
 import Card from './Card';
 import type { Card as GameCard } from '../game/types';
 import type { Metrics } from '../utils/scaling';
+
+const DRAW_PILE_BACK = {
+  id: 'draw-pile-back',
+  suit: '♠',
+  rank: 'A',
+  faceUp: false,
+} as GameCard;
 
 export type PilesProps = {
   topDiscard: GameCard | null;
@@ -17,9 +24,15 @@ export type PilesProps = {
   onDraw: () => void;
   onTake?: () => void;
   onTakeDiscard?: () => void; // alias used in GameScreen
+  held?: GameCard | null;
   /** Optional metrics to size the pile cards. */
   metrics?: Metrics;
+  activeSource?: 'draw' | 'discard' | null;
+  disableDraw?: boolean;
   disableTake?: boolean;
+  discardFlashKey?: string | null;
+  discardFlashCount?: number;
+  cardBackId?: string;
   [key: string]: unknown;
 };
 
@@ -30,9 +43,27 @@ const Piles: React.FC<PilesProps> = ({
   onDraw,
   onTake,
   onTakeDiscard,
+  held = null,
   metrics,
+  activeSource = null,
+  disableDraw = false,
   disableTake = false,
+  discardFlashKey = null,
+  discardFlashCount = 0,
+  cardBackId,
 }) => {
+  const discardFlash = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!discardFlashKey) return;
+    discardFlash.setValue(0);
+    Animated.sequence([
+      Animated.timing(discardFlash, { toValue: 1, duration: 180, useNativeDriver: true }),
+      Animated.delay(650),
+      Animated.timing(discardFlash, { toValue: 0, duration: 240, useNativeDriver: true }),
+    ]).start();
+  }, [discardFlash, discardFlashKey]);
+
   // Choose the appropriate callback for taking the discard pile.
   const handleTake = () => {
     if (disableTake) return;
@@ -47,26 +78,56 @@ const Piles: React.FC<PilesProps> = ({
   const cardW = metrics ? metrics.cardW : 60;
   const cardH = metrics ? metrics.cardH : 90;
   const margin = metrics ? metrics.gap / 2 : 4;
+  const drawCard = activeSource === 'draw' ? held : pileCount > 0 ? DRAW_PILE_BACK : null;
+  const discardCard = activeSource === 'discard' && held ? held : topDiscard;
+  const discardIsActive = activeSource === 'discard' || !!discardFlashKey;
+  const flashScale = discardFlash.interpolate({ inputRange: [0, 1], outputRange: [0.75, 1] });
 
   return (
     <View style={styles.container}>
-      <Pressable onPress={onDraw} style={styles.pile}>
-        <Card card={null} width={cardW} height={cardH} margin={margin} />
+      <Pressable onPress={onDraw} disabled={disableDraw} style={[styles.pile, disableDraw && activeSource !== 'draw' && styles.disabled]}>
+        <Card
+          card={drawCard}
+          width={cardW}
+          height={cardH}
+          margin={margin}
+          selected={activeSource === 'draw'}
+          disabled={disableDraw && activeSource !== 'draw'}
+          cardBackId={cardBackId}
+        />
         <Text style={styles.label}>Deck</Text>
         <Text style={styles.count}>{pileCount}</Text>
       </Pressable>
       <Pressable
         onPress={handleTake}
-        style={[styles.pile, disableTake && styles.disabled]}
+        style={[styles.pile, disableTake && activeSource !== 'discard' && styles.disabled]}
       >
-        <Card
-          card={topDiscard}
-          width={cardW}
-          height={cardH}
-          margin={margin}
-        />
+        <View style={styles.discardStage}>
+          <Card
+            card={discardCard}
+            width={cardW}
+            height={cardH}
+            margin={margin}
+            selected={discardIsActive}
+            disabled={disableTake && activeSource !== 'discard'}
+          />
+          {discardFlashKey && discardFlashCount > 0 ? (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.clearBadge,
+                {
+                  opacity: discardFlash,
+                  transform: [{ scale: flashScale }],
+                },
+              ]}
+            >
+              <Text style={styles.clearBadgeText}>+{discardFlashCount}</Text>
+            </Animated.View>
+          ) : null}
+        </View>
         <Text style={styles.label}>Discard</Text>
-        <Text style={styles.count}>{topDiscard ? '' : 'Empty'}</Text>
+        <Text style={styles.count}>{discardCard ? '' : 'Empty'}</Text>
       </Pressable>
     </View>
   );
@@ -78,10 +139,32 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginVertical: 16,
+    marginVertical: 7,
   },
   pile: {
     alignItems: 'center',
+  },
+  discardStage: {
+    position: 'relative',
+  },
+  clearBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -10,
+    minWidth: 26,
+    height: 24,
+    paddingHorizontal: 5,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#4DE0A0',
+    backgroundColor: '#102E2A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clearBadgeText: {
+    color: '#4DE0A0',
+    fontWeight: '900',
+    fontSize: 12,
   },
   disabled: {
     opacity: 0.5,

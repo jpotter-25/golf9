@@ -6,6 +6,7 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import type { Card as GameCard } from '../game/types';
+import { getCardBackVisual } from '../theme/cosmetics';
 
 export type CardProps = {
   card: GameCard | null;
@@ -13,11 +14,16 @@ export type CardProps = {
   width?: number;
   height?: number;
   margin?: number;
+  selected?: boolean;
+  disabled?: boolean;
+  cardBackId?: string;
 };
 
-const Card: React.FC<CardProps> = ({ card, onPress, width, height, margin }) => {
+const Card: React.FC<CardProps> = ({ card, onPress, width, height, margin, selected = false, disabled = false, cardBackId }) => {
+  const cleared = !card;
   const faceUp = card?.faceUp ?? false;
   const zeroed = card?.zeroed ?? false;
+  const cardBack = getCardBackVisual(cardBackId);
 
   // Fallback default size, overridden by props for scaled boards
   const W = typeof width === 'number' ? width : 60;
@@ -31,15 +37,24 @@ const Card: React.FC<CardProps> = ({ card, onPress, width, height, margin }) => 
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled || !onPress || cleared}
       style={[
         styles.card,
+        cleared && styles.cleared,
         zeroed && styles.zeroed,
-        !faceUp && styles.faceDown,
+        !cleared && !faceUp && [
+          styles.faceDown,
+          { backgroundColor: cardBack.backgroundColor, borderColor: cardBack.borderColor },
+        ],
+        selected && styles.selected,
+        disabled && styles.disabled,
         { width: W, height: H },
         typeof margin === 'number' ? { margin } : null,
       ]}
     >
-      {faceUp && card ? (
+      {cleared ? (
+        <View style={styles.clearedMark} />
+      ) : faceUp && card ? (
         <View style={styles.faceContainer}>
           <Text
             allowFontScaling={false}
@@ -67,7 +82,16 @@ const Card: React.FC<CardProps> = ({ card, onPress, width, height, margin }) => 
           </Text>
         </View>
       ) : (
-        <Text allowFontScaling={false} style={[styles.rank, { fontSize: rankSize }]}>?</Text>
+        <Text
+          allowFontScaling={false}
+          style={[
+            styles.rank,
+            styles.faceDownText,
+            { color: cardBack.textColor, fontSize: Math.max(10, Math.round(rankSize * 0.72)) },
+          ]}
+        >
+          {cardBack.mark}
+        </Text>
       )}
     </Pressable>
   );
@@ -88,8 +112,33 @@ const styles = StyleSheet.create({
   faceDown: {
     backgroundColor: '#2A2F57',
   },
+  faceDownText: {
+    letterSpacing: 0,
+  },
+  cleared: {
+    borderColor: '#2A2F57',
+    backgroundColor: 'transparent',
+    opacity: 0.85,
+  },
+  clearedMark: {
+    width: '42%',
+    height: 3,
+    borderRadius: 3,
+    backgroundColor: '#2A2F57',
+  },
   zeroed: {
     backgroundColor: '#084D34',
+  },
+  selected: {
+    borderColor: '#4DA3FF',
+    borderWidth: 3,
+    shadowColor: '#4DA3FF',
+    shadowOpacity: 0.65,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  disabled: {
+    opacity: 0.55,
   },
   faceContainer: {
     alignItems: 'center',

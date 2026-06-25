@@ -1,106 +1,240 @@
 // src/screens/LobbyScreen.tsx
-// Purpose: Pre-game menu with player count, rounds selector (5 or 9),
-// Pass & Play, Solo vs AI, Online Multiplayer (placeholder), and Rules link.
+// Purpose: Premium mode-first home hub for local, solo, and online play.
 
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Bot, BookOpen, ChevronLeft, MessageCircle, Play, Settings, ShoppingBag, Trophy, UserRound, Users, Wifi } from 'lucide-react-native';
+import type { LucideIcon } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
+import { ActionButton, IconTile, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Lobby'>;
+type ModeChoice = 'passplay' | 'solo' | 'online';
+
+const MODE_META: Record<ModeChoice, { title: string; subtitle: string; Icon: LucideIcon; tone: 'emerald' | 'sky' | 'gold' }> = {
+  passplay: { title: 'Pass & Play', subtitle: 'Same room, one device, table-night energy.', Icon: Users, tone: 'emerald' },
+  solo: { title: 'Solo vs AI', subtitle: 'Train your table instincts against tuned AI.', Icon: Bot, tone: 'sky' },
+  online: { title: 'Online Multiplayer', subtitle: 'Create rooms, wager, ranked, clubs, and friends.', Icon: Wifi, tone: 'gold' },
+};
 
 export default function LobbyScreen({ navigation }: Props) {
+  const [selectedMode, setSelectedMode] = useState<ModeChoice | null>(null);
   const [players, setPlayers] = useState<2 | 3 | 4>(4);
   const [rounds, setRounds] = useState<5 | 9>(9);
+  const [aiDifficulty, setAiDifficulty] = useState<'easy' | 'hard'>('easy');
 
-  const pill = (selected: boolean) => [
-    styles.pill,
-    selected && styles.pillSelected,
-  ];
+  const startSelectedMode = () => {
+    if (selectedMode === 'passplay') navigation.replace('Game', { players, mode: 'passplay', rounds });
+    else if (selectedMode === 'solo') navigation.replace('Game', { players, mode: 'solo', rounds, aiDifficulty });
+    else if (selectedMode === 'online') navigation.navigate('OnlineMenu', { players, rounds });
+  };
+
+  if (!selectedMode) {
+    return (
+      <ScreenShell scroll centered>
+        <ScreenHeader
+          eyebrow="Golf 9"
+          title="Choose Your Table"
+          subtitle="Fast card strategy, social pressure, and casino-night polish."
+          right={<StatusBadge label="LIVE" tone="gold" />}
+        />
+
+        {(Object.keys(MODE_META) as ModeChoice[]).map(mode => (
+          <ModeCard key={mode} mode={mode} {...MODE_META[mode]} onPress={() => setSelectedMode(mode)} />
+        ))}
+
+        <View style={styles.utilityGrid}>
+          <IconTile Icon={UserRound} label="Profile" onPress={() => navigation.navigate('Profile')} />
+          <IconTile Icon={ShoppingBag} label="Shop" onPress={() => navigation.navigate('Shop')} />
+          <IconTile Icon={MessageCircle} label="Social" onPress={() => navigation.navigate('Social')} />
+          <IconTile Icon={Settings} label="Settings" onPress={() => navigation.navigate('Settings')} />
+          <IconTile Icon={BookOpen} label="Rules" onPress={() => navigation.navigate('Rules')} />
+        </View>
+      </ScreenShell>
+    );
+  }
+
+  const selected = MODE_META[selectedMode];
+  const SelectedIcon = selected.Icon;
+  const isSolo = selectedMode === 'solo';
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Golf 9</Text>
+    <ScreenShell scroll centered>
+      <ScreenHeader
+        eyebrow="Table Setup"
+        title={selected.title}
+        subtitle={selected.subtitle}
+        right={<SelectedIcon size={34} color={toneColor(selected.tone)} strokeWidth={2.4} />}
+      />
 
-      {/* Players */}
-      <View style={styles.card}>
-        <Text style={styles.label}>Players</Text>
-        <View style={styles.row}>
-          {[2, 3, 4].map((n) => (
-            <Pressable key={n} onPress={() => setPlayers(n as 2 | 3 | 4)} style={pill(players === n)}>
-              <Text style={styles.pillText}>{n}</Text>
-            </Pressable>
-          ))}
+      <PremiumPanel>
+        <PickerLabel label="Players" value={`${players}`} />
+        <Segmented values={[2, 3, 4]} selected={players} onSelect={value => setPlayers(value as 2 | 3 | 4)} />
+      </PremiumPanel>
+
+      <PremiumPanel>
+        <PickerLabel label="Rounds" value={`${rounds}`} />
+        <Segmented values={[5, 9]} selected={rounds} onSelect={value => setRounds(value as 5 | 9)} />
+      </PremiumPanel>
+
+      {isSolo ? (
+        <PremiumPanel>
+          <PickerLabel label="AI Difficulty" value={aiDifficulty === 'easy' ? 'Easy' : 'Hard'} />
+          <Segmented
+            values={['easy', 'hard']}
+            selected={aiDifficulty}
+            onSelect={value => setAiDifficulty(value as 'easy' | 'hard')}
+            labels={{ easy: 'Easy', hard: 'Hard' }}
+          />
+        </PremiumPanel>
+      ) : null}
+
+      <ActionButton
+        label={selectedMode === 'online' ? 'Open Online Tables' : 'Deal Cards'}
+        Icon={selectedMode === 'online' ? Trophy : Play}
+        tone={selected.tone === 'gold' ? 'gold' : selected.tone === 'sky' ? 'secondary' : 'primary'}
+        onPress={startSelectedMode}
+        style={styles.startButton}
+      />
+      <ActionButton label="Back" Icon={ChevronLeft} tone="ghost" onPress={() => setSelectedMode(null)} />
+    </ScreenShell>
+  );
+}
+
+function ModeCard({
+  title,
+  subtitle,
+  Icon,
+  tone,
+  onPress,
+}: {
+  mode: ModeChoice;
+  title: string;
+  subtitle: string;
+  Icon: LucideIcon;
+  tone: 'emerald' | 'sky' | 'gold';
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress}>
+      <PremiumPanel tone="felt" style={[styles.modeCard, { borderColor: toneColor(tone) }]}>
+        <View style={[styles.modeAccent, { backgroundColor: toneColor(tone) }]} />
+        <View style={[styles.modeIcon, { borderColor: toneColor(tone) }]}>
+          <Icon size={26} color={toneColor(tone)} strokeWidth={2.6} />
         </View>
-      </View>
-
-      {/* Rounds */}
-      <View style={styles.card}>
-        <Text style={styles.label}>Rounds</Text>
-        <View style={styles.row}>
-          {[5, 9].map((n) => (
-            <Pressable key={n} onPress={() => setRounds(n as 5 | 9)} style={pill(rounds === n)}>
-              <Text style={styles.pillText}>{n}</Text>
-            </Pressable>
-          ))}
+        <View style={styles.modeCopy}>
+          <Text style={styles.modeTitle}>{title}</Text>
+          <Text style={styles.modeSubtitle}>{subtitle}</Text>
         </View>
-      </View>
+        <Play size={20} color={ui.palette.gold} fill={ui.palette.gold} />
+      </PremiumPanel>
+    </Pressable>
+  );
+}
 
-      {/* Modes */}
-      <View style={{ height: 12 }} />
-      <Pressable
-        style={[styles.cta, { backgroundColor: '#52E5A7' }]}
-        onPress={() => navigation.navigate('Game', { players, mode: 'passplay', rounds })}
-      >
-        <Text style={styles.ctaText}>Pass & Play</Text>
-      </Pressable>
-
-      <View style={{ height: 10 }} />
-      <Pressable
-        style={[styles.cta, { backgroundColor: '#4DA3FF' }]}
-        onPress={() => navigation.navigate('Game', { players, mode: 'solo', rounds })}
-      >
-        <Text style={styles.ctaText}>Solo vs AI</Text>
-      </Pressable>
-
-      <View style={{ height: 10 }} />
-      <Pressable
-        style={styles.ctaOutline}
-        onPress={() => navigation.navigate('OnlineRoom', { players, rounds, create: true })}
-      >
-        <Text style={styles.ctaOutlineText}>Online Multiplayer</Text>
-      </Pressable>
-
-      {/* Footer links */}
-      <View style={{ height: 14 }} />
-      <Pressable onPress={() => navigation.navigate('Rules')} style={{ alignSelf: 'center', padding: 6 }}>
-        <Text style={styles.rulesLink}>Rules</Text>
-      </Pressable>
+function PickerLabel({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.pickerLabel}>
+      <Text style={styles.label}>{label}</Text>
+      <StatusBadge label={value} tone="sky" />
     </View>
   );
 }
 
+function Segmented<T extends string | number>({
+  values,
+  selected,
+  labels,
+  onSelect,
+}: {
+  values: T[];
+  selected: T;
+  labels?: Partial<Record<string, string>>;
+  onSelect: (value: T) => void;
+}) {
+  return (
+    <View style={styles.segmented}>
+      {values.map(value => {
+        const active = selected === value;
+        const text = labels?.[String(value)] ?? String(value);
+        return (
+          <Pressable key={String(value)} onPress={() => onSelect(value)} style={[styles.segment, active && styles.segmentActive]}>
+            <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{text}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function toneColor(tone: 'emerald' | 'sky' | 'gold') {
+  if (tone === 'sky') return ui.palette.sky;
+  if (tone === 'gold') return ui.palette.gold;
+  return ui.palette.emerald;
+}
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0B1023', padding: 16 },
-  title: { color: '#E8ECF1', fontSize: 32, fontWeight: '900', marginBottom: 24, textAlign: 'center' },
-  card: { backgroundColor: '#121737', borderWidth: 1, borderColor: '#2A2F57', borderRadius: 14, padding: 14, marginBottom: 12 },
-  label: { color: '#9BA3C7', marginBottom: 8 },
-  row: { flexDirection: 'row', gap: 10 },
-  pill: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1, borderColor: '#2A2F57' },
-  pillSelected: { backgroundColor: '#1C2553', borderColor: '#4DA3FF' },
-  pillText: { color: '#E8ECF1', fontWeight: '700' },
-
-  cta: { padding: 16, borderRadius: 14, alignItems: 'center' },
-  ctaText: { color: '#0B1023', fontWeight: '900', fontSize: 16 },
-
-  ctaOutline: {
-    padding: 16,
-    borderRadius: 14,
+  modeCard: {
+    minHeight: 96,
+    flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#2A2F57',
+    gap: 14,
+    borderWidth: 1,
+    overflow: 'hidden',
   },
-  ctaOutlineText: { color: '#9BA3C7', fontWeight: '800' },
-
-  rulesLink: { color: '#9BA3C7', textDecorationLine: 'underline' },
+  modeAccent: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 4,
+    opacity: 0.9,
+  },
+  modeIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    borderWidth: 1,
+    backgroundColor: 'rgba(7, 10, 24, 0.34)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeCopy: { flex: 1, minWidth: 0 },
+  modeTitle: { color: ui.text.primary, fontSize: 19, fontWeight: '900' },
+  modeSubtitle: { color: ui.text.secondary, fontSize: 13, fontWeight: '700', lineHeight: 18, marginTop: 4 },
+  utilityGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 6,
+  },
+  pickerLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  label: { color: ui.text.secondary, fontSize: 14, fontWeight: '900' },
+  segmented: {
+    minHeight: 46,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  segment: {
+    flex: 1,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: ui.border.soft,
+    backgroundColor: ui.surface.base,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segmentActive: {
+    backgroundColor: ui.palette.emerald,
+    borderColor: ui.palette.emerald,
+  },
+  segmentText: { color: ui.text.secondary, fontSize: 15, fontWeight: '900' },
+  segmentTextActive: { color: ui.text.inverse },
+  startButton: { marginBottom: 10 },
 });

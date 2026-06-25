@@ -1,40 +1,60 @@
-// src/screens/RulesScreen.tsx
+// client/src/screens/RulesScreen.tsx
 // Purpose: In-app rules summary.
 
 import React from 'react';
-import { ScrollView, Text, StyleSheet, View } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
+import { BookOpen, ChevronLeft } from 'lucide-react-native';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../App';
+import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, ui } from '../ui';
 
-export default function RulesScreen() {
+type Props = NativeStackScreenProps<RootStackParamList, 'Rules'>;
+
+export default function RulesScreen({ navigation }: Props) {
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 16 }}>
-      <Text style={styles.title}>Golf 9 — Quick Rules</Text>
-      <View style={styles.card}>
-        <Text style={styles.h2}>Objective</Text>
-        <Text style={styles.p}>Have the lowest total points when the round ends. 5's count -5. Kings count 0. Three-of-a-kind in a column clears to 0.</Text>
-      </View>
-      <View style={styles.card}>
-        <Text style={styles.h2}>Setup</Text>
-        <Text style={styles.p}>Each player gets a 3×3 grid (9 cards) face-down. Flip two cards during start (peek phase).</Text>
-      </View>
-      <View style={styles.card}>
+    <ScreenShell scroll>
+      <ScreenHeader
+        eyebrow="Golf 9"
+        title="Quick Rules"
+        subtitle="Lowest total wins. Clear columns, manage risk, and know when to push."
+        right={<BookOpen size={28} color={ui.palette.gold} strokeWidth={2.5} />}
+      />
+
+      <RuleCard title="Objective">
+        Have the lowest total points when the round ends. 5's count -5. Kings count 0. Three-of-a-kind in a column clears to 0.
+      </RuleCard>
+
+      <RuleCard title="Setup">
+        Each player gets a 3x3 grid with 9 cards face-down. Flip two cards during the peek phase.
+      </RuleCard>
+
+      <PremiumPanel>
         <Text style={styles.h2}>On Your Turn</Text>
-        <Text style={styles.li}>• Draw from the draw pile or take the top discard.</Text>
-        <Text style={styles.li}>• Either replace one grid card (revealing it) or discard the drawn card.</Text>
-        <Text style={styles.li}>• If you complete three-of-a-kind in a column, that column becomes 0.</Text>
-      </View>
-      <View style={styles.card}>
-        <Text style={styles.h2}>Round End</Text>
-        <Text style={styles.p}>When all cards are face-up, sum values. Lowest score wins.</Text>
-      </View>
-    </ScrollView>
+        <Text style={styles.li}>- Draw from the deck or take the top discard.</Text>
+        <Text style={styles.li}>- Replace one grid card, reveal a hidden card, or discard a drawn card when allowed.</Text>
+        <Text style={styles.li}>- Completing three-of-a-kind in a column clears that column to 0.</Text>
+      </PremiumPanel>
+
+      <RuleCard title="Round End">
+        When all cards are face-up, values are totaled. Lowest score wins the round.
+      </RuleCard>
+
+      <ActionButton label="Back To Lobby" Icon={ChevronLeft} tone="ghost" onPress={() => navigation.goBack()} />
+    </ScreenShell>
+  );
+}
+
+function RuleCard({ title, children }: { title: string; children: string }) {
+  return (
+    <PremiumPanel>
+      <Text style={styles.h2}>{title}</Text>
+      <Text style={styles.p}>{children}</Text>
+    </PremiumPanel>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0B1023' },
-  title: { fontSize: 24, color: '#E8ECF1', fontWeight: '800', marginBottom: 12 },
-  card: { backgroundColor: '#121737', borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#2A2F57' },
-  h2: { color: '#E8ECF1', fontSize: 18, marginBottom: 8, fontWeight: '700' },
-  p: { color: '#C4CAE3', lineHeight: 20 },
-  li: { color: '#C4CAE3', lineHeight: 20, marginBottom: 2 }
+  h2: { color: ui.text.primary, fontSize: 18, marginBottom: 8, fontWeight: '900' },
+  p: { color: ui.text.secondary, lineHeight: 22, fontSize: 15, fontWeight: '700' },
+  li: { color: ui.text.secondary, lineHeight: 22, marginBottom: 4, fontSize: 15, fontWeight: '700' },
 });
