@@ -18,10 +18,27 @@ export type UserProfile = {
   competitive: CompetitiveState;
   competitiveByPlayers: RankedLadders;
   club: ClubSummary | null;
+  authProviders: AuthProviderStatus;
 };
 
 export type AuthResponse = { token: string; user: UserProfile };
-export type AuthConfig = { environment: string; inviteRequired: boolean; apiUrl: string; adminUrl: string };
+export type AuthProviderKey = 'google' | 'facebook';
+export type AuthProviderStatus = Record<AuthProviderKey, boolean>;
+export type AuthConfig = { environment: string; inviteRequired: boolean; apiUrl: string; adminUrl: string; providers: AuthProviderStatus };
+export type SocialAuthPayload = {
+  provider: AuthProviderKey;
+  idToken?: string;
+  accessToken?: string;
+  displayName?: string;
+  inviteCode?: string;
+};
+export type SocialProfileRequiredResponse = {
+  requiresProfile: true;
+  provider: AuthProviderKey;
+  suggestedDisplayName: string;
+  inviteRequired: boolean;
+};
+export type SocialAuthResponse = AuthResponse | SocialProfileRequiredResponse;
 export type RoomPlayer = { userId: string; displayName: string; avatarInitial: string; ready: boolean; connected: boolean; isHost: boolean };
 export type RoomSummary = {
   code: string;
@@ -562,6 +579,14 @@ export function signup(displayName: string, password: string, inviteCode = ''): 
 
 export function login(displayName: string, password: string): Promise<AuthResponse> {
   return request<AuthResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ displayName, password }) });
+}
+
+export function socialLogin(payload: SocialAuthPayload): Promise<SocialAuthResponse> {
+  return request<SocialAuthResponse>('/auth/social/login', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export function linkSocialProvider(token: string, payload: SocialAuthPayload): Promise<{ user: UserProfile }> {
+  return request<{ user: UserProfile }>('/auth/social/link', { method: 'POST', body: JSON.stringify(payload) }, token);
 }
 
 export function createSupportTicket(

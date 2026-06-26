@@ -5,10 +5,11 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Gift, MessageCircle, Pencil, ShoppingBag, Trophy, Users } from 'lucide-react-native';
+import { CheckCircle2, Gift, Link, MessageCircle, Pencil, ShoppingBag, Trophy, Users } from 'lucide-react-native';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
+import { isProviderConfigured } from '../services/socialAuth';
 import { ActionButton, PremiumPanel, ProgressBar, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Profile'>;
@@ -33,7 +34,7 @@ const MATCH_FILTERS: Array<{ key: MatchFilter; label: string }> = [
 ];
 
 const ProfileScreen: React.FC<Props> = ({ navigation }) => {
-  const { token, user, signOut, refreshProfile } = useAuth();
+  const { token, user, signOut, refreshProfile, linkSocialProvider } = useAuth();
   const [tab, setTab] = useState<ProfileTab>('stats');
   const [matchFilter, setMatchFilter] = useState<MatchFilter>('all');
   const [results, setResults] = useState<api.GameResult[]>([]);
@@ -106,6 +107,20 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
       await refreshProfile().catch(() => {});
     } catch (error) {
       Alert.alert('Cosmetic update failed', error instanceof Error ? error.message : 'Try again.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const onLinkSocialProvider = async (provider: api.AuthProviderKey) => {
+    if (busyId) return;
+    setBusyId(`link-${provider}`);
+    try {
+      await linkSocialProvider(provider);
+      await refreshProfile().catch(() => {});
+      Alert.alert('Account linked', `${provider === 'google' ? 'Google' : 'Facebook'} can now sign in to this Golf 9 profile.`);
+    } catch (error) {
+      Alert.alert('Link failed', error instanceof Error ? error.message : 'Try again.');
     } finally {
       setBusyId(null);
     }
@@ -262,6 +277,24 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
           </View>
           <ActionButton label="Open Social" Icon={Users} onPress={() => navigation.navigate('Social')} />
           <ActionButton label={user?.club ? 'Open Club' : 'Find A Club'} Icon={Trophy} tone="secondary" onPress={() => navigation.navigate('Club')} style={styles.socialButton} />
+          <View style={styles.linkedAccounts}>
+            <Text style={styles.sectionTitle}>Linked Accounts</Text>
+            <Text style={styles.sectionMeta}>Attach Google or Facebook so this same profile can use social login.</Text>
+            <LinkedAccountRow
+              provider="google"
+              linked={!!user?.authProviders?.google}
+              enabled={isProviderConfigured('google')}
+              busy={busyId === 'link-google'}
+              onPress={() => onLinkSocialProvider('google')}
+            />
+            <LinkedAccountRow
+              provider="facebook"
+              linked={!!user?.authProviders?.facebook}
+              enabled={isProviderConfigured('facebook')}
+              busy={busyId === 'link-facebook'}
+              onPress={() => onLinkSocialProvider('facebook')}
+            />
+          </View>
           <ActionButton label="Log Out" tone="danger" onPress={signOut} style={styles.socialButton} />
         </PremiumPanel>
       ) : null}
@@ -274,6 +307,37 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'go
     <View style={styles.stat}>
       <Text style={[styles.statValue, tone === 'gold' && styles.goldText]} numberOfLines={1}>{value}</Text>
       <Text style={styles.statLabel} numberOfLines={1}>{label}</Text>
+    </View>
+  );
+}
+
+function LinkedAccountRow({
+  provider,
+  linked,
+  enabled,
+  busy,
+  onPress,
+}: {
+  provider: api.AuthProviderKey;
+  linked: boolean;
+  enabled: boolean;
+  busy: boolean;
+  onPress: () => void;
+}) {
+  const label = provider === 'google' ? 'Google' : 'Facebook';
+  return (
+    <View style={styles.linkRow}>
+      <View style={[styles.providerMark, provider === 'google' ? styles.googleMark : styles.facebookMark]}>
+        <Text style={[styles.providerMarkText, provider === 'facebook' && styles.facebookMarkText]}>{provider === 'google' ? 'G' : 'f'}</Text>
+      </View>
+      <View style={styles.rowCopy}>
+        <Text style={styles.rowTitle}>{label}</Text>
+        <Text style={styles.rowMeta}>{linked ? 'Linked to this profile.' : enabled ? 'Available to link.' : 'Unavailable in this build.'}</Text>
+      </View>
+      <Pressable style={[styles.linkButton, (!enabled || linked || busy) && styles.disabled]} disabled={!enabled || linked || busy} onPress={onPress}>
+        {linked ? <CheckCircle2 size={18} color={ui.palette.emerald} strokeWidth={2.8} /> : <Link size={18} color={ui.text.inverse} strokeWidth={2.8} />}
+        <Text style={styles.linkButtonText}>{linked ? 'Linked' : busy ? '...' : 'Link'}</Text>
+      </Pressable>
     </View>
   );
 }
@@ -495,4 +559,13 @@ const styles = StyleSheet.create({
   socialIcon: { width: 52, height: 52, borderRadius: 8, backgroundColor: ui.palette.feltLight, alignItems: 'center', justifyContent: 'center' },
   socialCopy: { flex: 1, minWidth: 0 },
   socialButton: { marginTop: 10 },
+  linkedAccounts: { marginTop: 16, borderTopWidth: 1, borderTopColor: ui.border.soft, paddingTop: 14 },
+  linkRow: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderBottomColor: ui.border.soft, paddingVertical: 10 },
+  providerMark: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  googleMark: { backgroundColor: '#F4F7FF' },
+  facebookMark: { backgroundColor: '#1877F2' },
+  providerMarkText: { color: ui.text.inverse, fontSize: 21, fontWeight: '900' },
+  facebookMarkText: { color: ui.text.primary },
+  linkButton: { minWidth: 78, minHeight: 38, borderRadius: 8, backgroundColor: ui.palette.emerald, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 10 },
+  linkButtonText: { color: ui.text.inverse, fontSize: 12, fontWeight: '900' },
 });

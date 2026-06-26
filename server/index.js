@@ -7,6 +7,7 @@ import fs from 'fs';
 import http from 'http';
 import path from 'path';
 import cors from 'cors';
+import { OAuth2Client } from 'google-auth-library';
 import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import { createPostgresStore } from './postgresStore.js';
@@ -144,6 +145,13 @@ const DATABASE_URL = process.env.DATABASE_URL || '';
 const PUBLIC_API_URL = process.env.PUBLIC_API_URL || process.env.EXPO_PUBLIC_PROD_SERVER_URL || 'https://games.joinup.us';
 const ADMIN_PUBLIC_URL = process.env.ADMIN_PUBLIC_URL || 'https://games.joinup.us/admin';
 const PUBLIC_ENV = (process.env.APP_ENV || process.env.EXPO_PUBLIC_APP_ENV || (IS_PRODUCTION ? 'production' : 'development')).toLowerCase();
+const GOOGLE_CLIENT_IDS = (process.env.GOOGLE_CLIENT_IDS || process.env.GOOGLE_CLIENT_ID || '')
+  .split(',')
+  .map(value => value.trim())
+  .filter(Boolean);
+const FACEBOOK_APP_ID = String(process.env.FACEBOOK_APP_ID || '').trim();
+const FACEBOOK_APP_SECRET = String(process.env.FACEBOOK_APP_SECRET || '').trim();
+const SOCIAL_AUTH_TEST_MODE = process.env.SOCIAL_AUTH_TEST_MODE === '1';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const ROOM_TTL_MS = 1000 * 60 * 60 * 2;
 const PORT = String(process.env.PORT || 3001);
@@ -256,6 +264,7 @@ let rankedSeason = normalizeRankedSeason(null, Date.now(), liveCompetitiveConfig
 const adminStore = normalizeAdminStore({});
 const catalogStore = normalizeCatalogStore({});
 const postgresStore = createPostgresStore(DATABASE_URL);
+const googleOAuthClient = new OAuth2Client();
 let storeReady = false;
 let storeLoadError = null;
 
@@ -302,10 +311,64 @@ function normalizeUserClub(user) {
   return user.clubId;
 }
 
+function normalizeProvider(value) {
+  const provider = String(value || '').trim().toLowerCase();
+  return provider === 'google' || provider === 'facebook' ? provider : '';
+}
+
+function providerLabel(provider) {
+  return provider === 'facebook' ? 'Facebook' : 'Google';
+}
+
+function socialProviderEnabled(provider) {
+  if (SOCIAL_AUTH_TEST_MODE) return true;
+  if (provider === 'google') return GOOGLE_CLIENT_IDS.length > 0;
+  if (provider === 'facebook') return !!FACEBOOK_APP_ID && !!FACEBOOK_APP_SECRET;
+  return false;
+}
+
+function socialProviderConfig() {
+  return {
+    google: socialProviderEnabled('google'),
+    facebook: socialProviderEnabled('facebook'),
+  };
+}
+
+function normalizeAuthProviders(user) {
+  user.authProviders = user.authProviders && typeof user.authProviders === 'object' ? user.authProviders : {};
+  for (const provider of ['google', 'facebook']) {
+    const item = user.authProviders[provider];
+    const providerUserId = String(item?.providerUserId || item?.id || '').trim();
+    if (!providerUserId) {
+      delete user.authProviders[provider];
+      continue;
+    }
+    user.authProviders[provider] = {
+      provider,
+      providerUserId,
+      email: String(item.email || '').trim().toLowerCase(),
+      emailVerified: !!item.emailVerified,
+      displayName: String(item.displayName || '').trim(),
+      linkedAt: Number(item.linkedAt || Date.now()) || Date.now(),
+      lastLoginAt: Number(item.lastLoginAt || item.linkedAt || Date.now()) || Date.now(),
+    };
+  }
+  return user.authProviders;
+}
+
+function publicAuthProviders(user) {
+  normalizeAuthProviders(user);
+  return {
+    google: !!user.authProviders.google,
+    facebook: !!user.authProviders.facebook,
+  };
+}
+
 function normalizeUserRecord(user, now = Date.now()) {
   normalizeUserProgression(user, now, rankedSeason, rankedConfig());
   normalizeSocial(user);
   normalizeUserClub(user);
+  normalizeAuthProviders(user);
   normalizeUserAdminFields(user);
   return user;
 }
@@ -441,6 +504,126 @@ function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
   return { salt, passwordHash };
 }
 
+function validateNewDisplayName(displayName, existingUserId = null) {
+  const clean = String(displayName || '').trim();
+  if (clean.length < 2) return { error: 'Display name must be at least 2 characters.' };
+  const duplicate = [...users.values()].find(user => user.userId !== existingUserId && user.displayName.toLowerCase() === clean.toLowerCase());
+  if (duplicate) return { error: 'Display name is already taken.' };
+  return { displayName: clean };
+}
+
+function suggestedSocialDisplayName(profile) {
+  const base = String(profile.displayName || profile.email?.split('@')[0] || `${providerLabel(profile.provider)} Player`)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 24);
+  return base.length >= 2 ? base : `${providerLabel(profile.provider)} Player`;
+}
+
+function findUserByProvider(provider, providerUserId) {
+  for (const user of users.values()) {
+    normalizeAuthProviders(user);
+    if (user.authProviders[provider]?.providerUserId === providerUserId) return user;
+  }
+  return null;
+}
+
+function socialLinkFromProfile(profile, now = Date.now()) {
+  return {
+    provider: profile.provider,
+    providerUserId: profile.providerUserId,
+    email: String(profile.email || '').trim().toLowerCase(),
+    emailVerified: !!profile.emailVerified,
+    displayName: String(profile.displayName || '').trim(),
+    linkedAt: now,
+    lastLoginAt: now,
+  };
+}
+
+function mockSocialProfile(provider, body = {}) {
+  if (!SOCIAL_AUTH_TEST_MODE) return null;
+  const token = String(provider === 'google' ? body.idToken : body.accessToken || '').trim();
+  if (!token.startsWith(`mock:${provider}:`)) throw new Error(`${providerLabel(provider)} test token is invalid.`);
+  const [, , providerUserId, email = '', ...nameParts] = token.split(':');
+  const displayName = String(body.mockProfile?.displayName || nameParts.join(' ') || providerLabel(provider)).trim();
+  return {
+    provider,
+    providerUserId: String(body.mockProfile?.providerUserId || providerUserId || '').trim(),
+    email: String(body.mockProfile?.email || email || '').trim().toLowerCase(),
+    emailVerified: true,
+    displayName,
+  };
+}
+
+async function verifyGoogleProfile(body = {}) {
+  const mock = mockSocialProfile('google', body);
+  if (mock) return mock;
+  if (!GOOGLE_CLIENT_IDS.length) throw new Error('Google login is not configured.');
+  const idToken = String(body.idToken || '').trim();
+  if (!idToken) throw new Error('Google login token is missing.');
+  const ticket = await googleOAuthClient.verifyIdToken({ idToken, audience: GOOGLE_CLIENT_IDS });
+  const payload = ticket.getPayload();
+  if (!payload?.sub) throw new Error('Google login token is invalid.');
+  return {
+    provider: 'google',
+    providerUserId: String(payload.sub),
+    email: String(payload.email || '').trim().toLowerCase(),
+    emailVerified: !!payload.email_verified,
+    displayName: String(payload.name || payload.given_name || '').trim(),
+  };
+}
+
+async function verifyFacebookProfile(body = {}) {
+  const mock = mockSocialProfile('facebook', body);
+  if (mock) return mock;
+  if (!FACEBOOK_APP_ID || !FACEBOOK_APP_SECRET) throw new Error('Facebook login is not configured.');
+  const accessToken = String(body.accessToken || '').trim();
+  if (!accessToken) throw new Error('Facebook login token is missing.');
+  const appToken = `${FACEBOOK_APP_ID}|${FACEBOOK_APP_SECRET}`;
+  const debugUrl = new URL('https://graph.facebook.com/debug_token');
+  debugUrl.searchParams.set('input_token', accessToken);
+  debugUrl.searchParams.set('access_token', appToken);
+  const debugRes = await fetch(debugUrl);
+  const debug = await debugRes.json().catch(() => ({}));
+  const data = debug.data || {};
+  if (!debugRes.ok || !data.is_valid || String(data.app_id || '') !== FACEBOOK_APP_ID || !data.user_id) {
+    throw new Error('Facebook login token is invalid.');
+  }
+  const profileUrl = new URL('https://graph.facebook.com/me');
+  profileUrl.searchParams.set('fields', 'id,name,email');
+  profileUrl.searchParams.set('access_token', accessToken);
+  const profileRes = await fetch(profileUrl);
+  const profile = await profileRes.json().catch(() => ({}));
+  if (!profileRes.ok || String(profile.id || '') !== String(data.user_id)) throw new Error('Facebook profile lookup failed.');
+  return {
+    provider: 'facebook',
+    providerUserId: String(profile.id),
+    email: String(profile.email || '').trim().toLowerCase(),
+    emailVerified: !!profile.email,
+    displayName: String(profile.name || '').trim(),
+  };
+}
+
+async function verifySocialProfile(provider, body = {}) {
+  if (!socialProviderEnabled(provider)) throw new Error(`${providerLabel(provider)} login is not configured.`);
+  return provider === 'google' ? verifyGoogleProfile(body) : verifyFacebookProfile(body);
+}
+
+function createSocialUser(profile, displayName) {
+  const now = Date.now();
+  const userId = crypto.randomUUID();
+  const user = normalizeUserProgression({
+    userId,
+    displayName,
+    salt: '',
+    passwordHash: '',
+    authProviders: { [profile.provider]: socialLinkFromProfile(profile, now) },
+    stats: { gamesPlayed: 0, wins: 0 },
+  }, now, rankedSeason, rankedConfig());
+  normalizeAuthProviders(user);
+  return user;
+}
+
 function publicClubForUser(user) {
   const club = user?.clubId ? clubs.get(user.clubId) : null;
   return club ? publicClubSummary(club, user.userId) : null;
@@ -450,6 +633,7 @@ function safeUser(user) {
   return {
     ...publicUserProfile(user, rankedSeason, rankedConfig()),
     club: publicClubForUser(user),
+    authProviders: publicAuthProviders(user),
   };
 }
 
@@ -2337,21 +2521,20 @@ app.get('/auth/config', (_req, res) => {
     inviteRequired: signupInvitesRequired(),
     apiUrl: PUBLIC_API_URL,
     adminUrl: ADMIN_PUBLIC_URL,
+    providers: socialProviderConfig(),
   });
 });
 
 app.post('/auth/signup', (req, res) => {
-  const displayName = String(req.body.displayName || '').trim();
+  const displayNameCheck = validateNewDisplayName(req.body.displayName);
   const password = String(req.body.password || '');
   const inviteCheck = validateSignupInvite(adminStore, req.body?.inviteCode, signupInvitesRequired());
   if (inviteCheck.error) return res.status(403).json({ error: inviteCheck.error });
-  if (displayName.length < 2) return res.status(400).json({ error: 'Display name must be at least 2 characters.' });
+  if (displayNameCheck.error) return res.status(displayNameCheck.error.includes('taken') ? 409 : 400).json({ error: displayNameCheck.error });
   if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters.' });
-  const duplicate = [...users.values()].find(user => user.displayName.toLowerCase() === displayName.toLowerCase());
-  if (duplicate) return res.status(409).json({ error: 'Display name is already taken.' });
   const userId = crypto.randomUUID();
   const { salt, passwordHash } = hashPassword(password);
-  const user = normalizeUserProgression({ userId, displayName, salt, passwordHash, stats: { gamesPlayed: 0, wins: 0 } });
+  const user = normalizeUserProgression({ userId, displayName: displayNameCheck.displayName, salt, passwordHash, stats: { gamesPlayed: 0, wins: 0 } });
   const deviceHash = trackUserDevice(user, req, req.body?.deviceId);
   const moderationError = banErrorFor(adminStore, user, deviceHash);
   if (moderationError) return res.status(403).json({ error: moderationError });
@@ -2389,6 +2572,86 @@ app.post('/auth/login', (req, res) => {
   }
   const session = createSession(user.userId);
   return res.json({ token: session.token, user: safeUser(user) });
+});
+
+app.post('/auth/social/login', async (req, res) => {
+  const provider = normalizeProvider(req.body?.provider);
+  if (!provider) return res.status(400).json({ error: 'Unsupported social login provider.' });
+  let profile;
+  try {
+    profile = await verifySocialProfile(provider, req.body);
+  } catch (error) {
+    return res.status(401).json({ error: error instanceof Error ? error.message : `${providerLabel(provider)} login failed.` });
+  }
+
+  const linkedUser = findUserByProvider(provider, profile.providerUserId);
+  if (linkedUser) {
+    const deviceHash = trackUserDevice(linkedUser, req, req.body?.deviceId);
+    const moderationError = banErrorFor(adminStore, linkedUser, deviceHash);
+    if (moderationError) return res.status(403).json({ error: moderationError });
+    linkedUser.authProviders[provider].lastLoginAt = Date.now();
+    const session = createSession(linkedUser.userId);
+    saveStore();
+    return res.json({ token: session.token, user: safeUser(linkedUser) });
+  }
+
+  const displayName = String(req.body?.displayName || '').trim();
+  if (!displayName) {
+    return res.json({
+      requiresProfile: true,
+      provider,
+      suggestedDisplayName: suggestedSocialDisplayName(profile),
+      inviteRequired: signupInvitesRequired(),
+    });
+  }
+
+  const inviteCheck = validateSignupInvite(adminStore, req.body?.inviteCode, signupInvitesRequired());
+  if (inviteCheck.error) return res.status(403).json({ error: inviteCheck.error });
+  const displayNameCheck = validateNewDisplayName(displayName);
+  if (displayNameCheck.error) return res.status(displayNameCheck.error.includes('taken') ? 409 : 400).json({ error: displayNameCheck.error });
+
+  const user = createSocialUser(profile, displayNameCheck.displayName);
+  const deviceHash = trackUserDevice(user, req, req.body?.deviceId);
+  const moderationError = banErrorFor(adminStore, user, deviceHash);
+  if (moderationError) return res.status(403).json({ error: moderationError });
+  const invite = consumeSignupInvite(adminStore, inviteCheck.invite, user);
+  users.set(user.userId, user);
+  const session = createSession(user.userId);
+  writeAudit(adminStore, req, null, 'auth.signup.social', { userId: user.userId, provider });
+  if (invite) writeAudit(adminStore, req, null, 'auth.signup.invite_used', { userId: user.userId, inviteId: invite.inviteId, code: invite.code });
+  saveStore();
+  return res.json({ token: session.token, user: safeUser(user) });
+});
+
+app.post('/auth/social/link', requireAuth, async (req, res) => {
+  const provider = normalizeProvider(req.body?.provider);
+  if (!provider) return res.status(400).json({ error: 'Unsupported social login provider.' });
+  let profile;
+  try {
+    profile = await verifySocialProfile(provider, req.body);
+  } catch (error) {
+    return res.status(401).json({ error: error instanceof Error ? error.message : `${providerLabel(provider)} link failed.` });
+  }
+
+  const linkedUser = findUserByProvider(provider, profile.providerUserId);
+  if (linkedUser && linkedUser.userId !== req.auth.user.userId) {
+    return res.status(409).json({ error: `${providerLabel(provider)} is already linked to another Golf 9 profile.` });
+  }
+
+  normalizeAuthProviders(req.auth.user);
+  const current = req.auth.user.authProviders[provider];
+  if (current && current.providerUserId !== profile.providerUserId) {
+    return res.status(409).json({ error: `This profile is already linked to a different ${providerLabel(provider)} account.` });
+  }
+
+  const now = Date.now();
+  req.auth.user.authProviders[provider] = current
+    ? { ...current, ...socialLinkFromProfile(profile, current.linkedAt || now), linkedAt: current.linkedAt || now, lastLoginAt: now }
+    : socialLinkFromProfile(profile, now);
+  normalizeAuthProviders(req.auth.user);
+  writeAudit(adminStore, req, null, 'auth.social.link', { userId: req.auth.user.userId, provider });
+  saveStore();
+  return res.json({ user: safeUser(req.auth.user) });
 });
 
 app.post('/auth/logout', requireAuth, (req, res) => {

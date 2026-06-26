@@ -32,3 +32,9 @@ const URLS: Record<string, string> = {
 export const APP_ENV = ENV;
 export const SERVER_URL = URLS[ENV] || URLS.production;
 export const SOCKET_URL = SERVER_URL;
+
+export const SOCIAL_AUTH_CONFIG = {
+  googleWebClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '',
+  facebookAppId: process.env.EXPO_PUBLIC_FACEBOOK_APP_ID || '',
+  facebookClientToken: process.env.EXPO_PUBLIC_FACEBOOK_CLIENT_TOKEN || '',
+};

@@ -2,30 +2,41 @@
 // Purpose: Real signup/login screen backed by server sessions.
 
 import React, { useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BookOpen, LogIn, Sparkles, UserPlus } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
 import { SERVER_URL } from '../config';
 import * as api from '../services/api';
+import { isProviderConfigured } from '../services/socialAuth';
 import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
 
 const LoginScreen: React.FC<Props> = ({ navigation }) => {
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, signInWithSocial, completeSocialSignUp } = useAuth();
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [inviteRequired, setInviteRequired] = useState(false);
+  const [providers, setProviders] = useState<api.AuthProviderStatus>({ google: false, facebook: false });
+  const [pendingSocial, setPendingSocial] = useState<(api.SocialProfileRequiredResponse & api.SocialAuthPayload) | null>(null);
+  const [socialDisplayName, setSocialDisplayName] = useState('');
+  const [socialInviteCode, setSocialInviteCode] = useState('');
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     api.authConfig()
-      .then(config => setInviteRequired(config.inviteRequired))
-      .catch(() => setInviteRequired(false));
+      .then(config => {
+        setInviteRequired(config.inviteRequired);
+        setProviders(config.providers);
+      })
+      .catch(() => {
+        setInviteRequired(false);
+        setProviders({ google: false, facebook: false });
+      });
   }, []);
 
   const submit = async () => {
@@ -51,7 +62,49 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
     }
   };
 
+  const startSocial = async (provider: api.AuthProviderKey) => {
+    setLoading(true);
+    try {
+      const response = await signInWithSocial(provider);
+      if ('requiresProfile' in response) {
+        setPendingSocial(response);
+        setSocialDisplayName(response.suggestedDisplayName);
+        setSocialInviteCode('');
+      }
+    } catch (error) {
+      Alert.alert(`${provider === 'google' ? 'Google' : 'Facebook'} login failed`, error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const finishSocialProfile = async () => {
+    if (!pendingSocial) return;
+    const cleanName = socialDisplayName.trim();
+    const cleanInvite = socialInviteCode.trim();
+    if (!cleanName) {
+      Alert.alert('Profile needed', 'Choose your Golf 9 display name.');
+      return;
+    }
+    if (pendingSocial.inviteRequired && !cleanInvite) {
+      Alert.alert('Invite needed', 'Enter your pre-alpha invite code to create this account.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await completeSocialSignUp(pendingSocial, cleanName, cleanInvite);
+      setPendingSocial(null);
+    } catch (error) {
+      Alert.alert('Social signup failed', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const isLogin = mode === 'login';
+  const googleEnabled = providers.google && isProviderConfigured('google');
+  const facebookEnabled = providers.facebook && isProviderConfigured('facebook');
+  const showSocial = googleEnabled || facebookEnabled;
 
   return (
     <ScreenShell scroll centered>
@@ -113,6 +166,18 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
           disabled={loading}
           onPress={submit}
         />
+
+        {showSocial ? (
+          <>
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>OR</Text>
+              <View style={styles.dividerLine} />
+            </View>
+            {googleEnabled ? <SocialButton provider="google" disabled={loading} onPress={() => startSocial('google')} /> : null}
+            {facebookEnabled ? <SocialButton provider="facebook" disabled={loading} onPress={() => startSocial('facebook')} /> : null}
+          </>
+        ) : null}
       </PremiumPanel>
 
       <View style={styles.quickActions}>
@@ -127,11 +192,56 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
       </View>
 
       {__DEV__ ? <Text style={styles.devServer}>Server: {SERVER_URL}</Text> : null}
+
+      <Modal animationType="fade" transparent visible={!!pendingSocial} onRequestClose={() => setPendingSocial(null)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Finish Profile</Text>
+            <Text style={styles.modalMeta}>Choose the Golf 9 name other players will see.</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Display name"
+              placeholderTextColor={ui.text.muted}
+              value={socialDisplayName}
+              onChangeText={setSocialDisplayName}
+              autoCapitalize="none"
+              autoCorrect={false}
+              spellCheck={false}
+            />
+            {pendingSocial?.inviteRequired ? (
+              <TextInput
+                style={styles.input}
+                placeholder="Pre-alpha invite code"
+                placeholderTextColor={ui.text.muted}
+                value={socialInviteCode}
+                onChangeText={setSocialInviteCode}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                spellCheck={false}
+              />
+            ) : null}
+            <ActionButton label={loading ? 'Working...' : 'Create Account'} Icon={UserPlus} disabled={loading} onPress={finishSocialProfile} />
+            <ActionButton label="Cancel" tone="ghost" disabled={loading} onPress={() => setPendingSocial(null)} style={styles.cancelButton} />
+          </View>
+        </View>
+      </Modal>
     </ScreenShell>
   );
 };
 
 export default LoginScreen;
+
+function SocialButton({ provider, disabled, onPress }: { provider: api.AuthProviderKey; disabled: boolean; onPress: () => void }) {
+  const isGoogle = provider === 'google';
+  return (
+    <Pressable style={[styles.socialButton, disabled && styles.disabled]} disabled={disabled} onPress={onPress}>
+      <View style={[styles.socialMark, isGoogle ? styles.googleMark : styles.facebookMark]}>
+        <Text style={[styles.socialMarkText, !isGoogle && styles.facebookMarkText]}>{isGoogle ? 'G' : 'f'}</Text>
+      </View>
+      <Text style={styles.socialButtonText}>Continue with {isGoogle ? 'Google' : 'Facebook'}</Text>
+    </Pressable>
+  );
+}
 
 const styles = StyleSheet.create({
   heroIcon: {
@@ -177,4 +287,33 @@ const styles = StyleSheet.create({
   },
   secondaryText: { color: ui.text.primary, fontWeight: '900', fontSize: 13 },
   devServer: { color: ui.text.muted, fontSize: 11, marginTop: 18, textAlign: 'center', fontWeight: '700' },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 16 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: ui.border.soft },
+  dividerText: { color: ui.text.muted, fontSize: 11, fontWeight: '900' },
+  socialButton: {
+    width: '100%',
+    minHeight: 50,
+    borderRadius: ui.radius.md,
+    borderWidth: 1,
+    borderColor: ui.border.soft,
+    backgroundColor: ui.surface.base,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+  },
+  socialMark: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  googleMark: { backgroundColor: '#F4F7FF' },
+  facebookMark: { backgroundColor: '#1877F2' },
+  socialMarkText: { color: ui.text.inverse, fontSize: 17, fontWeight: '900' },
+  facebookMarkText: { color: ui.text.primary },
+  socialButtonText: { color: ui.text.primary, fontSize: 14, fontWeight: '900' },
+  disabled: { opacity: 0.45 },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(3, 6, 18, 0.74)', alignItems: 'center', justifyContent: 'center', padding: 22 },
+  modalCard: { width: '100%', maxWidth: 420, borderRadius: ui.radius.lg, borderWidth: 1, borderColor: ui.border.gold, backgroundColor: ui.surface.panel, padding: 18 },
+  modalTitle: { color: ui.text.primary, fontSize: 24, fontWeight: '900', textAlign: 'center' },
+  modalMeta: { color: ui.text.secondary, fontSize: 13, fontWeight: '800', lineHeight: 18, textAlign: 'center', marginTop: 6, marginBottom: 16 },
+  cancelButton: { marginTop: 10 },
 });

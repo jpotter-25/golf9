@@ -47,11 +47,11 @@ function emitAck(socket, event, payload) {
   return new Promise(resolve => socket.emit(event, payload, resolve));
 }
 
-async function signup(baseUrl, displayName) {
+async function signup(baseUrl, displayName, inviteCode = '') {
   return json(await fetch(`${baseUrl}/auth/signup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ displayName, password: 'password1' }),
+    body: JSON.stringify({ displayName, password: 'password1', inviteCode }),
   }));
 }
 
@@ -201,6 +201,96 @@ test('pre-alpha invite gate blocks open signup and consumes admin-created invite
     });
     assert.equal(exhausted.status, 403);
   }, { REQUIRE_INVITE_CODE: '1', SEED_ADMIN_ACCOUNT: '1' });
+});
+
+test('social auth gates new accounts and links existing profiles', async () => {
+  await withServer(async (baseUrl) => {
+    const config = await json(await fetch(`${baseUrl}/auth/config`));
+    assert.equal(config.providers.google, true);
+    assert.equal(config.providers.facebook, true);
+
+    const googleToken = 'mock:google:g-1:golf@example.com:Golfy Google';
+    const needsProfile = await json(await fetch(`${baseUrl}/auth/social/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'google', idToken: googleToken }),
+    }));
+    assert.equal(needsProfile.requiresProfile, true);
+    assert.equal(needsProfile.provider, 'google');
+    assert.equal(needsProfile.inviteRequired, true);
+    assert.equal(needsProfile.suggestedDisplayName, 'Golfy Google');
+
+    const blocked = await fetch(`${baseUrl}/auth/social/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'google', idToken: googleToken, displayName: `Social${Date.now()}` }),
+    });
+    assert.equal(blocked.status, 403);
+
+    const admin = await adminLogin(baseUrl);
+    await json(await fetch(`${baseUrl}/admin/api/invites`, {
+      method: 'POST',
+      headers: adminHeaders(admin),
+      body: JSON.stringify({
+        code: 'SOCIAL1',
+        label: 'Social smoke',
+        maxUses: 1,
+        reason: 'integration test',
+      }),
+    }));
+    await json(await fetch(`${baseUrl}/admin/api/invites`, {
+      method: 'POST',
+      headers: adminHeaders(admin),
+      body: JSON.stringify({
+        code: 'PASS1',
+        label: 'Password smoke',
+        maxUses: 1,
+        reason: 'integration test',
+      }),
+    }));
+
+    const displayName = `Google${Date.now()}`;
+    const accepted = await json(await fetch(`${baseUrl}/auth/social/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'google', idToken: googleToken, displayName, inviteCode: 'SOCIAL1' }),
+    }));
+    assert.ok(accepted.token);
+    assert.equal(accepted.user.displayName, displayName);
+    assert.equal(accepted.user.authProviders.google, true);
+    assert.equal(accepted.user.authProviders.facebook, false);
+
+    const repeat = await json(await fetch(`${baseUrl}/auth/social/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'google', idToken: googleToken }),
+    }));
+    assert.equal(repeat.user.userId, accepted.user.userId);
+
+    const passwordUser = await signup(baseUrl, `Pass${Date.now()}`, 'PASS1');
+    const facebookToken = 'mock:facebook:fb-1:face@example.com:Face Friend';
+    const linked = await json(await fetch(`${baseUrl}/auth/social/link`, {
+      method: 'POST',
+      headers: authHeaders(passwordUser.token),
+      body: JSON.stringify({ provider: 'facebook', accessToken: facebookToken }),
+    }));
+    assert.equal(linked.user.userId, passwordUser.user.userId);
+    assert.equal(linked.user.authProviders.facebook, true);
+
+    const facebookLogin = await json(await fetch(`${baseUrl}/auth/social/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'facebook', accessToken: facebookToken }),
+    }));
+    assert.equal(facebookLogin.user.userId, passwordUser.user.userId);
+
+    const conflict = await fetch(`${baseUrl}/auth/social/link`, {
+      method: 'POST',
+      headers: authHeaders(accepted.token),
+      body: JSON.stringify({ provider: 'facebook', accessToken: facebookToken }),
+    });
+    assert.equal(conflict.status, 409);
+  }, { REQUIRE_INVITE_CODE: '1', SEED_ADMIN_ACCOUNT: '1', SOCIAL_AUTH_TEST_MODE: '1' });
 });
 
 test('admin console supports MFA login, audited player ops, support tickets, and bans', async () => {
