@@ -29,9 +29,9 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 export type RootStackParamList = {
   Login: undefined;
   Lobby: undefined;
-  OnlineMenu: { players: 2 | 3 | 4; rounds: 5 | 9 };
+  OnlineMenu: undefined;
   OnlineRoom: { players: 2 | 3 | 4; rounds: 5 | 9; create?: boolean; joinCode?: string; quickPlay?: boolean; ranked?: boolean; wagerBuyIn?: number };
-  RankedQueue: { players: 2 | 3 | 4; rounds: 5 | 9 };
+  RankedQueue: { players: 2 | 3 | 4 };
   Game: { players: number; rounds: 5 | 9; mode: 'passplay' | 'solo' | 'online'; roomCode?: string; roomId?: string; online?: boolean; aiDifficulty?: 'easy' | 'hard' };
   Rules: undefined;
   Profile: undefined;

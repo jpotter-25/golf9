@@ -1,4 +1,4 @@
-import { normalizeCompetitiveState, publicCompetitiveState } from './ranked.js';
+import { normalizeCompetitiveState, publicCompetitiveByPlayers, publicCompetitiveState } from './ranked.js';
 import { publicDailyBonus } from './economy.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -403,6 +403,7 @@ export function publicUserProfile(user, rankedSeason = null, competitiveConfig =
     inventory: user.inventory,
     challenges: publicChallenges(user),
     competitive: publicCompetitiveState(user, rankedSeason || undefined, competitiveConfig),
+    competitiveByPlayers: publicCompetitiveByPlayers(user, rankedSeason || undefined, competitiveConfig),
   };
 }
 

@@ -1,5 +1,6 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SEASON_LENGTH_MS = 90 * DAY_MS;
+const RANKED_PLAYER_COUNTS = [2, 3, 4];
 export const BASE_MMR = 1000;
 export const PLACEMENT_MATCHES_REQUIRED = 5;
 
@@ -130,11 +131,17 @@ export function leagueForMmr(rawMmr = BASE_MMR, config = null) {
   };
 }
 
-function defaultCompetitive(season, config = null) {
+export function normalizeRankedPlayerCount(value = 2) {
+  const count = safeInteger(value, 2);
+  return count <= 2 ? 2 : count === 3 ? 3 : 4;
+}
+
+function defaultCompetitive(season, config = null, playerCount = 2) {
   const baseMmr = Math.max(0, safeInteger(configValue(config, 'baseMmr', BASE_MMR), BASE_MMR));
   const placementMatchesRequired = Math.max(1, safeInteger(configValue(config, 'placementMatchesRequired', PLACEMENT_MATCHES_REQUIRED), PLACEMENT_MATCHES_REQUIRED));
   const league = leagueForMmr(baseMmr, config);
   return {
+    playerCount: normalizeRankedPlayerCount(playerCount),
     seasonId: season.id,
     mmr: baseMmr,
     league,
@@ -151,9 +158,9 @@ function defaultCompetitive(season, config = null) {
   };
 }
 
-export function normalizeCompetitiveState(user, season = normalizeRankedSeason(), config = null) {
-  const defaults = defaultCompetitive(season, config);
-  const existing = user.competitive || {};
+function normalizeCompetitiveRecord(existing = {}, season = normalizeRankedSeason(), config = null, playerCount = 2) {
+  const safePlayerCount = normalizeRankedPlayerCount(playerCount);
+  const defaults = defaultCompetitive(season, config, safePlayerCount);
   const existingSeasonId = existing.seasonId || season.id;
   const isNewSeason = existingSeasonId !== season.id;
   const previousMmr = Math.max(0, safeInteger(existing.mmr, defaults.mmr));
@@ -178,7 +185,8 @@ export function normalizeCompetitiveState(user, season = normalizeRankedSeason()
     ? []
     : Array.isArray(existing.matchHistory) ? existing.matchHistory.filter(Boolean).slice(0, 25) : [];
 
-  user.competitive = {
+  return {
+    playerCount: safePlayerCount,
     seasonId: season.id,
     mmr,
     league: leagueForMmr(mmr, config),
@@ -193,18 +201,45 @@ export function normalizeCompetitiveState(user, season = normalizeRankedSeason()
     claimedSeasonRewards,
     matchHistory,
   };
-  return user.competitive;
 }
 
-function publicSeasonReward(user, season, reward, config = null) {
-  normalizeCompetitiveState(user, season, config);
-  const earned = user.competitive.seasonBestMmr >= reward.minMmr;
-  const claimed = user.competitive.claimedSeasonRewards.includes(reward.id);
+function seedCompetitiveMap(user, season, config = null) {
+  const existingMap = user.competitiveByPlayers && typeof user.competitiveByPlayers === 'object'
+    ? user.competitiveByPlayers
+    : null;
+  const legacy = user.competitive && typeof user.competitive === 'object' ? user.competitive : null;
+  const source = existingMap || { 2: legacy || {} };
+  user.competitiveByPlayers = {};
+  for (const count of RANKED_PLAYER_COUNTS) {
+    const key = String(count);
+    user.competitiveByPlayers[key] = normalizeCompetitiveRecord(source[key] || {}, season, config, count);
+  }
+  user.competitive = user.competitiveByPlayers['2'];
+  return user.competitiveByPlayers;
+}
+
+export function normalizeCompetitiveState(user, season = normalizeRankedSeason(), config = null, playerCount = 2) {
+  const count = normalizeRankedPlayerCount(playerCount);
+  const map = seedCompetitiveMap(user, season, config);
+  return map[String(count)];
+}
+
+export function publicCompetitiveByPlayers(user, season = normalizeRankedSeason(), config = null) {
+  const map = seedCompetitiveMap(user, season, config);
+  return Object.fromEntries(RANKED_PLAYER_COUNTS.map(count => [
+    String(count),
+    publicCompetitiveState(user, season, config, count),
+  ]));
+}
+
+function publicSeasonReward(competitive, reward) {
+  const earned = competitive.seasonBestMmr >= reward.minMmr;
+  const claimed = competitive.claimedSeasonRewards.includes(reward.id);
   return { ...reward, earned, claimed };
 }
 
-export function publicCompetitiveState(user, season = normalizeRankedSeason(), config = null) {
-  const competitive = normalizeCompetitiveState(user, season, config);
+export function publicCompetitiveState(user, season = normalizeRankedSeason(), config = null, playerCount = 2) {
+  const competitive = normalizeCompetitiveState(user, season, config, playerCount);
   return {
     ...competitive,
     league: leagueForMmr(competitive.mmr, config),
@@ -215,7 +250,7 @@ export function publicCompetitiveState(user, season = normalizeRankedSeason(), c
       name: season.name,
       startsAt: season.startsAt,
       endsAt: season.endsAt,
-      rewards: (season.rewards || rewardsFor(config)).map(reward => publicSeasonReward(user, season, reward, config)),
+      rewards: (season.rewards || rewardsFor(config)).map(reward => publicSeasonReward(competitive, reward)),
     },
   };
 }
@@ -274,11 +309,11 @@ export function previewRankedDelta({ mmr, opponentMmrs = [], playerCount = 2, pl
 }
 
 export function applyRankedMatchResult(user, match, season = normalizeRankedSeason(), now = Date.now(), config = null) {
-  const before = normalizeCompetitiveState(user, season, config);
+  const playerCount = normalizeRankedPlayerCount(match.playerCount);
+  const before = normalizeCompetitiveState(user, season, config, playerCount);
   const mmrBefore = before.mmr;
   const leagueBefore = leagueForMmr(mmrBefore, config);
   const placement = Number(match.placement) || 1;
-  const playerCount = Math.max(2, Math.min(4, safeInteger(match.playerCount, 2)));
   const delta = previewRankedDelta({
     mmr: mmrBefore,
     opponentMmrs: match.opponentMmrs || [],
@@ -294,7 +329,7 @@ export function applyRankedMatchResult(user, match, season = normalizeRankedSeas
   const won = placement === 1;
   const seasonBestMmr = Math.max(before.seasonBestMmr, mmrAfter);
 
-  user.competitive = {
+  const next = {
     ...before,
     mmr: mmrAfter,
     league: leagueAfter,
@@ -319,9 +354,13 @@ export function applyRankedMatchResult(user, match, season = normalizeRankedSeas
       leagueAfter,
     }, ...before.matchHistory].slice(0, 25),
   };
+  seedCompetitiveMap(user, season, config);
+  user.competitiveByPlayers[String(playerCount)] = next;
+  user.competitive = user.competitiveByPlayers['2'];
 
   return {
     matchType: 'ranked',
+    playerCount,
     seasonId: season.id,
     mmrBefore,
     mmrAfter,
@@ -337,20 +376,23 @@ export function applyRankedMatchResult(user, match, season = normalizeRankedSeas
   };
 }
 
-export function claimSeasonRewards(user, season = normalizeRankedSeason(), config = null) {
-  normalizeCompetitiveState(user, season, config);
+export function claimSeasonRewards(user, season = normalizeRankedSeason(), config = null, playerCount = 2) {
+  const count = normalizeRankedPlayerCount(playerCount);
+  const competitive = normalizeCompetitiveState(user, season, config, count);
   const granted = [];
   for (const reward of season.rewards || rewardsFor(config)) {
-    if (user.competitive.seasonBestMmr < reward.minMmr) continue;
-    if (user.competitive.claimedSeasonRewards.includes(reward.id)) continue;
-    user.competitive.claimedSeasonRewards.push(reward.id);
+    if (competitive.seasonBestMmr < reward.minMmr) continue;
+    if (competitive.claimedSeasonRewards.includes(reward.id)) continue;
+    competitive.claimedSeasonRewards.push(reward.id);
     granted.push({
-      ...publicSeasonReward(user, season, reward, config),
+      ...publicSeasonReward(competitive, reward),
       shopUnlock: true,
     });
   }
+  user.competitiveByPlayers[String(count)] = competitive;
+  user.competitive = user.competitiveByPlayers['2'];
   return {
     granted,
-    competitive: publicCompetitiveState(user, season, config),
+    competitive: publicCompetitiveState(user, season, config, count),
   };
 }

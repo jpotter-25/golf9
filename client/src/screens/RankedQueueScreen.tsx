@@ -13,7 +13,8 @@ import { ActionButton, PremiumPanel, ProgressBar, ScreenHeader, ScreenShell, Sta
 type Props = NativeStackScreenProps<RootStackParamList, 'RankedQueue'>;
 
 export default function RankedQueueScreen({ route, navigation }: Props) {
-  const { players, rounds } = route.params;
+  const { players } = route.params;
+  const rounds = 9;
   const { token, user, refreshProfile } = useAuth();
   const [competitive, setCompetitive] = useState<api.CompetitiveState | null>(user?.competitive ?? null);
   const [queue, setQueue] = useState<api.RankedQueueStatus | null>(null);
@@ -40,7 +41,7 @@ export default function RankedQueueScreen({ route, navigation }: Props) {
       }
     };
 
-    api.joinRankedQueue(token, players, rounds)
+    api.joinRankedQueue(token, players)
       .then(handle)
       .catch(error => {
         Alert.alert('Ranked queue failed', error instanceof Error ? error.message : 'Try again.');
@@ -58,7 +59,7 @@ export default function RankedQueueScreen({ route, navigation }: Props) {
       clearInterval(interval);
       if (!matchedRef.current) api.cancelRankedQueue(token).catch(() => {});
     };
-  }, [navigation, players, rounds, token]);
+  }, [navigation, players, token]);
 
   const cancel = async () => {
     if (!token) return;
@@ -103,8 +104,8 @@ export default function RankedQueueScreen({ route, navigation }: Props) {
     <ScreenShell scroll centered>
       <ScreenHeader
         eyebrow="Ranked Match"
-        title={league}
-        subtitle={`${mmr} MMR - ${players} players - ${rounds} rounds`}
+        title={`${players}-Player Ranked`}
+        subtitle={`${league} - ${mmr} MMR - always 9 rounds`}
         right={<StatusBadge label={queue?.matchedRoomCode ? 'FOUND' : 'SEARCHING'} tone={queue?.matchedRoomCode ? 'gold' : 'sky'} />}
       />
 
@@ -120,7 +121,7 @@ export default function RankedQueueScreen({ route, navigation }: Props) {
       </PremiumPanel>
 
       <PremiumPanel>
-        <MetricRow Icon={Users} label="Queue" value={`${players} players - ${rounds} rounds`} />
+        <MetricRow Icon={Users} label="Queue" value={`${players} players - 9 rounds`} />
         <MetricRow Icon={Trophy} label="Entry" value="Free ladder match" />
         <MetricRow Icon={Radar} label="Search" value={`+/- ${queue?.searchRange ?? 100} MMR`} />
         <MetricRow Icon={Sparkles} label="Waiting" value={`${waitedSeconds}s`} />

@@ -1,56 +1,85 @@
 // client/src/screens/ProfileScreen.tsx
-// Purpose: Player profile hub for progression, stats, achievements, and rewards.
+// Purpose: Tabbed player profile hub for progression, results, cosmetics, and social.
 
-import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Alert } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ChevronDown, ChevronRight } from 'lucide-react-native';
+import { Gift, MessageCircle, Pencil, ShoppingBag, Trophy, Users } from 'lucide-react-native';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
-import { getAvatarFrameVisual, getCardBackVisual, getTableThemeVisual } from '../theme/cosmetics';
-import { ScreenHeader, ScreenShell, StatusBadge } from '../ui';
+import { ActionButton, PremiumPanel, ProgressBar, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Profile'>;
+type ProfileTab = 'stats' | 'matches' | 'avatar' | 'cosmetics' | 'social';
+type MatchFilter = 'all' | 'online' | 'ranked' | 'wager' | 'solo' | 'passplay';
+
+const TABS: Array<{ key: ProfileTab; label: string }> = [
+  { key: 'stats', label: 'Stats' },
+  { key: 'matches', label: 'Matches' },
+  { key: 'avatar', label: 'Avatar' },
+  { key: 'cosmetics', label: 'Cosmetics' },
+  { key: 'social', label: 'Social' },
+];
+
+const MATCH_FILTERS: Array<{ key: MatchFilter; label: string }> = [
+  { key: 'all', label: 'All' },
+  { key: 'online', label: 'Online' },
+  { key: 'ranked', label: 'Ranked' },
+  { key: 'wager', label: 'Wager' },
+  { key: 'solo', label: 'Solo' },
+  { key: 'passplay', label: 'Pass' },
+];
 
 const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const { token, user, signOut, refreshProfile } = useAuth();
+  const [tab, setTab] = useState<ProfileTab>('stats');
+  const [matchFilter, setMatchFilter] = useState<MatchFilter>('all');
   const [results, setResults] = useState<api.GameResult[]>([]);
   const [cosmetics, setCosmetics] = useState<api.CosmeticItem[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [openLockerKeys, setOpenLockerKeys] = useState<string[]>([]);
 
   useFocusEffect(useCallback(() => {
     refreshProfile().catch(() => {});
     if (token) {
-      api.myResults(token)
-        .then(response => setResults(response.results.slice(0, 5)))
-        .catch(() => setResults([]));
-      api.cosmeticCatalog(token)
-        .then(response => setCosmetics(response.cosmetics))
-        .catch(() => setCosmetics([]));
+      api.myResults(token).then(response => setResults(response.results)).catch(() => setResults([]));
+      api.cosmeticCatalog(token).then(response => setCosmetics(response.cosmetics)).catch(() => setCosmetics([]));
     }
   }, [refreshProfile, token]));
 
   const progression = user?.progression;
-  const progressPercent = Math.max(4, Math.min(100, Math.round((progression?.levelProgress ?? 0) * 100)));
-  const unlockedAchievements = user?.achievements.filter(item => item.unlockedAt).slice(0, 4) ?? [];
-  const lockedAchievements = user?.achievements.filter(item => !item.unlockedAt).slice(0, 3) ?? [];
+  const winRate = user?.statistics.gamesPlayed
+    ? Math.round((user.statistics.wins / user.statistics.gamesPlayed) * 100)
+    : 0;
+  const filteredResults = useMemo(() => results.filter(result => {
+    if (matchFilter === 'all') return true;
+    if (matchFilter === 'online') return result.mode === 'online' && result.matchType !== 'ranked' && result.matchType !== 'wager';
+    if (matchFilter === 'passplay') return result.mode === 'passplay';
+    return result.matchType === matchFilter || result.mode === matchFilter;
+  }), [matchFilter, results]);
+  const ownedCosmetics = useMemo(() => sortCosmetics(cosmetics.filter(item => item.owned)), [cosmetics]);
+  const groupedCosmetics = useMemo(() => groupCosmeticsByType(ownedCosmetics), [ownedCosmetics]);
+  const dailyBonus = user?.currency.dailyBonus ?? null;
   const dailyChallenges = user?.challenges?.daily?.items ?? [];
   const weeklyChallenges = user?.challenges?.weekly?.items ?? [];
-  const avatarFrame = getAvatarFrameVisual(user?.inventory.equipped.avatarFrame);
-  const competitive = user?.competitive;
-  const dailyBonus = user?.currency.dailyBonus ?? null;
-  const ownedCosmetics = sortCosmetics(cosmetics.filter(item => item.owned));
-  const lockerGroups = groupCosmeticsByType(ownedCosmetics);
 
-  const reloadProfileBits = async () => {
+  const reloadBits = async () => {
     await refreshProfile().catch(() => {});
-    if (token) {
-      api.cosmeticCatalog(token)
-        .then(response => setCosmetics(response.cosmetics))
-        .catch(() => {});
+    if (token) api.cosmeticCatalog(token).then(response => setCosmetics(response.cosmetics)).catch(() => {});
+  };
+
+  const onClaimDailyBonus = async () => {
+    if (!token || busyId || !dailyBonus?.canClaim) return;
+    setBusyId('daily-bonus');
+    try {
+      const response = await api.claimDailyBonus(token);
+      await reloadBits();
+      Alert.alert('Daily Table Bonus', `+${response.reward} coins added to your stack.`);
+    } catch (error) {
+      Alert.alert('Bonus unavailable', error instanceof Error ? error.message : 'Try again later.');
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -59,7 +88,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
     setBusyId(challengeId);
     try {
       const response = await api.claimChallenge(token, challengeId);
-      await reloadProfileBits();
+      await reloadBits();
       Alert.alert('Reward claimed', `+${response.progression.xpGained} XP\n+${response.progression.coinsGained} coins`);
     } catch (error) {
       Alert.alert('Claim failed', error instanceof Error ? error.message : 'Try again.');
@@ -82,197 +111,160 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
     }
   };
 
-  const onClaimDailyBonus = async () => {
-    if (!token || busyId || !dailyBonus?.canClaim) return;
-    setBusyId('daily-bonus');
-    try {
-      const response = await api.claimDailyBonus(token);
-      await reloadProfileBits();
-      Alert.alert('Daily Table Bonus', `+${response.reward} coins added to your stack.`);
-    } catch (error) {
-      Alert.alert('Bonus unavailable', error instanceof Error ? error.message : 'Try again later.');
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const toggleLockerCategory = (categoryKey: string) => {
-    setOpenLockerKeys(current => (
-      current.includes(categoryKey)
-        ? current.filter(key => key !== categoryKey)
-        : [...current, categoryKey]
-    ));
-  };
-
   return (
     <ScreenShell scroll>
       <ScreenHeader
-        eyebrow="Player Hub"
+        eyebrow="Player Profile"
         title={user?.displayName ?? 'Player'}
-        subtitle="Progression, ranked status, achievements, owned gear, and recent matches."
+        subtitle="Stats, match history, avatar style, cosmetics, and social."
         right={<StatusBadge label={`Lv ${progression?.level ?? 1}`} tone="gold" />}
       />
 
-      <View style={styles.hero}>
-        <View style={[styles.avatar, { borderColor: avatarFrame.borderColor, backgroundColor: avatarFrame.backgroundColor }]}>
+      <PremiumPanel tone="felt" style={styles.hero}>
+        <View style={styles.avatar}>
           <Text style={styles.avatarText}>{user?.avatarInitial ?? '?'}</Text>
         </View>
         <View style={styles.heroCopy}>
           <Text style={styles.name} numberOfLines={1}>{user?.displayName ?? 'Player'}</Text>
-          <Text style={styles.level}>Level {progression?.level ?? 1}</Text>
-          {user?.club ? (
-            <Text style={styles.clubLine} numberOfLines={1}>[{user.club.tag}] {user.club.name}</Text>
-          ) : null}
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
-          </View>
-          <Text style={styles.progressText}>
-            {progression?.currentLevelXp ?? 0} / {progression?.nextLevelXp ?? 1000} XP
-          </Text>
+          <Text style={styles.meta}>Level {progression?.level ?? 1} - {user?.competitive.league.name ?? 'Silver III'}</Text>
+          <ProgressBar value={progression?.levelProgress ?? 0} />
+          <Text style={styles.progressText}>{progression?.currentLevelXp ?? 0} / {progression?.nextLevelXp ?? 1000} XP</Text>
         </View>
+      </PremiumPanel>
+
+      <View style={styles.tabRow}>
+        {TABS.map(item => (
+          <Pressable key={item.key} style={[styles.tab, tab === item.key && styles.tabActive]} onPress={() => setTab(item.key)}>
+            <Text style={[styles.tabText, tab === item.key && styles.tabTextActive]}>{item.label}</Text>
+          </Pressable>
+        ))}
       </View>
 
-      <View style={styles.statGrid}>
-        <Stat label="Coins" value={String(user?.currency.coins ?? 0)} tone="gold" />
-        <Stat label="Games" value={String(user?.statistics.gamesPlayed ?? 0)} />
-        <Stat label="Wins" value={String(user?.statistics.wins ?? 0)} />
-        <Stat label="Best Total" value={formatNullable(user?.statistics.bestTotal)} />
-        <Stat label="Best Round" value={formatNullable(user?.statistics.bestRound)} />
-        <Stat label="Clears" value={String(user?.statistics.columnClears ?? 0)} />
-      </View>
-
-      <SectionTitle title="Economy" />
-      <View style={styles.economyCard}>
-        <View style={styles.economyHeader}>
-          <View>
-            <Text style={styles.economyTitle}>Build Your Stack</Text>
-            <Text style={styles.economyText}>Claim the daily bonus, play Free Play, and finish challenges to earn coins for wagers and cosmetics.</Text>
+      {tab === 'stats' ? (
+        <>
+          <View style={styles.statGrid}>
+            <Stat label="Coins" value={String(user?.currency.coins ?? 0)} tone="gold" />
+            <Stat label="Games" value={String(user?.statistics.gamesPlayed ?? 0)} />
+            <Stat label="Wins" value={String(user?.statistics.wins ?? 0)} />
+            <Stat label="Win Rate" value={`${winRate}%`} />
+            <Stat label="Best Total" value={formatNullable(user?.statistics.bestTotal)} />
+            <Stat label="Best Round" value={formatNullable(user?.statistics.bestRound)} />
+            <Stat label="Clears" value={String(user?.statistics.columnClears ?? 0)} />
+            <Stat label="Lifetime Coins" value={String(user?.currency.lifetimeCoins ?? 0)} tone="gold" />
           </View>
-          <Text style={styles.economyCoins}>{user?.currency.coins ?? 0}</Text>
-        </View>
-        <View style={styles.economyRows}>
-          <Stat label="Lifetime" value={String(user?.currency.lifetimeCoins ?? 0)} tone="gold" />
-          <Stat label="Daily Bonus" value={dailyBonus?.canClaim ? `+${dailyBonus.reward}` : 'Claimed'} />
-          <Stat label="Streak" value={`${dailyBonus?.streak ?? 0}d`} />
-        </View>
-        <Pressable
-          style={[styles.claimButton, (!dailyBonus?.canClaim || busyId === 'daily-bonus') && styles.smallButtonDisabled]}
-          disabled={!dailyBonus?.canClaim || busyId === 'daily-bonus'}
-          onPress={onClaimDailyBonus}
-        >
-          <Text style={styles.claimButtonText}>
-            {dailyBonus?.canClaim ? `Claim ${dailyBonus.reward} Coins` : 'Daily Bonus Claimed'}
-          </Text>
-        </Pressable>
-      </View>
 
-      <SectionTitle title="Ranked" />
-      <View style={styles.rankedCard}>
-        <View style={styles.rankedHeader}>
-          <View>
-            <Text style={styles.rankedLeague}>{competitive?.league.name ?? 'Silver III'}</Text>
-            <Text style={styles.rankedMeta}>{competitive?.mmr ?? 1000} MMR</Text>
-          </View>
-          <View style={styles.rankedBadge}>
-            <Text style={styles.rankedBadgeText}>{competitive?.placementComplete ? 'RANKED' : 'PLACEMENT'}</Text>
-          </View>
-        </View>
-        <View style={styles.rankedStats}>
-          <Stat label="Ranked Games" value={String(competitive?.rankedGames ?? 0)} />
-          <Stat label="Ranked Wins" value={String(competitive?.wins ?? 0)} />
-          <Stat label="Season Best" value={competitive?.seasonBestLeague.name ?? 'Silver III'} />
-        </View>
-        <Text style={styles.rankedMeta}>
-          {competitive?.placementComplete
-            ? `${competitive?.season.name ?? 'Season 1'} shop unlocks use your season best. Buy ranked cosmetics in the Shop.`
-            : `${competitive?.placementsRemaining ?? 5} placement match${(competitive?.placementsRemaining ?? 5) === 1 ? '' : 'es'} remaining.`}
-        </Text>
-      </View>
+          <PremiumPanel>
+            <View style={styles.cardHeader}>
+              <View>
+                <Text style={styles.sectionTitle}>Ranked Ladders</Text>
+                <Text style={styles.sectionMeta}>Separate ratings for 2, 3, and 4 player ranked.</Text>
+              </View>
+              <Trophy size={24} color={ui.palette.gold} strokeWidth={2.6} />
+            </View>
+            <View style={styles.ladderRow}>
+              {[2, 3, 4].map(count => {
+                const ladder = user?.competitiveByPlayers?.[String(count) as '2' | '3' | '4'];
+                return (
+                  <View key={count} style={styles.ladderCard}>
+                    <Text style={styles.ladderCount}>{count}P</Text>
+                    <Text style={styles.ladderMmr}>{ladder?.mmr ?? 1000}</Text>
+                    <Text style={styles.ladderLeague} numberOfLines={1}>{ladder?.league.name ?? 'Silver III'}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          </PremiumPanel>
 
-      <SectionTitle title="Achievements" />
-      {unlockedAchievements.length ? (
-        unlockedAchievements.map(item => <AchievementRow key={item.id} achievement={item} />)
-      ) : (
-        <Text style={styles.emptyText}>Play a match to unlock your first achievement.</Text>
-      )}
-      {lockedAchievements.length ? (
-        <View style={styles.lockedBlock}>
-          {lockedAchievements.map(item => (
-            <Text key={item.id} style={styles.lockedText}>{item.name} - Locked</Text>
-          ))}
-        </View>
+          <PremiumPanel>
+            <View style={styles.cardHeader}>
+              <View>
+                <Text style={styles.sectionTitle}>Daily Bonus</Text>
+                <Text style={styles.sectionMeta}>Claim once per day to rebuild your stack.</Text>
+              </View>
+              <Gift size={24} color={ui.palette.gold} strokeWidth={2.6} />
+            </View>
+            <ActionButton
+              label={dailyBonus?.canClaim ? `Claim ${dailyBonus.reward} Coins` : 'Daily Bonus Claimed'}
+              Icon={Gift}
+              tone="gold"
+              disabled={!dailyBonus?.canClaim || busyId === 'daily-bonus'}
+              onPress={onClaimDailyBonus}
+            />
+          </PremiumPanel>
+
+          <ChallengeBlock title="Daily Challenges" items={dailyChallenges} busyId={busyId} onClaim={onClaimChallenge} />
+          <ChallengeBlock title="Weekly Challenges" items={weeklyChallenges} busyId={busyId} onClaim={onClaimChallenge} />
+        </>
       ) : null}
 
-      <SectionTitle title="Daily Challenges" />
-      {dailyChallenges.map(item => (
-        <ChallengeRow
-          key={item.id}
-          challenge={item}
-          busy={busyId === item.id}
-          onClaim={() => onClaimChallenge(item.id)}
-        />
-      ))}
-
-      <SectionTitle title="Weekly Challenges" />
-      {weeklyChallenges.map(item => (
-        <ChallengeRow
-          key={item.id}
-          challenge={item}
-          busy={busyId === item.id}
-          onClaim={() => onClaimChallenge(item.id)}
-        />
-      ))}
-
-      <SectionTitle title="Recent Matches" />
-      {results.length ? (
-        results.map(result => <ResultRow key={result.resultId} result={result} userId={user?.userId} />)
-      ) : (
-        <Text style={styles.emptyText}>Completed matches will appear here.</Text>
-      )}
-
-      <SectionTitle title="Collection" />
-      <View style={styles.collectionRow}>
-        <CollectionItem label="Card Back" value={user?.inventory.equipped.cardBack ?? 'classic-card-back'} />
-        <CollectionItem label="Avatar Frame" value={user?.inventory.equipped.avatarFrame ?? 'rookie-avatar-frame'} />
-        <CollectionItem label="Table" value={user?.inventory.equipped.tableTheme ?? 'classic-table-theme'} />
-        <CollectionItem label="Title" value={user?.inventory.equipped.title ?? 'rookie-title'} />
-      </View>
-
-      <SectionTitle title="Locker" />
-      {lockerGroups.length ? (
-        lockerGroups.map(group => (
-          <View key={group.key} style={styles.lockerCategory}>
-            <LockerHeader
-              title={group.title}
-              count={group.items.length}
-              equipped={group.equipped}
-              expanded={openLockerKeys.includes(group.key)}
-              onPress={() => toggleLockerCategory(group.key)}
-            />
-            {openLockerKeys.includes(group.key) ? (
-              <View style={styles.lockerTileGrid}>
-                {group.items.map(item => (
-                  <CosmeticTile
-                    key={item.id}
-                    item={item}
-                    busy={busyId === item.id}
-                    onPress={() => onCosmeticPress(item)}
-                  />
-                ))}
-              </View>
-            ) : null}
+      {tab === 'matches' ? (
+        <>
+          <View style={styles.filterRow}>
+            {MATCH_FILTERS.map(item => (
+              <Pressable key={item.key} style={[styles.filterChip, matchFilter === item.key && styles.filterChipActive]} onPress={() => setMatchFilter(item.key)}>
+                <Text style={[styles.filterText, matchFilter === item.key && styles.filterTextActive]}>{item.label}</Text>
+              </Pressable>
+            ))}
           </View>
-        ))
-      ) : (
-        <Text style={styles.emptyText}>Owned cosmetics will appear here. Visit the Shop to buy new looks.</Text>
-      )}
+          {filteredResults.length ? (
+            filteredResults.map(result => <ResultRow key={result.resultId} result={result} userId={user?.userId} />)
+          ) : (
+            <Text style={styles.emptyText}>No matches in this filter yet.</Text>
+          )}
+        </>
+      ) : null}
 
-      <Pressable style={styles.primaryButton} onPress={() => navigation.goBack()}>
-        <Text style={styles.primaryButtonText}>Back to Lobby</Text>
-      </Pressable>
-      <Pressable style={styles.dangerButton} onPress={signOut}>
-        <Text style={styles.dangerButtonText}>Log Out</Text>
-      </Pressable>
+      {tab === 'avatar' ? (
+        <PremiumPanel>
+          <View style={styles.avatarLarge}>
+            <Text style={styles.avatarLargeText}>{user?.avatarInitial ?? '?'}</Text>
+          </View>
+          <Text style={styles.avatarName}>{user?.displayName ?? 'Player'}</Text>
+          <View style={styles.collectionRow}>
+            <CollectionItem label="Title" value={user?.inventory.equipped.title ?? 'rookie-title'} />
+            <CollectionItem label="Avatar Frame" value={user?.inventory.equipped.avatarFrame ?? 'rookie-avatar-frame'} />
+            <CollectionItem label="Table" value={user?.inventory.equipped.tableTheme ?? 'classic-table-theme'} />
+          </View>
+          <Text style={styles.emptyText}>Hats and avatar accessories can fit here in a future cosmetics update.</Text>
+          <ActionButton label="Edit Cosmetics" Icon={Pencil} onPress={() => setTab('cosmetics')} />
+        </PremiumPanel>
+      ) : null}
+
+      {tab === 'cosmetics' ? (
+        <>
+          <ActionButton label="Open Shop" Icon={ShoppingBag} tone="gold" onPress={() => navigation.navigate('Shop')} style={styles.shopButton} />
+          {groupedCosmetics.length ? (
+            groupedCosmetics.map(group => (
+              <PremiumPanel key={group.key}>
+                <Text style={styles.sectionTitle}>{group.title}</Text>
+                <Text style={styles.sectionMeta}>Equipped: {group.equipped}</Text>
+                <View style={styles.lockerGrid}>
+                  {group.items.map(item => (
+                    <CosmeticTile key={item.id} item={item} busy={busyId === item.id} onPress={() => onCosmeticPress(item)} />
+                  ))}
+                </View>
+              </PremiumPanel>
+            ))
+          ) : (
+            <Text style={styles.emptyText}>Owned cosmetics will appear here. Visit the Shop to buy new looks.</Text>
+          )}
+        </>
+      ) : null}
+
+      {tab === 'social' ? (
+        <PremiumPanel>
+          <View style={styles.socialRow}>
+            <View style={styles.socialIcon}><MessageCircle size={24} color={ui.palette.emerald} strokeWidth={2.7} /></View>
+            <View style={styles.socialCopy}>
+              <Text style={styles.sectionTitle}>Friends & Invites</Text>
+              <Text style={styles.sectionMeta}>Find players, accept invites, and jump into social rooms.</Text>
+            </View>
+          </View>
+          <ActionButton label="Open Social" Icon={Users} onPress={() => navigation.navigate('Social')} />
+          <ActionButton label={user?.club ? 'Open Club' : 'Find A Club'} Icon={Trophy} tone="secondary" onPress={() => navigation.navigate('Club')} style={styles.socialButton} />
+          <ActionButton label="Log Out" tone="danger" onPress={signOut} style={styles.socialButton} />
+        </PremiumPanel>
+      ) : null}
     </ScreenShell>
   );
 };
@@ -286,54 +278,18 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'go
   );
 }
 
-function SectionTitle({ title }: { title: string }) {
-  return <Text style={styles.sectionTitle}>{title}</Text>;
-}
-
-function LockerHeader({
-  title,
-  count,
-  equipped,
-  expanded,
-  onPress,
-}: {
-  title: string;
-  count: number;
-  equipped: string;
-  expanded: boolean;
-  onPress: () => void;
-}) {
-  const Chevron = expanded ? ChevronDown : ChevronRight;
+function ChallengeBlock({ title, items, busyId, onClaim }: { title: string; items: api.Challenge[]; busyId: string | null; onClaim: (id: string) => void }) {
+  if (!items.length) return null;
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.lockerHeader, pressed && styles.lockerHeaderPressed]}>
-      <View style={styles.lockerHeaderCopy}>
-        <Text style={styles.lockerTitle}>{title}</Text>
-        <Text style={styles.lockerSubtitle} numberOfLines={1}>Equipped: {equipped}</Text>
-      </View>
-      <View style={styles.lockerHeaderMeta}>
-        <StatusBadge label={`${count}`} tone="sky" />
-        <Chevron size={20} color="#9BA3C7" strokeWidth={2.8} />
-      </View>
-    </Pressable>
-  );
-}
-
-function AchievementRow({ achievement }: { achievement: api.Achievement }) {
-  return (
-    <View style={styles.rowItem}>
-      <View style={styles.rowIcon}><Text style={styles.rowIconText}>XP</Text></View>
-      <View style={styles.rowCopy}>
-        <Text style={styles.rowTitle}>{achievement.name}</Text>
-        <Text style={styles.rowMeta}>{achievement.description}</Text>
-      </View>
-      <Text style={styles.rowReward}>+{achievement.reward.coins}</Text>
-    </View>
+    <PremiumPanel>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {items.map(item => <ChallengeRow key={item.id} challenge={item} busy={busyId === item.id} onClaim={() => onClaim(item.id)} />)}
+    </PremiumPanel>
   );
 }
 
 function ChallengeRow({ challenge, busy, onClaim }: { challenge: api.Challenge; busy: boolean; onClaim: () => void }) {
   const ratio = challenge.target > 0 ? Math.min(1, challenge.progress / challenge.target) : 0;
-  const percent = Math.max(4, Math.round(ratio * 100));
   const complete = !!challenge.completedAt;
   const claimed = !!challenge.claimedAt;
   return (
@@ -341,55 +297,58 @@ function ChallengeRow({ challenge, busy, onClaim }: { challenge: api.Challenge; 
       <View style={styles.rowCopy}>
         <Text style={styles.rowTitle}>{challenge.title}</Text>
         <Text style={styles.rowMeta}>{challenge.description}</Text>
-        <View style={styles.challengeProgressTrack}>
-          <View style={[styles.challengeProgressFill, complete && styles.challengeProgressComplete, { width: `${percent}%` }]} />
-        </View>
-        <Text style={styles.challengeMeta}>
-          {challenge.progress}/{challenge.target}  +{challenge.reward.xp} XP  +{challenge.reward.coins} coins
-        </Text>
+        <ProgressBar value={ratio} color={complete ? ui.palette.emerald : ui.palette.sky} />
+        <Text style={styles.challengeMeta}>{challenge.progress}/{challenge.target}  +{challenge.reward.xp} XP  +{challenge.reward.coins} coins</Text>
       </View>
-      <Pressable
-        style={[styles.smallButton, (!challenge.canClaim || busy) && styles.smallButtonDisabled]}
-        disabled={!challenge.canClaim || busy}
-        onPress={onClaim}
-      >
+      <Pressable style={[styles.smallButton, (!challenge.canClaim || busy) && styles.disabled]} disabled={!challenge.canClaim || busy} onPress={onClaim}>
         <Text style={styles.smallButtonText}>{claimed ? 'Done' : busy ? '...' : challenge.canClaim ? 'Claim' : 'Open'}</Text>
       </Pressable>
     </View>
   );
 }
 
-function CosmeticTile({ item, busy, onPress }: { item: api.CosmeticItem; busy: boolean; onPress: () => void }) {
-  const label = item.equipped ? 'Equipped' : 'Equip';
-  const badgeLabel = item.type === 'cardBack' ? 'CB' : item.type === 'avatarFrame' ? 'AF' : item.type === 'tableTheme' ? 'TB' : 'T';
-  const cardBack = item.type === 'cardBack' ? getCardBackVisual(item.id) : null;
-  const avatarFrame = item.type === 'avatarFrame' ? getAvatarFrameVisual(item.id) : null;
-  const tableTheme = item.type === 'tableTheme' ? getTableThemeVisual(item.id) : null;
-  const badgeStyle = cardBack
-    ? { backgroundColor: cardBack.backgroundColor, borderColor: cardBack.borderColor }
-    : avatarFrame
-      ? { backgroundColor: avatarFrame.backgroundColor, borderColor: avatarFrame.borderColor }
-      : tableTheme
-        ? { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.accentColor }
-        : null;
+function ResultRow({ result, userId }: { result: api.GameResult; userId?: string }) {
+  const mine = result.players.find(player => player.userId === userId) ?? result.players[0];
+  const mode = result.matchType === 'ranked' ? 'Ranked' : result.matchType === 'wager' ? 'Wager' : result.mode === 'solo' ? 'Solo' : result.mode === 'passplay' ? 'Pass & Play' : 'Online';
+  const reward = mine?.economy
+    ? `${mine.economy.net >= 0 ? '+' : ''}${mine.economy.net} coins`
+    : mine?.ranked
+      ? `${mine.ranked.mmrDelta > 0 ? '+' : ''}${mine.ranked.mmrDelta} MMR`
+      : `+${mine?.progression?.xpGained ?? 0} XP`;
   return (
-    <Pressable
-      style={[styles.lockerTile, item.equipped && styles.lockerTileEquipped, busy && styles.smallButtonDisabled]}
-      disabled={item.equipped || busy}
-      onPress={onPress}
-    >
-      <View style={styles.lockerTileTop}>
-        <View style={[styles.cosmeticBadge, badgeStyle]}>
-          <Text style={styles.cosmeticBadgeText}>{badgeLabel}</Text>
-        </View>
+    <View style={styles.resultRow}>
+      <View style={[styles.resultIcon, mine?.won && styles.winIcon]}>
+        <Text style={styles.resultIconText}>{mine?.won ? 'W' : 'G'}</Text>
+      </View>
+      <View style={styles.rowCopy}>
+        <Text style={styles.rowTitle}>{mode} - {mine?.won ? 'Win' : 'Played'}</Text>
+        <Text style={styles.rowMeta}>{formatDate(result.completedAt)} - Total {mine?.total ?? 0} - {result.players.length} players</Text>
+      </View>
+      <Text style={styles.rowReward}>{reward}</Text>
+    </View>
+  );
+}
+
+function CosmeticTile({ item, busy, onPress }: { item: api.CosmeticItem; busy: boolean; onPress: () => void }) {
+  return (
+    <Pressable style={[styles.cosmeticTile, item.equipped && styles.cosmeticTileEquipped, busy && styles.disabled]} disabled={item.equipped || busy} onPress={onPress}>
+      <View style={styles.cosmeticTileTop}>
+        <Text style={styles.cosmeticType}>{cosmeticTypeLabel(item.type)}</Text>
         <StatusBadge label={item.equipped ? 'ON' : 'OWNED'} tone={item.equipped ? 'emerald' : 'muted'} />
       </View>
-      <Text style={styles.lockerTileTitle} numberOfLines={1}>{item.name}</Text>
-      <Text style={styles.lockerTileText} numberOfLines={2}>{item.description}</Text>
-      <View style={[styles.lockerTileAction, item.equipped && styles.lockerTileActionEquipped]}>
-        <Text style={styles.lockerTileActionText}>{busy ? '...' : label}</Text>
-      </View>
+      <Text style={styles.cosmeticName} numberOfLines={1}>{item.name}</Text>
+      <Text style={styles.cosmeticMeta} numberOfLines={2}>{item.description}</Text>
+      <Text style={styles.cosmeticAction}>{item.equipped ? 'Equipped' : busy ? '...' : 'Equip'}</Text>
     </Pressable>
+  );
+}
+
+function CollectionItem({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.collectionItem}>
+      <Text style={styles.collectionLabel}>{label}</Text>
+      <Text style={styles.collectionValue} numberOfLines={1}>{value.replace(/-/g, ' ')}</Text>
+    </View>
   );
 }
 
@@ -404,66 +363,21 @@ function sortCosmetics(items: api.CosmeticItem[]) {
 
 function groupCosmeticsByType(items: api.CosmeticItem[]) {
   const groups = [
-    {
-      key: 'cardBack',
-      title: 'Card Backs',
-      subtitle: 'Choose the one card-back design shown in games.',
-      items: items.filter(item => item.type === 'cardBack'),
-    },
-    {
-      key: 'avatarFrame',
-      title: 'Avatar Frames',
-      subtitle: 'Choose the one frame around your player avatar.',
-      items: items.filter(item => item.type === 'avatarFrame'),
-    },
-    {
-      key: 'title',
-      title: 'Titles',
-      subtitle: 'Choose the one title shown with your profile.',
-      items: items.filter(item => item.type === 'title'),
-    },
-    {
-      key: 'tableTheme',
-      title: 'Table Themes',
-      subtitle: 'Choose the one table style used on your match screen.',
-      items: items.filter(item => item.type === 'tableTheme'),
-    },
+    { key: 'cardBack', title: 'Card Backs', items: items.filter(item => item.type === 'cardBack') },
+    { key: 'avatarFrame', title: 'Avatar Frames', items: items.filter(item => item.type === 'avatarFrame') },
+    { key: 'title', title: 'Titles', items: items.filter(item => item.type === 'title') },
+    { key: 'tableTheme', title: 'Table Themes', items: items.filter(item => item.type === 'tableTheme') },
   ];
   return groups
-    .map(group => ({
-      ...group,
-      equipped: group.items.find(item => item.equipped)?.name ?? 'None selected',
-    }))
+    .map(group => ({ ...group, equipped: group.items.find(item => item.equipped)?.name ?? 'None selected' }))
     .filter(group => group.items.length);
 }
 
-function ResultRow({ result, userId }: { result: api.GameResult; userId?: string }) {
-  const mine = result.players.find(player => player.userId === userId) ?? result.players[0];
-  const mode = result.matchType === 'ranked' ? 'Ranked' : result.matchType === 'wager' ? 'Wager' : result.mode === 'solo' ? 'Solo' : result.mode === 'passplay' ? 'Pass & Play' : 'Online';
-  const reward = mine?.economy
-    ? `${mine.economy.net >= 0 ? '+' : ''}${mine.economy.net} coins`
-    : mine?.ranked
-      ? `${mine.ranked.mmrDelta > 0 ? '+' : ''}${mine.ranked.mmrDelta} MMR`
-      : `+${mine?.progression?.xpGained ?? 0} XP`;
-  return (
-    <View style={styles.rowItem}>
-      <View style={[styles.rowIcon, mine?.won && styles.winIcon]}><Text style={styles.rowIconText}>{mine?.won ? 'W' : 'G'}</Text></View>
-      <View style={styles.rowCopy}>
-        <Text style={styles.rowTitle}>{mode} - {mine?.won ? 'Win' : 'Played'}</Text>
-        <Text style={styles.rowMeta}>{formatDate(result.completedAt)} - Total {mine?.total ?? 0}</Text>
-      </View>
-      <Text style={styles.rowReward}>{reward}</Text>
-    </View>
-  );
-}
-
-function CollectionItem({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.collectionItem}>
-      <Text style={styles.collectionLabel}>{label}</Text>
-      <Text style={styles.collectionValue} numberOfLines={1}>{value.replace(/-/g, ' ')}</Text>
-    </View>
-  );
+function cosmeticTypeLabel(type: string) {
+  if (type === 'cardBack') return 'Card';
+  if (type === 'avatarFrame') return 'Frame';
+  if (type === 'tableTheme') return 'Table';
+  return 'Title';
 }
 
 function formatNullable(value: number | null | undefined) {
@@ -477,284 +391,108 @@ function formatDate(value: number) {
 export default ProfileScreen;
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0B1023' },
-  content: { padding: 16, paddingTop: 54, paddingBottom: 34 },
-  hero: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    marginBottom: 18,
-  },
+  hero: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   avatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
+    width: 82,
+    height: 82,
+    borderRadius: 41,
     borderWidth: 3,
-    borderColor: '#52E5A7',
-    backgroundColor: '#123B32',
+    borderColor: ui.palette.emerald,
+    backgroundColor: ui.palette.feltLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: { color: '#E8ECF1', fontSize: 40, fontWeight: '900' },
+  avatarText: { color: ui.text.primary, fontSize: 38, fontWeight: '900' },
   heroCopy: { flex: 1, minWidth: 0 },
-  name: { color: '#E8ECF1', fontSize: 30, fontWeight: '900' },
-  level: { color: '#52E5A7', fontSize: 15, fontWeight: '900', marginTop: 4 },
-  clubLine: { color: '#FFCC66', fontSize: 13, fontWeight: '900', marginTop: 4 },
-  progressTrack: {
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#121737',
-    borderWidth: 1,
-    borderColor: '#2A2F57',
-    overflow: 'hidden',
-    marginTop: 10,
-  },
-  progressFill: { height: '100%', backgroundColor: '#52E5A7' },
-  progressText: { color: '#9BA3C7', fontSize: 12, fontWeight: '800', marginTop: 5 },
-  statGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 16,
-  },
-  rankedCard: {
-    backgroundColor: '#121737',
-    borderColor: '#FFCC66',
-    borderWidth: 1,
+  name: { color: ui.text.primary, fontSize: 25, fontWeight: '900' },
+  meta: { color: ui.palette.gold, fontSize: 13, fontWeight: '900', marginTop: 4, marginBottom: 9 },
+  progressText: { color: ui.text.muted, fontSize: 11, fontWeight: '800', marginTop: 5 },
+  tabRow: { flexDirection: 'row', gap: 6, marginBottom: 12 },
+  tab: {
+    flex: 1,
+    minHeight: 42,
     borderRadius: 8,
-    padding: 14,
-    marginBottom: 16,
-  },
-  economyCard: {
-    backgroundColor: '#121737',
-    borderColor: '#2A2F57',
     borderWidth: 1,
-    borderRadius: 8,
-    padding: 14,
-    marginBottom: 16,
+    borderColor: ui.border.soft,
+    backgroundColor: ui.surface.glass,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
   },
-  economyHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  economyTitle: { color: '#E8ECF1', fontSize: 20, fontWeight: '900' },
-  economyText: { color: '#9BA3C7', fontSize: 12, fontWeight: '800', lineHeight: 18, marginTop: 5 },
-  economyCoins: { color: '#FFCC66', fontSize: 30, fontWeight: '900' },
-  economyRows: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  rankedHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  rankedLeague: { color: '#FFCC66', fontSize: 24, fontWeight: '900' },
-  rankedMeta: { color: '#9BA3C7', fontSize: 12, fontWeight: '800', marginTop: 5 },
-  rankedBadge: { backgroundColor: '#FFCC66', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10 },
-  rankedBadgeText: { color: '#0B1023', fontWeight: '900', fontSize: 11 },
-  rankedStats: { flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 8 },
-  claimButton: { backgroundColor: '#FFCC66', borderRadius: 8, padding: 12, alignItems: 'center', marginTop: 12 },
-  claimButtonText: { color: '#0B1023', fontWeight: '900' },
+  tabActive: { backgroundColor: ui.palette.emerald, borderColor: ui.palette.emerald },
+  tabText: { color: ui.text.secondary, fontSize: 11, fontWeight: '900' },
+  tabTextActive: { color: ui.text.inverse },
+  statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
   stat: {
-    width: '31.5%',
-    minHeight: 76,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
-    justifyContent: 'center',
-    padding: 10,
-  },
-  statValue: { color: '#E8ECF1', fontSize: 22, fontWeight: '900' },
-  statLabel: { color: '#9BA3C7', fontSize: 11, fontWeight: '800', marginTop: 4 },
-  goldText: { color: '#FFCC66' },
-  sectionTitle: { color: '#E8ECF1', fontSize: 18, fontWeight: '900', marginTop: 10, marginBottom: 8 },
-  rowItem: {
-    minHeight: 68,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
-    padding: 10,
-    marginBottom: 8,
-  },
-  rowIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#102448',
-    borderWidth: 2,
-    borderColor: '#4DA3FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  winIcon: { backgroundColor: '#123B32', borderColor: '#52E5A7' },
-  rowIconText: { color: '#E8ECF1', fontWeight: '900', fontSize: 13 },
-  rowCopy: { flex: 1, minWidth: 0 },
-  rowTitle: { color: '#E8ECF1', fontSize: 14, fontWeight: '900' },
-  rowMeta: { color: '#9BA3C7', fontSize: 12, fontWeight: '700', marginTop: 3 },
-  rowReward: { color: '#FFCC66', fontSize: 12, fontWeight: '900' },
-  challengeItem: {
-    minHeight: 90,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
-    padding: 10,
-    marginBottom: 8,
-  },
-  challengeProgressTrack: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#0B1023',
-    overflow: 'hidden',
-    marginTop: 8,
-  },
-  challengeProgressFill: { height: '100%', backgroundColor: '#4DA3FF' },
-  challengeProgressComplete: { backgroundColor: '#52E5A7' },
-  challengeMeta: { color: '#FFCC66', fontSize: 11, fontWeight: '900', marginTop: 5 },
-  cosmeticItem: {
-    minHeight: 78,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
-    padding: 10,
-    marginBottom: 8,
-  },
-  cosmeticBadge: {
-    width: 42,
-    height: 42,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#FFCC66',
-    backgroundColor: '#2B2515',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cosmeticBadgeText: { color: '#FFCC66', fontSize: 12, fontWeight: '900' },
-  cosmeticMeta: { color: '#52E5A7', fontSize: 11, fontWeight: '900', marginTop: 4 },
-  lockerCategory: { marginBottom: 8 },
-  lockerHeader: {
-    minHeight: 52,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#3C4676',
-    backgroundColor: '#0F1530',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginBottom: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  lockerHeaderPressed: { borderColor: '#4DA3FF', backgroundColor: '#171D43' },
-  lockerHeaderCopy: { flex: 1, minWidth: 0 },
-  lockerTitle: { color: '#E8ECF1', fontSize: 16, fontWeight: '900' },
-  lockerSubtitle: { color: '#9BA3C7', fontSize: 11, fontWeight: '800', marginTop: 2, textTransform: 'capitalize' },
-  lockerHeaderMeta: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  lockerTileGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginBottom: 6,
-  },
-  lockerTile: {
-    width: '48.5%',
-    minHeight: 148,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: 'rgba(18, 23, 55, 0.88)',
-    padding: 10,
-  },
-  lockerTileEquipped: { borderColor: '#52E5A7', backgroundColor: 'rgba(18, 59, 50, 0.82)' },
-  lockerTileTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 },
-  lockerTileTitle: { color: '#E8ECF1', fontSize: 13, fontWeight: '900', marginTop: 9 },
-  lockerTileText: { color: '#9BA3C7', fontSize: 11, fontWeight: '700', lineHeight: 15, marginTop: 4 },
-  lockerTileAction: {
-    minHeight: 34,
-    borderRadius: 8,
-    backgroundColor: '#4DA3FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 'auto',
-    paddingHorizontal: 8,
-  },
-  lockerTileActionEquipped: { backgroundColor: '#52E5A7' },
-  lockerTileActionText: { color: '#0B1023', fontSize: 11, fontWeight: '900' },
-  equippedChip: {
-    maxWidth: 132,
-    minHeight: 44,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#52E5A7',
-    backgroundColor: 'rgba(82, 229, 167, 0.12)',
-    paddingHorizontal: 8,
-    justifyContent: 'center',
-  },
-  equippedLabel: { color: '#52E5A7', fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
-  equippedValue: { color: '#E8ECF1', fontSize: 11, fontWeight: '900', marginTop: 2, textTransform: 'capitalize' },
-  smallButton: {
-    minWidth: 72,
-    minHeight: 40,
-    borderRadius: 8,
-    backgroundColor: '#4DA3FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-  },
-  smallButtonEquipped: { backgroundColor: '#52E5A7' },
-  smallButtonDisabled: { opacity: 0.45 },
-  smallButtonText: { color: '#0B1023', fontSize: 12, fontWeight: '900' },
-  lockedBlock: {
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#0F1530',
-    padding: 10,
-    marginBottom: 8,
-  },
-  lockedText: { color: '#9BA3C7', fontSize: 12, fontWeight: '800', marginBottom: 4 },
-  emptyText: {
-    color: '#9BA3C7',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
-    padding: 14,
-    fontWeight: '800',
-    marginBottom: 8,
-  },
-  collectionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
-  collectionItem: {
     width: '48%',
+    minHeight: 68,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
-    padding: 12,
-  },
-  collectionLabel: { color: '#9BA3C7', fontSize: 11, fontWeight: '900' },
-  collectionValue: { color: '#E8ECF1', fontSize: 13, fontWeight: '900', marginTop: 5, textTransform: 'capitalize' },
-  primaryButton: {
-    minHeight: 48,
-    borderRadius: 8,
-    backgroundColor: '#52E5A7',
+    borderColor: ui.border.soft,
+    backgroundColor: ui.surface.glass,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 4,
+    padding: 10,
   },
-  primaryButtonText: { color: '#0B1023', fontSize: 16, fontWeight: '900' },
-  dangerButton: {
-    minHeight: 48,
+  statValue: { color: ui.text.primary, fontSize: 20, fontWeight: '900' },
+  goldText: { color: ui.palette.gold },
+  statLabel: { color: ui.text.muted, fontSize: 11, fontWeight: '900', marginTop: 4 },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 },
+  sectionTitle: { color: ui.text.primary, fontSize: 18, fontWeight: '900' },
+  sectionMeta: { color: ui.text.secondary, fontSize: 12, fontWeight: '800', lineHeight: 17, marginTop: 4 },
+  ladderRow: { flexDirection: 'row', gap: 8 },
+  ladderCard: { flex: 1, minHeight: 86, borderRadius: 8, backgroundColor: ui.surface.glass, alignItems: 'center', justifyContent: 'center', padding: 8 },
+  ladderCount: { color: ui.palette.gold, fontSize: 13, fontWeight: '900' },
+  ladderMmr: { color: ui.text.primary, fontSize: 20, fontWeight: '900', marginTop: 5 },
+  ladderLeague: { color: ui.text.muted, fontSize: 10, fontWeight: '900', marginTop: 4 },
+  challengeItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderTopWidth: 1, borderTopColor: ui.border.soft },
+  rowCopy: { flex: 1, minWidth: 0 },
+  rowTitle: { color: ui.text.primary, fontSize: 14, fontWeight: '900' },
+  rowMeta: { color: ui.text.secondary, fontSize: 12, fontWeight: '800', lineHeight: 17, marginTop: 3, marginBottom: 7 },
+  challengeMeta: { color: ui.palette.gold, fontSize: 11, fontWeight: '900', marginTop: 5 },
+  smallButton: { minWidth: 62, minHeight: 38, borderRadius: 8, backgroundColor: ui.palette.sky, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
+  smallButtonText: { color: ui.text.inverse, fontSize: 12, fontWeight: '900' },
+  disabled: { opacity: 0.45 },
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 12 },
+  filterChip: { minHeight: 36, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.glass, justifyContent: 'center', paddingHorizontal: 12 },
+  filterChipActive: { backgroundColor: ui.palette.emerald, borderColor: ui.palette.emerald },
+  filterText: { color: ui.text.secondary, fontSize: 12, fontWeight: '900' },
+  filterTextActive: { color: ui.text.inverse },
+  resultRow: {
+    minHeight: 68,
     borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#FF6B6B',
+    borderWidth: 1,
+    borderColor: ui.border.soft,
+    backgroundColor: ui.surface.glass,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 10,
+    gap: 10,
+    padding: 10,
+    marginBottom: 8,
   },
-  dangerButtonText: { color: '#FF6B6B', fontSize: 16, fontWeight: '900' },
+  resultIcon: { width: 38, height: 38, borderRadius: 8, backgroundColor: ui.border.strong, alignItems: 'center', justifyContent: 'center' },
+  winIcon: { backgroundColor: ui.palette.emerald },
+  resultIconText: { color: ui.text.inverse, fontSize: 14, fontWeight: '900' },
+  rowReward: { color: ui.palette.gold, fontSize: 12, fontWeight: '900', maxWidth: 86, textAlign: 'right' },
+  emptyText: { color: ui.text.muted, fontSize: 13, fontWeight: '800', lineHeight: 19, textAlign: 'center', marginVertical: 12 },
+  avatarLarge: { alignSelf: 'center', width: 118, height: 118, borderRadius: 59, borderWidth: 4, borderColor: ui.palette.emerald, backgroundColor: ui.palette.feltLight, alignItems: 'center', justifyContent: 'center' },
+  avatarLargeText: { color: ui.text.primary, fontSize: 54, fontWeight: '900' },
+  avatarName: { color: ui.text.primary, fontSize: 22, fontWeight: '900', textAlign: 'center', marginTop: 12 },
+  collectionRow: { gap: 8, marginVertical: 14 },
+  collectionItem: { minHeight: 48, borderRadius: 8, backgroundColor: ui.surface.glass, padding: 10 },
+  collectionLabel: { color: ui.text.muted, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
+  collectionValue: { color: ui.text.primary, fontSize: 14, fontWeight: '900', marginTop: 4, textTransform: 'capitalize' },
+  shopButton: { marginBottom: 12 },
+  lockerGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+  cosmeticTile: { width: '48%', minHeight: 150, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.glass, padding: 10 },
+  cosmeticTileEquipped: { borderColor: ui.palette.emerald },
+  cosmeticTileTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 6 },
+  cosmeticType: { color: ui.palette.gold, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
+  cosmeticName: { color: ui.text.primary, fontSize: 14, fontWeight: '900', marginTop: 10 },
+  cosmeticMeta: { color: ui.text.secondary, fontSize: 11, fontWeight: '800', lineHeight: 16, marginTop: 4 },
+  cosmeticAction: { color: ui.palette.emerald, fontSize: 12, fontWeight: '900', marginTop: 'auto' },
+  socialRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
+  socialIcon: { width: 52, height: 52, borderRadius: 8, backgroundColor: ui.palette.feltLight, alignItems: 'center', justifyContent: 'center' },
+  socialCopy: { flex: 1, minWidth: 0 },
+  socialButton: { marginTop: 10 },
 });

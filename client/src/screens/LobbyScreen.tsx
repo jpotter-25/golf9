@@ -3,11 +3,11 @@
 
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Bot, BookOpen, ChevronLeft, MessageCircle, Play, Settings, ShoppingBag, Trophy, UserRound, Users, Wifi } from 'lucide-react-native';
+import { Bot, ChevronLeft, Play, Users, Wifi } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
-import { ActionButton, IconTile, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
+import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Lobby'>;
 type ModeChoice = 'passplay' | 'solo' | 'online';
@@ -27,7 +27,6 @@ export default function LobbyScreen({ navigation }: Props) {
   const startSelectedMode = () => {
     if (selectedMode === 'passplay') navigation.replace('Game', { players, mode: 'passplay', rounds });
     else if (selectedMode === 'solo') navigation.replace('Game', { players, mode: 'solo', rounds, aiDifficulty });
-    else if (selectedMode === 'online') navigation.navigate('OnlineMenu', { players, rounds });
   };
 
   if (!selectedMode) {
@@ -37,20 +36,19 @@ export default function LobbyScreen({ navigation }: Props) {
           eyebrow="Golf 9"
           title="Choose Your Table"
           subtitle="Fast card strategy, social pressure, and casino-night polish."
-          right={<StatusBadge label="LIVE" tone="gold" />}
         />
 
         {(Object.keys(MODE_META) as ModeChoice[]).map(mode => (
-          <ModeCard key={mode} mode={mode} {...MODE_META[mode]} onPress={() => setSelectedMode(mode)} />
+          <ModeCard
+            key={mode}
+            mode={mode}
+            {...MODE_META[mode]}
+            onPress={() => {
+              if (mode === 'online') navigation.navigate('OnlineMenu');
+              else setSelectedMode(mode);
+            }}
+          />
         ))}
-
-        <View style={styles.utilityGrid}>
-          <IconTile Icon={UserRound} label="Profile" onPress={() => navigation.navigate('Profile')} />
-          <IconTile Icon={ShoppingBag} label="Shop" onPress={() => navigation.navigate('Shop')} />
-          <IconTile Icon={MessageCircle} label="Social" onPress={() => navigation.navigate('Social')} />
-          <IconTile Icon={Settings} label="Settings" onPress={() => navigation.navigate('Settings')} />
-          <IconTile Icon={BookOpen} label="Rules" onPress={() => navigation.navigate('Rules')} />
-        </View>
       </ScreenShell>
     );
   }
@@ -91,8 +89,8 @@ export default function LobbyScreen({ navigation }: Props) {
       ) : null}
 
       <ActionButton
-        label={selectedMode === 'online' ? 'Open Online Tables' : 'Deal Cards'}
-        Icon={selectedMode === 'online' ? Trophy : Play}
+        label="Deal Cards"
+        Icon={Play}
         tone={selected.tone === 'gold' ? 'gold' : selected.tone === 'sky' ? 'secondary' : 'primary'}
         onPress={startSelectedMode}
         style={styles.startButton}
@@ -204,10 +202,7 @@ const styles = StyleSheet.create({
   modeTitle: { color: ui.text.primary, fontSize: 19, fontWeight: '900' },
   modeSubtitle: { color: ui.text.secondary, fontSize: 13, fontWeight: '700', lineHeight: 18, marginTop: 4 },
   utilityGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 6,
+    display: 'none',
   },
   pickerLabel: {
     flexDirection: 'row',

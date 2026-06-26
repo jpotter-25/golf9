@@ -822,6 +822,11 @@ test('quick play joins compatible rooms and starts a full-room countdown', async
   await withServer(async (baseUrl) => {
     const one = await signup(baseUrl, `QuickOne${Date.now()}`);
     const two = await signup(baseUrl, `QuickTwo${Date.now()}`);
+    const privateRoom = await json(await fetch(`${baseUrl}/rooms`, {
+      method: 'POST',
+      headers: authHeaders(one.token),
+      body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
+    }));
 
     const first = await json(await fetch(`${baseUrl}/rooms/quick-play`, {
       method: 'POST',
@@ -830,6 +835,13 @@ test('quick play joins compatible rooms and starts a full-room countdown', async
     }));
     assert.equal(first.room.players.length, 1);
     assert.equal(first.room.countdownEndsAt, null);
+    assert.equal(first.room.isPublic, true);
+
+    const openBeforeJoin = await json(await fetch(`${baseUrl}/rooms/open?matchType=casual&maxPlayers=2&rounds=5`, {
+      headers: authHeaders(two.token),
+    }));
+    assert.equal(openBeforeJoin.rooms.some(room => room.code === first.room.code), true);
+    assert.equal(openBeforeJoin.rooms.some(room => room.code === privateRoom.room.code), false);
 
     const second = await json(await fetch(`${baseUrl}/rooms/quick-play`, {
       method: 'POST',
@@ -875,7 +887,9 @@ test('ranked queue creates a human-only ranked room and starts automatically', a
     }));
     assert.equal(first.queue.queued, true);
     assert.equal(first.queue.matchedRoomCode, null);
+    assert.equal(first.queue.rounds, 9);
     assert.equal(first.competitive.mmr, 1000);
+    assert.equal(first.competitive.playerCount, 2);
 
     const second = await json(await fetch(`${baseUrl}/ranked/queue`, {
       method: 'POST',
@@ -885,6 +899,7 @@ test('ranked queue creates a human-only ranked room and starts automatically', a
     assert.equal(second.queue.queued, false);
     assert.equal(typeof second.queue.matchedRoomCode, 'string');
     assert.equal(second.queue.room.matchType, 'ranked');
+    assert.equal(second.queue.room.rounds, 9);
 
     const firstStatus = await json(await fetch(`${baseUrl}/ranked/queue`, { headers: authHeaders(one.token) }));
     assert.equal(firstStatus.queue.matchedRoomCode, second.queue.matchedRoomCode);
@@ -903,6 +918,7 @@ test('ranked queue creates a human-only ranked room and starts automatically', a
       const joined = await emitAck(socketOne, 'room:join', { code });
       assert.equal(joined.room.status, 'playing');
       assert.equal(joined.room.matchType, 'ranked');
+      assert.equal(joined.game.totalRounds, 9);
       assert.equal(joined.game.phase, 'peek');
     } finally {
       socketOne.disconnect();

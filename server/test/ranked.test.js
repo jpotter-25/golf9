@@ -101,6 +101,34 @@ test('ranked match result updates MMR, placement progress, and history once per 
   assert.ok(result.mmrDelta > 0);
 });
 
+test('ranked ladders are separate by player count', () => {
+  const season = normalizeRankedSeason({ id: 's1', name: 'Season 1', startsAt: 1000, endsAt: 1000 + 90 * 24 * 60 * 60 * 1000 }, 2000);
+  const account = user();
+  const twoPlayer = applyRankedMatchResult(account, {
+    matchId: 'two-player-match',
+    roomCode: 'TWO2',
+    playerCount: 2,
+    placement: 1,
+    total: 12,
+    opponentMmrs: [1000],
+    columnClears: 1,
+  }, season, 3000);
+  const fourPlayer = applyRankedMatchResult(account, {
+    matchId: 'four-player-match',
+    roomCode: 'FOUR',
+    playerCount: 4,
+    placement: 4,
+    total: 72,
+    opponentMmrs: [1000, 1000, 1000],
+    columnClears: 0,
+  }, season, 4000);
+
+  assert.equal(account.competitiveByPlayers['2'].mmr, twoPlayer.mmrAfter);
+  assert.equal(account.competitiveByPlayers['4'].mmr, fourPlayer.mmrAfter);
+  assert.equal(account.competitiveByPlayers['3'].mmr, 1000);
+  assert.notEqual(account.competitiveByPlayers['2'].mmr, account.competitiveByPlayers['4'].mmr);
+});
+
 test('matchmaking range expands with queue time', () => {
   assert.equal(matchmakingRangeFor(1000, 1000 + 20_000), 100);
   assert.equal(matchmakingRangeFor(1000, 1000 + 45_000), 200);

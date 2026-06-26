@@ -3,7 +3,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Switch, Text, View } from 'react-native';
-import { Bell, ChevronLeft, Eye, Gauge, Volume2, Zap, type LucideIcon } from 'lucide-react-native';
+import { Bell, ChevronLeft, Eye, Gauge, Music2, Volume2, Zap, type LucideIcon } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import { getGameplayPreferences, setGameplayPreferences, subscribeGameplayPreferences } from '../services/preferences';
@@ -38,10 +38,17 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
         />
         <SettingRow
           Icon={Volume2}
-          title="Turn Sound"
+          title="Sound"
           detail="Play a short table chime at the start of your turn."
           value={prefs.sound}
           onValueChange={value => update({ sound: value })}
+        />
+        <SettingRow
+          Icon={Music2}
+          title="Music"
+          detail="Keep background music enabled when music assets are added."
+          value={prefs.music}
+          onValueChange={value => update({ music: value })}
         />
         <SettingRow
           Icon={Zap}

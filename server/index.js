@@ -55,6 +55,7 @@ import {
   leagueForMmr,
   matchmakingRangeFor,
   normalizeCompetitiveState,
+  normalizeRankedPlayerCount,
   normalizeRankedSeason,
   placementForTotals,
   publicCompetitiveState,
@@ -564,8 +565,9 @@ function adminRankedQueues() {
 
 function normalizeAdminCompetitiveAdjustment(user, body = {}) {
   const config = rankedConfig();
-  normalizeCompetitiveState(user, rankedSeason, config);
-  const before = { ...user.competitive, league: user.competitive.league, seasonBestLeague: user.competitive.seasonBestLeague };
+  const playerCount = normalizeRankedPlayerCount(body.playerCount || body.maxPlayers || 2);
+  const competitive = normalizeCompetitiveState(user, rankedSeason, config, playerCount);
+  const before = { ...competitive, league: competitive.league, seasonBestLeague: competitive.seasonBestLeague };
   const patch = {};
   if (body.mmr !== undefined) patch.mmr = Math.max(0, Math.floor(Number(body.mmr) || 0));
   if (body.seasonBestMmr !== undefined) patch.seasonBestMmr = Math.max(0, Math.floor(Number(body.seasonBestMmr) || 0));
@@ -574,28 +576,30 @@ function normalizeAdminCompetitiveAdjustment(user, body = {}) {
   if (body.wins !== undefined) patch.wins = Math.max(0, Math.floor(Number(body.wins) || 0));
   if (body.losses !== undefined) patch.losses = Math.max(0, Math.floor(Number(body.losses) || 0));
   if (Array.isArray(body.claimedSeasonRewards)) patch.claimedSeasonRewards = body.claimedSeasonRewards.map(String).filter(Boolean);
-  user.competitive = { ...user.competitive, ...patch };
-  user.competitive.placementsPlayed = Math.min(user.competitive.placementsPlayed, user.competitive.placementMatchesRequired);
-  user.competitive.placementComplete = user.competitive.placementsPlayed >= user.competitive.placementMatchesRequired;
-  user.competitive.seasonBestMmr = Math.max(user.competitive.mmr, user.competitive.seasonBestMmr);
-  user.competitive.league = leagueForMmr(user.competitive.mmr, config);
-  user.competitive.seasonBestLeague = leagueForMmr(user.competitive.seasonBestMmr, config);
-  if (body.clearHistory) user.competitive.matchHistory = [];
-  user.competitive.matchHistory = [{
+  const next = { ...competitive, ...patch, playerCount };
+  next.placementsPlayed = Math.min(next.placementsPlayed, next.placementMatchesRequired);
+  next.placementComplete = next.placementsPlayed >= next.placementMatchesRequired;
+  next.seasonBestMmr = Math.max(next.mmr, next.seasonBestMmr);
+  next.league = leagueForMmr(next.mmr, config);
+  next.seasonBestLeague = leagueForMmr(next.seasonBestMmr, config);
+  if (body.clearHistory) next.matchHistory = [];
+  next.matchHistory = [{
     matchId: `admin-${crypto.randomUUID()}`,
     completedAt: Date.now(),
     roomCode: null,
-    playerCount: 0,
+    playerCount,
     total: 0,
     placement: 0,
     mmrBefore: before.mmr,
-    mmrAfter: user.competitive.mmr,
-    delta: user.competitive.mmr - before.mmr,
+    mmrAfter: next.mmr,
+    delta: next.mmr - before.mmr,
     leagueBefore: before.league,
-    leagueAfter: user.competitive.league,
+    leagueAfter: next.league,
     adminAdjustment: true,
-  }, ...(user.competitive.matchHistory || [])].slice(0, 25);
-  return { before, after: user.competitive };
+  }, ...(next.matchHistory || [])].slice(0, 25);
+  user.competitiveByPlayers[String(playerCount)] = next;
+  user.competitive = user.competitiveByPlayers['2'];
+  return { before, after: next };
 }
 
 function requireClubAdminReason(req, res) {
@@ -669,6 +673,7 @@ function publicPlayerCard(viewer, target, extra = {}) {
       rankedGames: profile.competitive.rankedGames,
       wins: profile.competitive.wins,
     },
+    competitiveByPlayers: profile.competitiveByPlayers,
     cosmetics: profile.inventory.equipped,
     club: profile.club,
     relationship: relationshipBetween(viewer, target),
@@ -719,6 +724,7 @@ function publicViewedProfile(viewer, target) {
       losses: profile.competitive.losses,
       seasonBestLeague: profile.competitive.seasonBestLeague,
     },
+    competitiveByPlayers: profile.competitiveByPlayers,
     cosmetics: profile.inventory.equipped,
     club: profile.club,
     relationship: relationshipBetween(viewer, target),
@@ -1059,8 +1065,10 @@ function roomSummary(room) {
     hostUserId: room.hostUserId,
     status: room.status,
     matchType: room.matchType || 'casual',
+    isPublic: !!room.isPublic,
     maxPlayers: room.maxPlayers,
     rounds: room.rounds,
+    openSeats: Math.max(0, room.maxPlayers - room.players.length),
     countdownEndsAt: room.countdownEndsAt || null,
     economy: room.economy ? {
       buyIn: room.economy.buyIn || 0,
@@ -1070,6 +1078,7 @@ function roomSummary(room) {
     ranked: room.matchType === 'ranked' ? {
       seasonId: room.ranked?.seasonId || rankedSeason.id,
       averageMmr: room.ranked?.averageMmr || null,
+      playerCount: room.ranked?.playerCount || room.maxPlayers,
       buyIn: room.economy?.buyIn || 0,
     } : null,
     players: room.players.map(player => ({
@@ -1276,6 +1285,16 @@ function normalizeWagerOptions(body = {}) {
   return { ...options, buyIn: normalizeBuyIn(body.buyIn) };
 }
 
+function normalizeRankedRoomOptions(body = {}) {
+  const options = normalizeRoomOptions(body);
+  return {
+    ...options,
+    maxPlayers: normalizeRankedPlayerCount(options.maxPlayers),
+    rounds: 9,
+    buyIn: 0,
+  };
+}
+
 function cancelRoomCountdown(room) {
   if (room.countdownTimer) clearTimeout(room.countdownTimer);
   room.countdownTimer = null;
@@ -1317,7 +1336,7 @@ function addUserToRoom(room, user) {
   room.connected.set(player.userId, false);
 }
 
-function makeRoom(hostUser, { maxPlayers = 4, rounds = 9, matchType = 'casual', ranked = null, buyIn = 0 } = {}) {
+function makeRoom(hostUser, { maxPlayers = 4, rounds = 9, matchType = 'casual', ranked = null, buyIn = 0, isPublic = false } = {}) {
   const options = normalizeRoomOptions({ maxPlayers, rounds, buyIn });
   const code = makeCode();
   const host = safeUser(hostUser);
@@ -1334,6 +1353,7 @@ function makeRoom(hostUser, { maxPlayers = 4, rounds = 9, matchType = 'casual', 
     },
     maxPlayers: options.maxPlayers,
     rounds: options.rounds,
+    isPublic: Boolean(isPublic),
     status: 'lobby',
     players: [host],
     ready: new Map([[host.userId, false]]),
@@ -1371,8 +1391,8 @@ function activeRankedRoomForUser(userId) {
 }
 
 function rankedQueueEntry(user, options) {
-  normalizeCompetitiveState(user, rankedSeason, rankedConfig());
-  const buyIn = rankedBuyInForMmr(user.competitive.mmr);
+  const competitive = normalizeCompetitiveState(user, rankedSeason, rankedConfig(), options.maxPlayers);
+  const buyIn = rankedBuyInForMmr(competitive.mmr);
   return {
     userId: user.userId,
     displayName: user.displayName,
@@ -1381,7 +1401,7 @@ function rankedQueueEntry(user, options) {
     rounds: options.rounds,
     buyIn,
     key: rankedQueueKey(options),
-    mmr: user.competitive.mmr,
+    mmr: competitive.mmr,
     joinedAt: Date.now(),
   };
 }
@@ -1439,6 +1459,7 @@ function createRankedRoom(entries) {
     ranked: {
       seasonId: rankedSeason.id,
       averageMmr,
+      playerCount: entries[0].maxPlayers,
       mmrSnapshot,
     },
   });
@@ -1643,7 +1664,11 @@ function recordCompletedGame(room) {
       const snapshot = room.ranked?.mmrSnapshot || {};
       const opponentMmrs = result.players
         .filter(item => item.userId !== player.userId)
-        .map(item => Number(snapshot[item.userId] ?? users.get(item.userId)?.competitive?.mmr ?? 1000));
+        .map(item => {
+          const opponent = users.get(item.userId);
+          const ladder = opponent ? normalizeCompetitiveState(opponent, rankedSeason, rankedConfig(), result.players.length) : null;
+          return Number(snapshot[item.userId] ?? ladder?.mmr ?? 1000);
+        });
       const ranked = applyRankedMatchResult(user, {
         matchId: result.resultId,
         roomCode: room.code,
@@ -2756,6 +2781,7 @@ app.get('/ranked/me', requireAuth, (req, res) => {
   normalizeCompetitiveState(req.auth.user, rankedSeason, rankedConfig());
   return res.json({
     competitive: publicCompetitiveState(req.auth.user, rankedSeason, rankedConfig()),
+    competitiveByPlayers: safeUser(req.auth.user).competitiveByPlayers,
     queue: publicRankedQueueStatus(req.auth.user.userId),
   });
 });
@@ -2764,22 +2790,36 @@ app.post('/ranked/queue', requireAuth, (req, res) => {
   rankedSeason = normalizeRankedSeason(rankedSeason, Date.now(), rankedConfig());
   const activeRoom = activeRankedRoomForUser(req.auth.user.userId);
   if (activeRoom) {
-    return res.json({ queue: publicRankedQueueStatus(req.auth.user.userId), competitive: publicCompetitiveState(req.auth.user, rankedSeason, rankedConfig()) });
+    return res.json({
+      queue: publicRankedQueueStatus(req.auth.user.userId),
+      competitive: publicCompetitiveState(req.auth.user, rankedSeason, rankedConfig(), activeRoom.maxPlayers),
+      competitiveByPlayers: safeUser(req.auth.user).competitiveByPlayers,
+    });
   }
-  const options = normalizeRoomOptions(req.body || {});
-  normalizeCompetitiveState(req.auth.user, rankedSeason, rankedConfig());
-  const buyIn = rankedBuyInForMmr(req.auth.user.competitive.mmr);
+  const options = normalizeRankedRoomOptions(req.body || {});
+  const competitive = normalizeCompetitiveState(req.auth.user, rankedSeason, rankedConfig(), options.maxPlayers);
+  const buyIn = rankedBuyInForMmr(competitive.mmr);
   const error = buyInError(req.auth.user, buyIn);
   if (error) return res.status(402).json({ error, buyIn, balance: req.auth.user.currency.coins });
   removeUserFromRankedQueue(req.auth.user.userId);
   rankedQueue.set(req.auth.user.userId, rankedQueueEntry(req.auth.user, options));
   tryMatchRankedQueue();
-  return res.json({ queue: publicRankedQueueStatus(req.auth.user.userId), competitive: publicCompetitiveState(req.auth.user, rankedSeason, rankedConfig()) });
+  return res.json({
+    queue: publicRankedQueueStatus(req.auth.user.userId),
+    competitive: publicCompetitiveState(req.auth.user, rankedSeason, rankedConfig(), options.maxPlayers),
+    competitiveByPlayers: safeUser(req.auth.user).competitiveByPlayers,
+  });
 });
 
 app.get('/ranked/queue', requireAuth, (req, res) => {
   tryMatchRankedQueue();
-  return res.json({ queue: publicRankedQueueStatus(req.auth.user.userId), competitive: publicCompetitiveState(req.auth.user, rankedSeason, rankedConfig()) });
+  const queue = publicRankedQueueStatus(req.auth.user.userId);
+  const playerCount = queue.room?.maxPlayers || queue.maxPlayers || 2;
+  return res.json({
+    queue,
+    competitive: publicCompetitiveState(req.auth.user, rankedSeason, rankedConfig(), playerCount),
+    competitiveByPlayers: safeUser(req.auth.user).competitiveByPlayers,
+  });
 });
 
 app.delete('/ranked/queue', requireAuth, (req, res) => {
@@ -2868,10 +2908,33 @@ app.post('/rooms', requireAuth, (req, res) => {
   return res.json({ room: roomSummary(room) });
 });
 
+app.get('/rooms/open', requireAuth, (req, res) => {
+  const matchType = ['casual', 'wager'].includes(String(req.query.matchType || ''))
+    ? String(req.query.matchType)
+    : null;
+  const maxPlayers = req.query.maxPlayers ? normalizeRankedPlayerCount(req.query.maxPlayers) : null;
+  const rounds = req.query.rounds ? (Number(req.query.rounds) === 5 ? 5 : 9) : null;
+  const buyIn = req.query.buyIn !== undefined ? normalizeBuyIn(req.query.buyIn) : null;
+  const openRooms = [...rooms.values()]
+    .filter(room => room.isPublic)
+    .filter(room => room.status === 'lobby')
+    .filter(room => room.players.length < room.maxPlayers)
+    .filter(room => !room.players.some(player => player.userId === req.auth.user.userId))
+    .filter(room => !matchType || room.matchType === matchType)
+    .filter(room => !maxPlayers || room.maxPlayers === maxPlayers)
+    .filter(room => !rounds || room.rounds === rounds)
+    .filter(room => buyIn === null || (room.economy?.buyIn || 0) === buyIn)
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, 50)
+    .map(roomSummary);
+  return res.json({ rooms: openRooms });
+});
+
 app.post('/rooms/quick-play', requireAuth, (req, res) => {
   const options = normalizeRoomOptions(req.body || {});
   const existingForUser = [...rooms.values()].find(room =>
     room.status === 'lobby'
+    && room.isPublic
     && room.matchType === 'casual'
     && room.maxPlayers === options.maxPlayers
     && room.rounds === options.rounds
@@ -2879,6 +2942,7 @@ app.post('/rooms/quick-play', requireAuth, (req, res) => {
   );
   let room = existingForUser || [...rooms.values()].find(item =>
     item.status === 'lobby'
+    && item.isPublic
     && item.matchType === 'casual'
     && item.maxPlayers === options.maxPlayers
     && item.rounds === options.rounds
@@ -2886,7 +2950,7 @@ app.post('/rooms/quick-play', requireAuth, (req, res) => {
     && !item.players.some(player => player.userId === req.auth.user.userId)
   );
 
-  if (!room) room = makeRoom(req.auth.user, options);
+  if (!room) room = makeRoom(req.auth.user, { ...options, isPublic: true });
   else {
     try {
       addUserToRoom(room, req.auth.user);
@@ -2895,6 +2959,7 @@ app.post('/rooms/quick-play', requireAuth, (req, res) => {
     }
   }
 
+  room.isPublic = true;
   room.updatedAt = Date.now();
   broadcastRoom(room);
   return res.json({ room: roomSummary(room) });
@@ -2908,6 +2973,7 @@ app.post('/rooms/wager-play', requireAuth, (req, res) => {
 
   const existingForUser = [...rooms.values()].find(room =>
     room.status === 'lobby'
+    && room.isPublic
     && room.matchType === 'wager'
     && room.economy?.buyIn === options.buyIn
     && room.maxPlayers === options.maxPlayers
@@ -2916,6 +2982,7 @@ app.post('/rooms/wager-play', requireAuth, (req, res) => {
   );
   let room = existingForUser || [...rooms.values()].find(item =>
     item.status === 'lobby'
+    && item.isPublic
     && item.matchType === 'wager'
     && item.economy?.buyIn === options.buyIn
     && item.maxPlayers === options.maxPlayers
@@ -2924,7 +2991,7 @@ app.post('/rooms/wager-play', requireAuth, (req, res) => {
     && !item.players.some(player => player.userId === req.auth.user.userId)
   );
 
-  if (!room) room = makeRoom(req.auth.user, { ...options, matchType: 'wager', buyIn: options.buyIn });
+  if (!room) room = makeRoom(req.auth.user, { ...options, matchType: 'wager', buyIn: options.buyIn, isPublic: true });
   else {
     try {
       addUserToRoom(room, req.auth.user);
@@ -2933,6 +3000,7 @@ app.post('/rooms/wager-play', requireAuth, (req, res) => {
     }
   }
 
+  room.isPublic = true;
   room.updatedAt = Date.now();
   broadcastRoom(room);
   return res.json({ room: roomSummary(room) });

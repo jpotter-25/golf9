@@ -16,6 +16,7 @@ export type UserProfile = {
   inventory: PlayerInventory;
   challenges: ChallengeBuckets;
   competitive: CompetitiveState;
+  competitiveByPlayers: RankedLadders;
   club: ClubSummary | null;
 };
 
@@ -27,11 +28,13 @@ export type RoomSummary = {
   hostUserId: string;
   status: 'lobby' | 'playing';
   matchType: MatchType;
+  isPublic: boolean;
   maxPlayers: number;
   rounds: 5 | 9;
+  openSeats: number;
   countdownEndsAt?: number | null;
   economy: MatchEconomy;
-  ranked?: { seasonId: string; averageMmr: number | null; buyIn: number } | null;
+  ranked?: { seasonId: string; averageMmr: number | null; playerCount: number; buyIn: number } | null;
   players: RoomPlayer[];
 };
 
@@ -73,6 +76,7 @@ export type PublicPlayerSummary = {
   stats: { gamesPlayed: number; wins: number };
   statistics: Pick<PlayerStatistics, 'gamesPlayed' | 'wins' | 'bestTotal' | 'bestRound' | 'columnClears'>;
   competitive: Pick<CompetitiveState, 'mmr' | 'league' | 'rankedGames' | 'wins'>;
+  competitiveByPlayers?: RankedLadders;
   cosmetics: PlayerInventory['equipped'];
   club: ClubSummary | null;
   relationship: SocialRelationship;
@@ -124,6 +128,7 @@ export type PublicPlayerProfile = {
     losses: number;
     seasonBestLeague: RankedLeague;
   };
+  competitiveByPlayers?: RankedLadders;
   cosmetics: PlayerInventory['equipped'];
   club: ClubSummary | null;
   relationship: SocialRelationship;
@@ -330,6 +335,7 @@ export type RankedSeasonReward = {
 };
 
 export type CompetitiveState = {
+  playerCount: 2 | 3 | 4;
   seasonId: string;
   mmr: number;
   league: RankedLeague;
@@ -353,8 +359,11 @@ export type CompetitiveState = {
   };
 };
 
+export type RankedLadders = Record<'2' | '3' | '4', CompetitiveState>;
+
 export type RankedMatchSummary = {
   matchType: 'ranked';
+  playerCount?: number;
   seasonId: string;
   mmrBefore: number;
   mmrAfter: number;
@@ -381,6 +390,13 @@ export type RankedQueueStatus = {
   buyIn?: number;
   pot?: number;
   queuedPlayers?: number;
+};
+
+export type OpenRoomFilters = {
+  matchType?: 'casual' | 'wager';
+  maxPlayers?: 2 | 3 | 4;
+  rounds?: 5 | 9;
+  buyIn?: number;
 };
 
 export type ClubProgression = ProgressionState & { memberCap: number };
@@ -803,6 +819,16 @@ export function createOnlineRoom(token: string, maxPlayers: number, rounds: numb
   return request<{ room: RoomSummary }>('/rooms', { method: 'POST', body: JSON.stringify({ maxPlayers, rounds }) }, token);
 }
 
+export function openRooms(token: string, filters: OpenRoomFilters = {}): Promise<{ rooms: RoomSummary[] }> {
+  const params = new URLSearchParams();
+  if (filters.matchType) params.set('matchType', filters.matchType);
+  if (filters.maxPlayers) params.set('maxPlayers', String(filters.maxPlayers));
+  if (filters.rounds) params.set('rounds', String(filters.rounds));
+  if (filters.buyIn !== undefined) params.set('buyIn', String(filters.buyIn));
+  const query = params.toString();
+  return request<{ rooms: RoomSummary[] }>(`/rooms/open${query ? `?${query}` : ''}`, {}, token);
+}
+
 export function joinOnlineRoom(token: string, code: string): Promise<{ room: RoomSummary }> {
   return request<{ room: RoomSummary }>(`/rooms/${code}/join`, { method: 'POST' }, token);
 }
@@ -815,20 +841,20 @@ export function wagerPlayOnlineRoom(token: string, maxPlayers: number, rounds: n
   return request<{ room: RoomSummary }>('/rooms/wager-play', { method: 'POST', body: JSON.stringify({ maxPlayers, rounds, buyIn }) }, token);
 }
 
-export function rankedProfile(token: string): Promise<{ competitive: CompetitiveState; queue: RankedQueueStatus }> {
-  return request<{ competitive: CompetitiveState; queue: RankedQueueStatus }>('/ranked/me', {}, token);
+export function rankedProfile(token: string): Promise<{ competitive: CompetitiveState; competitiveByPlayers: RankedLadders; queue: RankedQueueStatus }> {
+  return request<{ competitive: CompetitiveState; competitiveByPlayers: RankedLadders; queue: RankedQueueStatus }>('/ranked/me', {}, token);
 }
 
-export function joinRankedQueue(token: string, maxPlayers: number, rounds: number): Promise<{ competitive: CompetitiveState; queue: RankedQueueStatus }> {
-  return request<{ competitive: CompetitiveState; queue: RankedQueueStatus }>(
+export function joinRankedQueue(token: string, maxPlayers: number): Promise<{ competitive: CompetitiveState; competitiveByPlayers: RankedLadders; queue: RankedQueueStatus }> {
+  return request<{ competitive: CompetitiveState; competitiveByPlayers: RankedLadders; queue: RankedQueueStatus }>(
     '/ranked/queue',
-    { method: 'POST', body: JSON.stringify({ maxPlayers, rounds }) },
+    { method: 'POST', body: JSON.stringify({ maxPlayers, rounds: 9 }) },
     token
   );
 }
 
-export function rankedQueueStatus(token: string): Promise<{ competitive: CompetitiveState; queue: RankedQueueStatus }> {
-  return request<{ competitive: CompetitiveState; queue: RankedQueueStatus }>('/ranked/queue', {}, token);
+export function rankedQueueStatus(token: string): Promise<{ competitive: CompetitiveState; competitiveByPlayers: RankedLadders; queue: RankedQueueStatus }> {
+  return request<{ competitive: CompetitiveState; competitiveByPlayers: RankedLadders; queue: RankedQueueStatus }>('/ranked/queue', {}, token);
 }
 
 export function cancelRankedQueue(token: string): Promise<{ queue: RankedQueueStatus }> {
