@@ -124,6 +124,25 @@ async function withSeededServer(seed, fn) {
   await fnWithServer(dataDir, serverPort, fn);
 }
 
+test('public policy pages are available for store and social auth review', async () => {
+  await withServer(async (baseUrl) => {
+    const pages = [
+      ['/privacy', 'Privacy Policy'],
+      ['/terms', 'Terms of Service'],
+      ['/account/delete', 'Account Deletion'],
+    ];
+
+    for (const [route, title] of pages) {
+      const res = await fetch(`${baseUrl}${route}`);
+      const html = await res.text();
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get('content-type'), /text\/html/);
+      assert.match(html, new RegExp(`<h1>${title}</h1>`));
+      assert.match(html, /developer@joinup\.us/);
+    }
+  });
+});
+
 test('dev test accounts can be seeded for local playtesting', async () => {
   await withServer(async (baseUrl) => {
     const one = await json(await fetch(`${baseUrl}/auth/login`, {

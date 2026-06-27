@@ -1875,6 +1875,108 @@ function recordCompletedGame(room) {
   saveStore();
 }
 
+const LEGAL_CONTACT_EMAIL = process.env.LEGAL_CONTACT_EMAIL || 'developer@joinup.us';
+const LEGAL_EFFECTIVE_DATE = 'June 27, 2026';
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function legalEmailLink(subject = '') {
+  const email = escapeHtml(LEGAL_CONTACT_EMAIL);
+  const query = subject ? `?subject=${encodeURIComponent(subject)}` : '';
+  return `<a href="mailto:${email}${query}">${email}</a>`;
+}
+
+function legalPage(title, sections) {
+  const content = sections.map(section => `
+    <section>
+      <h2>${escapeHtml(section.title)}</h2>
+      ${section.body.map(paragraph => `<p>${paragraph}</p>`).join('\n')}
+    </section>
+  `).join('\n');
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(title)} | Golf 9</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #08111f;
+        color: #f5f7fb;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.6;
+      }
+      main {
+        width: min(880px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 48px 0 64px;
+      }
+      header {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+        margin-bottom: 28px;
+        padding-bottom: 20px;
+      }
+      .eyebrow {
+        color: #ffd166;
+        font-size: 0.84rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      h1 {
+        font-size: clamp(2.1rem, 7vw, 4.6rem);
+        line-height: 0.95;
+        margin: 10px 0 12px;
+      }
+      h2 {
+        color: #71e2aa;
+        font-size: 1.15rem;
+        margin: 28px 0 8px;
+      }
+      p { color: #dbe4f0; margin: 0 0 12px; }
+      a { color: #ffd166; }
+      .muted { color: #95a3b8; }
+      .panel {
+        background: rgba(18, 29, 55, 0.75);
+        border: 1px solid rgba(113, 226, 170, 0.22);
+        border-radius: 8px;
+        padding: 18px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="eyebrow">Golf 9</div>
+        <h1>${escapeHtml(title)}</h1>
+        <p class="muted">Effective date: ${LEGAL_EFFECTIVE_DATE}</p>
+      </header>
+      <div class="panel">
+        ${content}
+      </div>
+    </main>
+  </body>
+</html>`;
+}
+
+function sendLegalPage(res, title, sections) {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.send(legalPage(title, sections));
+}
+
 app.get('/health', (_req, res) => res.json({ ok: true, ready: storeReady, env: PUBLIC_ENV }));
 app.get('/health/ready', (_req, res) => {
   if (storeReady) return res.json({ ok: true, ready: true });
@@ -1884,6 +1986,110 @@ app.get('/health/ready', (_req, res) => {
     error: storeLoadError ? 'Persistence failed to load.' : 'Persistence is still loading.',
   });
 });
+
+app.get('/privacy', (_req, res) => sendLegalPage(res, 'Privacy Policy', [
+  {
+    title: 'What Golf 9 Collects',
+    body: [
+      'Golf 9 collects the information needed to run the game, protect accounts, and keep online matches working. This can include your display name, generated user ID, password hash for direct sign-in, linked Google or Facebook account identifiers, invite or tester status, friends, clubs, gameplay history, scores, rankings, virtual currency, cosmetics, chat messages, support requests, and moderation records.',
+      'We may also collect basic technical information such as IP address, device or browser details, server logs, crash details, and connection events so we can secure the service and troubleshoot bugs.',
+    ],
+  },
+  {
+    title: 'How We Use Information',
+    body: [
+      'We use this information to create and secure accounts, verify Google and Facebook sign-ins, match players into rooms, run games, save progress, show leaderboards and profiles, operate chat and social features, provide support, prevent abuse, and improve Golf 9.',
+      'Google and Facebook login are used only to verify your identity and link your Golf 9 account. Golf 9 does not receive your Google or Facebook password.',
+    ],
+  },
+  {
+    title: 'Sharing',
+    body: [
+      'We do not sell personal information. We share information only when needed to operate Golf 9, such as with hosting, database, app-store, authentication, and infrastructure providers, or when required by law or necessary to protect the game and its players.',
+      'Some in-game information, such as display name, avatar initial, match activity, scores, profile stats, club membership, and chat messages, may be visible to other players depending on the feature you use.',
+    ],
+  },
+  {
+    title: 'Retention And Deletion',
+    body: [
+      `We keep account and gameplay information while your account is active or as needed to operate Golf 9, resolve disputes, prevent abuse, and satisfy legal or store-platform requirements. You can request deletion at ${legalEmailLink()} or by visiting <a href="/account/delete">/account/delete</a>.`,
+      'When an account is deleted, we will delete or anonymize personal account data where reasonably possible. Some records may be kept if needed for security, fraud prevention, legal compliance, or completed transaction/history integrity.',
+    ],
+  },
+  {
+    title: 'Children',
+    body: [
+      'Golf 9 is not intended for children under 13. If you believe a child provided personal information, contact us and we will review the request.',
+    ],
+  },
+  {
+    title: 'Contact',
+    body: [
+      `Questions about this policy can be sent to ${legalEmailLink()}.`,
+    ],
+  },
+]));
+
+app.get('/terms', (_req, res) => sendLegalPage(res, 'Terms of Service', [
+  {
+    title: 'Using Golf 9',
+    body: [
+      'By using Golf 9, you agree to play fairly, follow the rules shown in the app, and use the service only for lawful personal entertainment. You are responsible for activity on your account.',
+      'Do not cheat, exploit bugs, interfere with servers, harass other players, impersonate others, upload malicious content, or use Golf 9 in a way that harms the service or other players.',
+    ],
+  },
+  {
+    title: 'Accounts And Access',
+    body: [
+      'We may limit, suspend, or remove access to accounts or features when needed to protect Golf 9, enforce these terms, respond to abuse, or comply with law or platform requirements.',
+      'Online features may change, pause, or be unavailable from time to time while we test, improve, or maintain the app.',
+    ],
+  },
+  {
+    title: 'Virtual Items And Progress',
+    body: [
+      'Golf 9 may include virtual currency, rankings, rewards, cosmetics, clubs, and other progression features. These items have no cash value and may be changed, balanced, reset, or removed as the game evolves, especially during testing.',
+      'If real-money purchases are added later, additional store terms may apply through Google Play, Apple, or another payment provider.',
+    ],
+  },
+  {
+    title: 'Content And Conduct',
+    body: [
+      'You are responsible for the names, chat messages, club content, and other content you submit. Keep it respectful and do not submit content that is illegal, abusive, hateful, sexually explicit, threatening, infringing, or otherwise harmful.',
+      'We may moderate, restrict, or remove content and accounts that violate these terms or disrupt the game.',
+    ],
+  },
+  {
+    title: 'Disclaimers',
+    body: [
+      'Golf 9 is provided as is and as available. We do our best to keep the game reliable, but we do not guarantee uninterrupted access, error-free gameplay, or permanent availability of any feature.',
+      `For questions, contact ${legalEmailLink()}.`,
+    ],
+  },
+]));
+
+app.get('/account/delete', (_req, res) => sendLegalPage(res, 'Account Deletion', [
+  {
+    title: 'How To Request Deletion',
+    body: [
+      `To delete your Golf 9 account, email ${legalEmailLink('Golf 9 account deletion request')} with the subject "Golf 9 account deletion request".`,
+      'Include your Golf 9 display name and, if you used Google or Facebook login, tell us which provider you used. Do not send passwords. We may ask for reasonable confirmation that you control the account before deletion.',
+    ],
+  },
+  {
+    title: 'What Will Be Deleted',
+    body: [
+      'After verification, we will delete or anonymize account identifiers and personal profile information associated with your Golf 9 account, including linked social-login identifiers where reasonably possible.',
+      'Some completed match records, moderation records, security logs, or records needed for legal, fraud-prevention, support, or transaction-history reasons may be retained or anonymized instead of fully removed.',
+    ],
+  },
+  {
+    title: 'Timing',
+    body: [
+      'We aim to complete verified deletion requests within 30 days. If more time is needed because of security, legal, or technical reasons, we will let you know when possible.',
+    ],
+  },
+]));
 
 app.use('/admin', express.static(ADMIN_PUBLIC_DIR));
 app.get('/admin', (_req, res) => res.sendFile(path.join(ADMIN_PUBLIC_DIR, 'index.html')));
