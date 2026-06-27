@@ -8,10 +8,10 @@ const plugins = [];
 
 plugins.push('expo-secure-store');
 
-if (googleWebClientId) {
+if (googleWebClientId && googleIosUrlScheme) {
   plugins.push([
     '@react-native-google-signin/google-signin',
-    googleIosUrlScheme ? { iosUrlScheme: googleIosUrlScheme } : {},
+    { iosUrlScheme: googleIosUrlScheme },
   ]);
 }
 
