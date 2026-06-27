@@ -16,6 +16,7 @@
       "android": { "buildType": "apk" }
     },
     "playtest": {
+      "environment": "preview",
       "env": {
         "EXPO_PUBLIC_APP_ENV": "staging",
         "EXPO_PUBLIC_STAGING_SERVER_URL": "https://games.joinup.us"
@@ -24,6 +25,7 @@
       "android": { "buildType": "app-bundle" }
     },
     "production": {
+      "environment": "production",
       "env": {
         "EXPO_PUBLIC_APP_ENV": "production",
         "EXPO_PUBLIC_PROD_SERVER_URL": "https://games.joinup.us"
