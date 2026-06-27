@@ -3,6 +3,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import * as api from '../services/api';
+import { unregisterPushNotifications } from '../services/pushNotifications';
 import { getSocialCredential, signOutProviders } from '../services/socialAuth';
 import { clearSession, loadSession, saveSession } from '../utils/sessionStorage';
 import { logError } from '../utils/logger';
@@ -80,7 +81,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     },
     refreshProfile,
     signOut: async () => {
-      if (token) await api.logout(token).catch(error => logError(error, { area: 'logout' }));
+      if (token) {
+        await unregisterPushNotifications(token).catch(error => logError(error, { area: 'push-logout' }));
+        await api.logout(token).catch(error => logError(error, { area: 'logout' }));
+      }
       await signOutProviders().catch(error => logError(error, { area: 'provider-logout' }));
       setToken(null);
       setUser(null);

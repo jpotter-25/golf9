@@ -25,6 +25,11 @@ export type AuthResponse = { token: string; user: UserProfile };
 export type AuthProviderKey = 'google' | 'facebook';
 export type AuthProviderStatus = Record<AuthProviderKey, boolean>;
 export type AuthConfig = { environment: string; inviteRequired: boolean; apiUrl: string; adminUrl: string; providers: AuthProviderStatus };
+export type PushTokenPayload = {
+  expoPushToken?: string;
+  deviceId?: string;
+  platform?: 'ios' | 'android' | 'web';
+};
 export type SocialAuthPayload = {
   provider: AuthProviderKey;
   idToken?: string;
@@ -610,6 +615,22 @@ export function me(token: string): Promise<{ user: UserProfile }> {
 
 export function profile(token: string): Promise<{ user: UserProfile }> {
   return request<{ user: UserProfile }>('/profile/me', {}, token);
+}
+
+export function registerPushToken(token: string, payload: PushTokenPayload): Promise<{ ok: boolean; pushTokenCount: number }> {
+  return request<{ ok: boolean; pushTokenCount: number }>(
+    '/push/register',
+    { method: 'POST', body: JSON.stringify(payload) },
+    token
+  );
+}
+
+export function unregisterPushToken(token: string, payload: PushTokenPayload): Promise<{ ok: boolean; pushTokenCount: number }> {
+  return request<{ ok: boolean; pushTokenCount: number }>(
+    '/push/unregister',
+    { method: 'POST', body: JSON.stringify(payload) },
+    token
+  );
 }
 
 export function socialMe(token: string): Promise<{ social: SocialSummary }> {

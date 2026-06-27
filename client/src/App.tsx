@@ -25,6 +25,8 @@ import {
   ShopScreen,
 } from './screens';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { getGameplayPreferences, subscribeGameplayPreferences, type GameplayPreferences } from './services/preferences';
+import { registerPushNotifications, unregisterPushNotifications } from './services/pushNotifications';
 
 export type RootStackParamList = {
   Login: undefined;
@@ -106,6 +108,24 @@ function AppNavigator() {
   );
 }
 
+function PushNotificationRegistration() {
+  const { token } = useAuth();
+  const [prefs, setPrefs] = React.useState<GameplayPreferences>(getGameplayPreferences());
+
+  useEffect(() => subscribeGameplayPreferences(setPrefs), []);
+
+  useEffect(() => {
+    if (!token) return;
+    if (prefs.turnAlerts) {
+      void registerPushNotifications(token);
+      return;
+    }
+    void unregisterPushNotifications(token);
+  }, [prefs.turnAlerts, token]);
+
+  return null;
+}
+
 export default function App() {
   useEffect(() => {
     applyImmersive();
@@ -118,6 +138,7 @@ export default function App() {
       {/* Hide the OS status bar */}
       <StatusBar hidden />
       <AuthProvider>
+        <PushNotificationRegistration />
         <AppNavigator />
       </AuthProvider>
     </SafeAreaProvider>

@@ -143,6 +143,41 @@ test('public policy pages are available for store and social auth review', async
   });
 });
 
+test('push notification tokens can register, rotate, and unregister', async () => {
+  await withServer(async (baseUrl) => {
+    const player = await signup(baseUrl, `PushTester${Date.now()}`);
+    const first = await json(await fetch(`${baseUrl}/push/register`, {
+      method: 'POST',
+      headers: authHeaders(player.token),
+      body: JSON.stringify({
+        expoPushToken: 'ExponentPushToken[test-token-one]',
+        deviceId: 'test-device',
+        platform: 'android',
+      }),
+    }));
+    assert.equal(first.ok, true);
+    assert.equal(first.pushTokenCount, 1);
+
+    const rotated = await json(await fetch(`${baseUrl}/push/register`, {
+      method: 'POST',
+      headers: authHeaders(player.token),
+      body: JSON.stringify({
+        expoPushToken: 'ExponentPushToken[test-token-two]',
+        deviceId: 'test-device',
+        platform: 'android',
+      }),
+    }));
+    assert.equal(rotated.pushTokenCount, 1);
+
+    const removed = await json(await fetch(`${baseUrl}/push/unregister`, {
+      method: 'POST',
+      headers: authHeaders(player.token),
+      body: JSON.stringify({ deviceId: 'test-device' }),
+    }));
+    assert.equal(removed.pushTokenCount, 0);
+  }, { PUSH_TEST_MODE: '1' });
+});
+
 test('dev test accounts can be seeded for local playtesting', async () => {
   await withServer(async (baseUrl) => {
     const one = await json(await fetch(`${baseUrl}/auth/login`, {

@@ -7,6 +7,7 @@ const facebookDisplayName = process.env.EXPO_PUBLIC_FACEBOOK_DISPLAY_NAME || 'Go
 const plugins = [];
 
 plugins.push('expo-secure-store');
+plugins.push('expo-notifications');
 
 if (googleWebClientId && googleIosUrlScheme) {
   plugins.push([
@@ -53,7 +54,7 @@ module.exports = {
     },
     android: {
       package: 'us.joinup.golf_9',
-      versionCode: 6,
+      versionCode: 7,
       permissions: [],
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',

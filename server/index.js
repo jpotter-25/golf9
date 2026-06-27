@@ -77,6 +77,7 @@ import {
   calculatePayouts,
   claimDailyTableBonus,
   normalizeBuyIn,
+  publicDailyBonus,
   publicEconomyCatalog,
   rankedBuyInForMmr,
 } from './economy.js';
@@ -152,6 +153,10 @@ const GOOGLE_CLIENT_IDS = (process.env.GOOGLE_CLIENT_IDS || process.env.GOOGLE_C
 const FACEBOOK_APP_ID = String(process.env.FACEBOOK_APP_ID || '').trim();
 const FACEBOOK_APP_SECRET = String(process.env.FACEBOOK_APP_SECRET || '').trim();
 const SOCIAL_AUTH_TEST_MODE = process.env.SOCIAL_AUTH_TEST_MODE === '1';
+const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
+const EXPO_ACCESS_TOKEN = String(process.env.EXPO_ACCESS_TOKEN || '').trim();
+const PUSH_TEST_MODE = process.env.PUSH_TEST_MODE === '1';
+const PUSH_DAILY_SCAN_MS = Math.max(60_000, Number(process.env.PUSH_DAILY_SCAN_MS || 60_000));
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const ROOM_TTL_MS = 1000 * 60 * 60 * 2;
 const PORT = String(process.env.PORT || 3001);
@@ -198,6 +203,7 @@ const CHAT_BLOCKED_TERMS = new Set([
 const ROOM_INVITE_TTL_MS = 1000 * 60 * 30;
 const SOCIAL_RECENT_LIMIT = 20;
 const CLUB_CHAT_RATE_LIMIT_MS = 1000;
+const MAX_PUSH_TOKENS_PER_USER = 12;
 
 const app = express();
 app.use(cors({ origin: CLIENT_ORIGINS.includes('*') ? '*' : CLIENT_ORIGINS, credentials: true }));
@@ -267,6 +273,7 @@ const postgresStore = createPostgresStore(DATABASE_URL);
 const googleOAuthClient = new OAuth2Client();
 let storeReady = false;
 let storeLoadError = null;
+let lastDailyPushScanAt = 0;
 
 function rankedConfig() {
   return liveCompetitiveConfig(competitiveStore);
@@ -364,11 +371,150 @@ function publicAuthProviders(user) {
   };
 }
 
+function normalizePushTokenValue(value) {
+  const token = String(value || '').trim();
+  if (!/^(ExponentPushToken|ExpoPushToken)\[[^\]]+\]$/.test(token)) return '';
+  return token;
+}
+
+function normalizePushPlatform(value) {
+  const platform = String(value || '').trim().toLowerCase();
+  return platform === 'ios' || platform === 'android' || platform === 'web' ? platform : 'unknown';
+}
+
+function normalizePushNotifications(user) {
+  const existing = user.pushNotifications && typeof user.pushNotifications === 'object' ? user.pushNotifications : {};
+  const sourceTokens = Array.isArray(existing.tokens)
+    ? existing.tokens
+    : Array.isArray(user.pushTokens)
+      ? user.pushTokens
+      : [];
+  const seen = new Set();
+  const tokens = [];
+  for (const raw of sourceTokens) {
+    const token = normalizePushTokenValue(raw?.expoPushToken || raw?.token || raw);
+    if (!token || seen.has(token)) continue;
+    seen.add(token);
+    tokens.push({
+      token,
+      deviceId: String(raw?.deviceId || '').trim(),
+      platform: normalizePushPlatform(raw?.platform),
+      createdAt: Number(raw?.createdAt || Date.now()) || Date.now(),
+      updatedAt: Number(raw?.updatedAt || raw?.createdAt || Date.now()) || Date.now(),
+    });
+  }
+  user.pushNotifications = {
+    tokens: tokens.slice(0, MAX_PUSH_TOKENS_PER_USER),
+    lastKeys: existing.lastKeys && typeof existing.lastKeys === 'object' ? existing.lastKeys : {},
+  };
+  delete user.pushTokens;
+  return user.pushNotifications;
+}
+
+function upsertPushToken(user, body = {}) {
+  const token = normalizePushTokenValue(body.expoPushToken || body.pushToken || body.token);
+  if (!token) return { error: 'Invalid Expo push token.' };
+  const now = Date.now();
+  const deviceId = String(body.deviceId || '').trim();
+  const platform = normalizePushPlatform(body.platform);
+  const push = normalizePushNotifications(user);
+  const existing = push.tokens.find(item => item.token === token);
+  push.tokens = push.tokens.filter(item => item.token !== token && (!deviceId || item.deviceId !== deviceId));
+  push.tokens.unshift({
+    token,
+    deviceId,
+    platform,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  });
+  push.tokens = push.tokens.slice(0, MAX_PUSH_TOKENS_PER_USER);
+  return { token, pushTokenCount: push.tokens.length };
+}
+
+function removePushToken(user, body = {}) {
+  const token = normalizePushTokenValue(body.expoPushToken || body.pushToken || body.token);
+  const deviceId = String(body.deviceId || '').trim();
+  const push = normalizePushNotifications(user);
+  if (!token && !deviceId) return { error: 'A push token or device ID is required.' };
+  push.tokens = push.tokens.filter(item => {
+    if (token && item.token === token) return false;
+    if (deviceId && item.deviceId === deviceId) return false;
+    return true;
+  });
+  return { pushTokenCount: push.tokens.length };
+}
+
+function utcDayKey(now = Date.now()) {
+  const date = new Date(now);
+  return String(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+async function sendExpoPushMessages(messages) {
+  if (!messages.length) return [];
+  if (PUSH_TEST_MODE) return messages.map(() => ({ status: 'ok' }));
+  const headers = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  };
+  if (EXPO_ACCESS_TOKEN) headers.Authorization = `Bearer ${EXPO_ACCESS_TOKEN}`;
+  const response = await fetch(EXPO_PUSH_URL, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(messages),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.errors?.[0]?.message || body?.error || `Expo push failed: ${response.status}`);
+  return Array.isArray(body?.data) ? body.data : [];
+}
+
+async function sendQueuedPush(user, payload) {
+  const push = normalizePushNotifications(user);
+  const tokens = push.tokens.slice();
+  if (!tokens.length) return;
+  const messages = tokens.map(item => ({
+    to: item.token,
+    sound: 'default',
+    title: payload.title,
+    body: payload.body,
+    data: payload.data || {},
+    priority: 'high',
+    channelId: 'game-alerts',
+  }));
+  const tickets = await sendExpoPushMessages(messages);
+  const invalidTokens = new Set();
+  tickets.forEach((ticket, index) => {
+    if (ticket?.status === 'error' && ticket?.details?.error === 'DeviceNotRegistered') {
+      invalidTokens.add(tokens[index]?.token);
+    }
+  });
+  if (invalidTokens.size) {
+    push.tokens = push.tokens.filter(item => !invalidTokens.has(item.token));
+    saveStore();
+  }
+}
+
+function queuePushToUser(userId, payload) {
+  const user = users.get(userId);
+  if (!user) return false;
+  const push = normalizePushNotifications(user);
+  if (!push.tokens.length) return false;
+  const keyName = payload.keyName || payload.type || 'notification';
+  if (payload.dedupeKey) {
+    if (push.lastKeys[keyName] === payload.dedupeKey) return false;
+    push.lastKeys[keyName] = payload.dedupeKey;
+  }
+  sendQueuedPush(user, payload).catch(error => {
+    console.error('Push notification failed:', error);
+  });
+  return true;
+}
+
 function normalizeUserRecord(user, now = Date.now()) {
   normalizeUserProgression(user, now, rankedSeason, rankedConfig());
   normalizeSocial(user);
   normalizeUserClub(user);
   normalizeAuthProviders(user);
+  normalizePushNotifications(user);
   normalizeUserAdminFields(user);
   return user;
 }
@@ -1283,7 +1429,54 @@ function broadcastRoom(room) {
     for (const player of room.players) {
       io.to(`${room.code}:${player.userId}`).emit('game:state', gameViewFor(room, player.userId));
     }
+    maybeSendTurnPush(room);
   }
+}
+
+function maybeSendTurnPush(room) {
+  const game = room.game;
+  if (!game || game.completed || game.phase !== 'turn') return;
+  const activePlayer = game.players?.[game.currentPlayerIndex];
+  if (!activePlayer?.userId) return;
+  const key = `${room.code}:${game.round}:${game.turnSerial || 0}:${activePlayer.userId}`;
+  const roomPlayer = room.players.find(player => player.userId === activePlayer.userId);
+  queuePushToUser(activePlayer.userId, {
+    type: 'turn',
+    keyName: 'turn',
+    dedupeKey: key,
+    title: 'Your turn in Golf 9',
+    body: `Room ${room.code} is waiting on you.`,
+    data: {
+      type: 'turn',
+      roomCode: room.code,
+      roomId: game.id,
+      displayName: roomPlayer?.displayName || activePlayer.displayName || '',
+    },
+  });
+}
+
+function queueDailyBonusPushes(now = Date.now()) {
+  let queued = 0;
+  const dayKey = `daily:${utcDayKey(now)}`;
+  for (const user of users.values()) {
+    const push = normalizePushNotifications(user);
+    if (!push.tokens.length) continue;
+    const bonus = publicDailyBonus(user, now);
+    if (!bonus.canClaim) continue;
+    const didQueue = queuePushToUser(user.userId, {
+      type: 'dailyBonus',
+      keyName: 'dailyBonus',
+      dedupeKey: dayKey,
+      title: 'Daily bonus ready',
+      body: `Claim ${bonus.reward} free coins in Golf 9.`,
+      data: {
+        type: 'dailyBonus',
+        reward: String(bonus.reward),
+      },
+    });
+    if (didQueue) queued += 1;
+  }
+  return queued;
 }
 
 function gameViewFor(room, userId) {
@@ -1992,13 +2185,13 @@ app.get('/privacy', (_req, res) => sendLegalPage(res, 'Privacy Policy', [
     title: 'What Golf 9 Collects',
     body: [
       'Golf 9 collects the information needed to run the game, protect accounts, and keep online matches working. This can include your display name, generated user ID, password hash for direct sign-in, linked Google or Facebook account identifiers, invite or tester status, friends, clubs, gameplay history, scores, rankings, virtual currency, cosmetics, chat messages, support requests, and moderation records.',
-      'We may also collect basic technical information such as IP address, device or browser details, server logs, crash details, and connection events so we can secure the service and troubleshoot bugs.',
+      'We may also collect basic technical information such as IP address, device or browser details, server logs, crash details, notification push tokens, notification preferences, and connection events so we can secure the service, send requested game alerts, and troubleshoot bugs.',
     ],
   },
   {
     title: 'How We Use Information',
     body: [
-      'We use this information to create and secure accounts, verify Google and Facebook sign-ins, match players into rooms, run games, save progress, show leaderboards and profiles, operate chat and social features, provide support, prevent abuse, and improve Golf 9.',
+      'We use this information to create and secure accounts, verify Google and Facebook sign-ins, match players into rooms, run games, save progress, show leaderboards and profiles, operate chat and social features, send enabled push notifications, provide support, prevent abuse, and improve Golf 9.',
       'Google and Facebook login are used only to verify your identity and link your Golf 9 account. Golf 9 does not receive your Google or Facebook password.',
     ],
   },
@@ -2870,6 +3063,20 @@ app.get('/auth/me', requireAuth, (req, res) => res.json({ user: safeUser(req.aut
 
 app.get('/profile/me', requireAuth, (req, res) => res.json({ user: safeUser(req.auth.user) }));
 
+app.post('/push/register', requireAuth, (req, res) => {
+  const result = upsertPushToken(req.auth.user, req.body || {});
+  if (result.error) return res.status(400).json({ error: result.error });
+  saveStore();
+  return res.json({ ok: true, pushTokenCount: result.pushTokenCount });
+});
+
+app.post('/push/unregister', requireAuth, (req, res) => {
+  const result = removePushToken(req.auth.user, req.body || {});
+  if (result.error) return res.status(400).json({ error: result.error });
+  saveStore();
+  return res.json({ ok: true, pushTokenCount: result.pushTokenCount });
+});
+
 app.get('/social/me', requireAuth, (req, res) => res.json({ social: socialSummary(req.auth.user) }));
 
 app.get('/players/search', requireAuth, (req, res) => {
@@ -3178,14 +3385,27 @@ app.post('/friends/requests', requireAuth, (req, res) => {
   }
 
   const existing = req.auth.user.social.outgoingRequests.find(request => request.userId === target.userId);
+  let outgoingRequest = existing;
   if (!existing) {
     const request = { id: crypto.randomUUID(), userId: target.userId, createdAt: Date.now() };
     req.auth.user.social.outgoingRequests.push(request);
     target.social.incomingRequests.push({ ...request, userId: req.auth.user.userId });
+    outgoingRequest = request;
   }
   saveStore();
   emitSocialUpdate(req.auth.user.userId);
   emitSocialUpdate(target.userId);
+  queuePushToUser(target.userId, {
+    type: 'friendRequest',
+    keyName: 'friendRequest',
+    dedupeKey: outgoingRequest?.id || `friend:${req.auth.user.userId}:${target.userId}`,
+    title: 'New friend request',
+    body: `${req.auth.user.displayName} wants to connect on Golf 9.`,
+    data: {
+      type: 'friendRequest',
+      fromUserId: req.auth.user.userId,
+    },
+  });
   return res.json({ social: socialSummary(req.auth.user) });
 });
 
@@ -3516,6 +3736,19 @@ app.post('/rooms/:code/invites', requireAuth, (req, res) => {
   target.social.roomInvites.push(invite);
   saveStore();
   emitSocialUpdate(target.userId);
+  queuePushToUser(target.userId, {
+    type: 'roomInvite',
+    keyName: 'roomInvite',
+    dedupeKey: invite.id,
+    title: 'Game invite',
+    body: `${req.auth.user.displayName} invited you to room ${room.code}.`,
+    data: {
+      type: 'roomInvite',
+      inviteId: invite.id,
+      roomCode: room.code,
+      fromUserId: req.auth.user.userId,
+    },
+  });
   return res.json({ invite: publicRoomInvite(target, invite), social: socialSummary(req.auth.user) });
 });
 
@@ -3832,6 +4065,10 @@ setInterval(() => {
   const now = Date.now();
   rankedSeason = normalizeRankedSeason(rankedSeason, now, rankedConfig());
   tryMatchRankedQueue(now);
+  if (now - lastDailyPushScanAt >= PUSH_DAILY_SCAN_MS) {
+    lastDailyPushScanAt = now;
+    queueDailyBonusPushes(now);
+  }
   for (const [token, session] of sessions) if (session.expiresAt <= now) sessions.delete(token);
   for (const [code, room] of rooms) {
     const gameChanged = resolveRoomExpiredTimers(room);
