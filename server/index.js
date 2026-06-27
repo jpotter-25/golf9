@@ -142,11 +142,13 @@ const DATA_DIR = process.env.DATA_DIR || DEFAULT_DATA_DIR;
 const DATA_FILE = path.join(DATA_DIR, 'auth-store.json');
 const ADMIN_PUBLIC_DIR = path.join(__dirname, 'admin-public');
 const ASSET_UPLOAD_DIR = path.join(DATA_DIR, 'uploads', 'cosmetics');
-const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const RAW_PUBLIC_ENV = (process.env.APP_ENV || process.env.EXPO_PUBLIC_APP_ENV || process.env.NODE_ENV || '').toLowerCase();
+const IS_PRODUCTION = process.env.NODE_ENV === 'production' || RAW_PUBLIC_ENV === 'production';
 const DATABASE_URL = process.env.DATABASE_URL || '';
-const PUBLIC_API_URL = process.env.PUBLIC_API_URL || process.env.EXPO_PUBLIC_PROD_SERVER_URL || 'https://games.joinup.us';
-const ADMIN_PUBLIC_URL = process.env.ADMIN_PUBLIC_URL || 'https://games.joinup.us/admin';
+const PUBLIC_API_URL = normalizePublicUrl(process.env.PUBLIC_API_URL || process.env.EXPO_PUBLIC_PROD_SERVER_URL || 'https://games.joinup.us');
+const ADMIN_PUBLIC_URL = normalizeAdminPublicUrl(process.env.ADMIN_PUBLIC_URL, PUBLIC_API_URL);
 const PUBLIC_ENV = (process.env.APP_ENV || process.env.EXPO_PUBLIC_APP_ENV || (IS_PRODUCTION ? 'production' : 'development')).toLowerCase();
+const ALLOW_UNSAFE_JSON_IN_PRODUCTION = process.env.ALLOW_JSON_STORE_IN_PRODUCTION === '1' || process.env.ALLOW_JSON_FALLBACK_ON_DB_ERROR === '1';
 const GOOGLE_CLIENT_IDS = (process.env.GOOGLE_CLIENT_IDS || process.env.GOOGLE_CLIENT_ID || '')
   .split(',')
   .map(value => value.trim())
@@ -205,6 +207,31 @@ const ROOM_INVITE_TTL_MS = 1000 * 60 * 30;
 const SOCIAL_RECENT_LIMIT = 20;
 const CLUB_CHAT_RATE_LIMIT_MS = 1000;
 const MAX_PUSH_TOKENS_PER_USER = 12;
+
+function normalizePublicUrl(value) {
+  const fallback = 'https://games.joinup.us';
+  try {
+    const parsed = new URL(String(value || fallback).trim() || fallback);
+    parsed.pathname = parsed.pathname.replace(/\/+$/, '');
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeAdminPublicUrl(value, publicApiUrl) {
+  const fallback = new URL('/admin', `${publicApiUrl}/`).toString().replace(/\/$/, '');
+  const raw = String(value || '').trim();
+  if (!raw) return fallback;
+  try {
+    const parsed = new URL(raw, `${publicApiUrl}/`);
+    return new URL('/admin', parsed.origin).toString().replace(/\/$/, '');
+  } catch {
+    return fallback;
+  }
+}
 
 const app = express();
 app.use(cors({ origin: CLIENT_ORIGINS.includes('*') ? '*' : CLIENT_ORIGINS, credentials: true }));
@@ -276,6 +303,18 @@ const googleOAuthClient = new OAuth2Client();
 let storeReady = false;
 let storeLoadError = null;
 let lastDailyPushScanAt = 0;
+
+function storageStatus() {
+  return {
+    provider: postgresStore ? 'postgres' : 'json',
+    durable: !!postgresStore,
+    databaseConfigured: !!DATABASE_URL,
+    production: IS_PRODUCTION,
+    unsafeJsonAllowed: ALLOW_UNSAFE_JSON_IN_PRODUCTION,
+    ready: storeReady,
+    error: storeLoadError ? 'Persistence failed to load.' : null,
+  };
+}
 
 function rankedConfig() {
   return liveCompetitiveConfig(competitiveStore);
@@ -2187,13 +2226,14 @@ function sendLegalPage(res, title, sections) {
   res.send(legalPage(title, sections));
 }
 
-app.get('/health', (_req, res) => res.json({ ok: true, ready: storeReady, env: PUBLIC_ENV }));
+app.get('/health', (_req, res) => res.json({ ok: true, ready: storeReady, env: PUBLIC_ENV, storage: storageStatus() }));
 app.get('/health/ready', (_req, res) => {
-  if (storeReady) return res.json({ ok: true, ready: true });
+  if (storeReady) return res.json({ ok: true, ready: true, storage: storageStatus() });
   return res.status(503).json({
     ok: false,
     ready: false,
     error: storeLoadError ? 'Persistence failed to load.' : 'Persistence is still loading.',
+    storage: storageStatus(),
   });
 });
 
@@ -2301,6 +2341,19 @@ app.get('/account/delete', (_req, res) => sendLegalPage(res, 'Account Deletion',
   },
 ]));
 
+app.use('/admin', (req, res, next) => {
+  const rawUrl = req.originalUrl || req.url || '';
+  let decodedUrl = rawUrl;
+  try {
+    decodedUrl = decodeURIComponent(rawUrl);
+  } catch {
+    decodedUrl = rawUrl;
+  }
+  if (/^\/admin\/https?:\/\//i.test(decodedUrl) || /^\/admin\/https?:/i.test(decodedUrl)) {
+    return res.redirect(302, '/admin/');
+  }
+  return next();
+});
 app.use('/admin', express.static(ADMIN_PUBLIC_DIR));
 app.get('/admin', (_req, res) => res.sendFile(path.join(ADMIN_PUBLIC_DIR, 'index.html')));
 app.use('/assets/cosmetics', express.static(ASSET_UPLOAD_DIR, {
@@ -2915,7 +2968,12 @@ app.post('/admin/api/clubs/:clubId/moderation', requireAdmin(adminStore, 'clubs:
   return res.json({ club: adminClubDetail(club) });
 });
 
-app.get('/admin/api/metrics', requireAdmin(adminStore, 'metrics:read'), (_req, res) => res.json({ metrics: adminMetrics(users, rooms, clubs, adminStore.supportTickets) }));
+app.get('/admin/api/metrics', requireAdmin(adminStore, 'metrics:read'), (_req, res) => res.json({
+  metrics: {
+    ...adminMetrics(users, rooms, clubs, adminStore.supportTickets),
+    storage: storageStatus(),
+  },
+}));
 
 app.get('/admin/api/invites', requireAdmin(adminStore, 'invites:read'), (_req, res) => {
   res.json({
@@ -4099,6 +4157,7 @@ io.on('connection', (socket) => {
 });
 
 setInterval(() => {
+  if (!storeReady) return;
   const now = Date.now();
   rankedSeason = normalizeRankedSeason(rankedSeason, now, rankedConfig());
   tryMatchRankedQueue(now);
@@ -4122,7 +4181,7 @@ setInterval(() => {
   saveStore();
 }, 1000);
 
-async function startServer() {
+function startHttpListeners() {
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Golf9 authoritative server listening on port ${PORT}`);
   });
@@ -4134,6 +4193,13 @@ async function startServer() {
       console.log(`Golf9 fallback listener active on port ${extraPort}`);
     });
   }
+}
+
+async function initializePersistence() {
+  if (IS_PRODUCTION && !postgresStore && !ALLOW_UNSAFE_JSON_IN_PRODUCTION) {
+    throw new Error('DATABASE_URL is required in production. Set ALLOW_JSON_STORE_IN_PRODUCTION=1 only for an emergency temporary fallback.');
+  }
+
   try {
     await loadStore();
     seedLocalTestAccounts();
@@ -4145,20 +4211,27 @@ async function startServer() {
     storeReady = false;
     storeLoadError = error;
     console.error('Golf9 persistence failed to load:', error);
-    if (!IS_PRODUCTION || process.env.ALLOW_JSON_FALLBACK_ON_DB_ERROR === '1') {
+    if (!IS_PRODUCTION || ALLOW_UNSAFE_JSON_IN_PRODUCTION) {
       console.warn('Falling back to local JSON store after persistence failure.');
       loadJsonStore();
       seedLocalTestAccounts();
       seedAdminAccounts();
       storeReady = true;
       storeLoadError = null;
+      return;
     }
+    throw error;
   }
+}
+
+async function startServer() {
+  await initializePersistence();
+  startHttpListeners();
 }
 
 async function shutdown() {
   try {
-    saveStore();
+    if (storeReady) saveStore();
     if (postgresStore) await postgresStore.close();
   } finally {
     let remaining = listeningServers.length;

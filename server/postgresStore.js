@@ -15,6 +15,7 @@ const COLLECTION_TABLES = [
   ['bans', 'ban_id'],
   ['invite_codes', 'invite_id'],
 ];
+const META_KEYS = ['rankedSeason', 'competitiveConfig', 'economyConfig'];
 
 function json(value) {
   return JSON.stringify(value ?? null);
@@ -79,6 +80,7 @@ export class PostgresStore {
       results: [],
       rankedSeason: null,
       competitiveConfig: null,
+      economyConfig: null,
       catalog: { live: [], draft: [], versions: [] },
       clubs: [],
       admins: [],
@@ -91,8 +93,7 @@ export class PostgresStore {
 
     const meta = await this.pool.query('SELECT key, value FROM golf9_meta');
     for (const row of meta.rows) {
-      if (row.key === 'rankedSeason') state.rankedSeason = row.value;
-      if (row.key === 'competitiveConfig') state.competitiveConfig = row.value;
+      if (META_KEYS.includes(row.key)) state[row.key] = row.value;
     }
 
     for (const [table] of COLLECTION_TABLES) {
@@ -116,16 +117,13 @@ export class PostgresStore {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query(`
-        INSERT INTO golf9_meta (key, value, updated_at)
-        VALUES ('rankedSeason', $1::jsonb, NOW())
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-      `, [json(state.rankedSeason)]);
-      await client.query(`
-        INSERT INTO golf9_meta (key, value, updated_at)
-        VALUES ('competitiveConfig', $1::jsonb, NOW())
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-      `, [json(state.competitiveConfig)]);
+      for (const key of META_KEYS) {
+        await client.query(`
+          INSERT INTO golf9_meta (key, value, updated_at)
+          VALUES ($1, $2::jsonb, NOW())
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+        `, [key, json(state[key])]);
+      }
 
       const collections = {
         users: state.users || [],

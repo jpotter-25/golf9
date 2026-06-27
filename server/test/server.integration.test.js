@@ -124,6 +124,13 @@ async function withSeededServer(seed, fn) {
   await fnWithServer(dataDir, serverPort, fn);
 }
 
+async function waitForExit(child, timeoutMs = 5000) {
+  return Promise.race([
+    once(child, 'exit'),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('server did not exit')), timeoutMs)),
+  ]);
+}
+
 test('public policy pages are available for store and social auth review', async () => {
   await withServer(async (baseUrl) => {
     const pages = [
@@ -141,6 +148,61 @@ test('public policy pages are available for store and social auth review', async
       assert.match(html, /developer@joinup\.us/);
     }
   });
+});
+
+test('admin config is canonical and malformed nested admin URLs redirect', async () => {
+  await withServer(async (baseUrl) => {
+    const config = await json(await fetch(`${baseUrl}/auth/config`));
+    assert.equal(config.apiUrl, 'https://games.joinup.us');
+    assert.equal(config.adminUrl, 'https://games.joinup.us/admin');
+
+    const nested = await fetch(`${baseUrl}/admin/https://games.joinup.us/admin/`, { redirect: 'manual' });
+    assert.equal(nested.status, 302);
+    assert.equal(nested.headers.get('location'), '/admin/');
+  }, {
+    PUBLIC_API_URL: 'https://games.joinup.us',
+    ADMIN_PUBLIC_URL: 'https://games.joinup.us/admin/https://games.joinup.us/admin/',
+  });
+});
+
+test('local JSON storage remains available outside production', async () => {
+  await withServer(async (baseUrl) => {
+    const health = await json(await fetch(`${baseUrl}/health/ready`));
+    assert.equal(health.storage.provider, 'json');
+    assert.equal(health.storage.durable, false);
+    assert.equal(health.storage.databaseConfigured, false);
+  }, { NODE_ENV: 'development', APP_ENV: 'development', DATABASE_URL: '' });
+});
+
+test('production refuses to start without durable database storage', async () => {
+  const serverPort = port();
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'golf9-server-test-'));
+  const child = spawn(process.execPath, ['index.js'], {
+    cwd: path.resolve('..', 'server'),
+    env: {
+      ...process.env,
+      NODE_ENV: 'production',
+      APP_ENV: 'production',
+      EXPO_PUBLIC_APP_ENV: 'production',
+      DATABASE_URL: '',
+      ALLOW_JSON_STORE_IN_PRODUCTION: '',
+      ALLOW_JSON_FALLBACK_ON_DB_ERROR: '',
+      PORT: String(serverPort),
+      DATA_DIR: dataDir,
+      CLIENT_ORIGINS: '*',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const stderr = [];
+  child.stderr.on('data', chunk => stderr.push(String(chunk)));
+  try {
+    const [code] = await waitForExit(child);
+    assert.notEqual(code, 0);
+    assert.match(stderr.join(''), /DATABASE_URL is required in production/);
+  } finally {
+    child.kill('SIGTERM');
+    await rm(dataDir, { recursive: true, force: true });
+  }
 });
 
 test('push notification tokens can register, rotate, and unregister', async () => {
