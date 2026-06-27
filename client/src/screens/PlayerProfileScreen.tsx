@@ -9,7 +9,7 @@ import { ShoppingBag } from 'lucide-react-native';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
-import { getAvatarFrameVisual } from '../theme/cosmetics';
+import { PlayerAvatar } from '../components/PlayerAvatar';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PlayerProfile'>;
 
@@ -68,7 +68,6 @@ export default function PlayerProfileScreen({ route, navigation }: Props) {
     );
   }
 
-  const avatarFrame = getAvatarFrameVisual(profile.cosmetics.avatarFrame);
   const primaryLabel = profile.relationship === 'self'
     ? 'Your Profile'
     : profile.relationship === 'friend'
@@ -87,9 +86,7 @@ export default function PlayerProfileScreen({ route, navigation }: Props) {
           <Text style={styles.backText}>Back</Text>
         </Pressable>
         <View style={styles.topActions}>
-          <Pressable style={styles.topAvatar} onPress={() => navigation.navigate('Profile')}>
-            <Text style={styles.topAvatarText}>{user?.avatarInitial ?? '?'}</Text>
-          </Pressable>
+          <PlayerAvatar cosmetics={user?.inventory.equipped} fallbackInitial={user?.avatarInitial ?? '?'} size={40} onPress={() => navigation.navigate('Profile')} />
           <Pressable style={styles.topShopButton} onPress={() => navigation.navigate('Shop')}>
             <ShoppingBag size={18} color="#FFCC66" strokeWidth={2.8} />
           </Pressable>
@@ -97,9 +94,7 @@ export default function PlayerProfileScreen({ route, navigation }: Props) {
       </View>
 
       <View style={styles.hero}>
-        <View style={[styles.avatar, { borderColor: avatarFrame.borderColor, backgroundColor: avatarFrame.backgroundColor }]}>
-          <Text style={styles.avatarText}>{profile.avatarInitial}</Text>
-        </View>
+        <PlayerAvatar cosmetics={profile.cosmetics} fallbackInitial={profile.avatarInitial} size={78} />
         <View style={styles.heroCopy}>
           <Text style={styles.name} numberOfLines={1}>{profile.displayName}</Text>
           <Text style={styles.meta}>Level {profile.progression.level} - {profile.competitive.league.name}</Text>
@@ -132,7 +127,7 @@ export default function PlayerProfileScreen({ route, navigation }: Props) {
       <SectionTitle title="Ranked" />
       <View style={styles.infoCard}>
         <Text style={styles.infoTitle}>{profile.competitive.league.name}</Text>
-        <Text style={styles.infoMeta}>{profile.competitive.mmr} MMR - {profile.competitive.wins}W / {profile.competitive.losses}L</Text>
+        <Text style={styles.infoMeta}>{profile.competitive.wins}W / {profile.competitive.losses}L</Text>
         <Text style={styles.infoMeta}>Season best: {profile.competitive.seasonBestLeague.name}</Text>
       </View>
 

@@ -4,7 +4,7 @@ import path from 'path';
 import { COSMETIC_CATALOG } from './progression.js';
 
 const MAX_ASSET_BYTES = 2 * 1024 * 1024;
-const VALID_TYPES = new Set(['cardBack', 'avatarFrame', 'title', 'tableTheme']);
+const VALID_TYPES = new Set(['cardBack', 'avatarFrame', 'avatarIcon', 'title', 'tableTheme']);
 const VALID_CATEGORIES = new Set(['starter', 'coin', 'ranked', 'club', 'event']);
 const VALID_RARITIES = new Set(['starter', 'common', 'rare', 'epic', 'legendary']);
 const VALID_UNLOCKS = new Set(['none', 'level', 'achievement', 'rank', 'club', 'event', 'season']);
@@ -34,7 +34,7 @@ function numberOrNull(value) {
 function normalizeVisual(input = {}, type = 'cardBack') {
   const visual = input && typeof input === 'object' ? input : {};
   const result = {};
-  for (const key of ['backgroundColor', 'borderColor', 'accentColor', 'textColor', 'mark', 'pattern', 'feltColor', 'railColor']) {
+  for (const key of ['backgroundColor', 'borderColor', 'accentColor', 'textColor', 'mark', 'icon', 'pattern', 'feltColor', 'railColor']) {
     if (visual[key] !== undefined) result[key] = cleanText(visual[key], key === 'mark' ? 8 : 32);
   }
   result.kind = cleanText(visual.kind || 'preset', 24);

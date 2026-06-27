@@ -966,11 +966,12 @@ test('quick play joins compatible rooms and starts a full-room countdown', async
   await withServer(async (baseUrl) => {
     const one = await signup(baseUrl, `QuickOne${Date.now()}`);
     const two = await signup(baseUrl, `QuickTwo${Date.now()}`);
-    const privateRoom = await json(await fetch(`${baseUrl}/rooms`, {
+    const createdRoom = await json(await fetch(`${baseUrl}/rooms`, {
       method: 'POST',
       headers: authHeaders(one.token),
       body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
     }));
+    assert.equal(createdRoom.room.isPublic, true);
 
     const first = await json(await fetch(`${baseUrl}/rooms/quick-play`, {
       method: 'POST',
@@ -985,7 +986,7 @@ test('quick play joins compatible rooms and starts a full-room countdown', async
       headers: authHeaders(two.token),
     }));
     assert.equal(openBeforeJoin.rooms.some(room => room.code === first.room.code), true);
-    assert.equal(openBeforeJoin.rooms.some(room => room.code === privateRoom.room.code), false);
+    assert.equal(openBeforeJoin.rooms.some(room => room.code === createdRoom.room.code), true);
 
     const second = await json(await fetch(`${baseUrl}/rooms/quick-play`, {
       method: 'POST',

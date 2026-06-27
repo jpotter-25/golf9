@@ -11,6 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
 import { isProviderConfigured } from '../services/socialAuth';
 import { ActionButton, PremiumPanel, ProgressBar, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
+import { PlayerAvatar } from '../components/PlayerAvatar';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Profile'>;
 type ProfileTab = 'stats' | 'matches' | 'avatar' | 'cosmetics' | 'social';
@@ -136,9 +137,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
       />
 
       <PremiumPanel tone="felt" style={styles.hero}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{user?.avatarInitial ?? '?'}</Text>
-        </View>
+        <PlayerAvatar cosmetics={user?.inventory.equipped} fallbackInitial={user?.avatarInitial ?? '?'} size={82} />
         <View style={styles.heroCopy}>
           <Text style={styles.name} numberOfLines={1}>{user?.displayName ?? 'Player'}</Text>
           <Text style={styles.meta}>Level {progression?.level ?? 1} - {user?.competitive.league.name ?? 'Silver III'}</Text>
@@ -182,8 +181,8 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
                 return (
                   <View key={count} style={styles.ladderCard}>
                     <Text style={styles.ladderCount}>{count}P</Text>
-                    <Text style={styles.ladderMmr}>{ladder?.mmr ?? 1000}</Text>
-                    <Text style={styles.ladderLeague} numberOfLines={1}>{ladder?.league.name ?? 'Silver III'}</Text>
+                    <Text style={styles.ladderMmr} numberOfLines={1}>{ladder?.league.name ?? 'Silver III'}</Text>
+                    <Text style={styles.ladderLeague} numberOfLines={1}>{ladder?.rankedGames ?? 0} ranked games</Text>
                   </View>
                 );
               })}
@@ -232,11 +231,12 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
       {tab === 'avatar' ? (
         <PremiumPanel>
           <View style={styles.avatarLarge}>
-            <Text style={styles.avatarLargeText}>{user?.avatarInitial ?? '?'}</Text>
+            <PlayerAvatar cosmetics={user?.inventory.equipped} fallbackInitial={user?.avatarInitial ?? '?'} size={92} />
           </View>
           <Text style={styles.avatarName}>{user?.displayName ?? 'Player'}</Text>
           <View style={styles.collectionRow}>
             <CollectionItem label="Title" value={user?.inventory.equipped.title ?? 'rookie-title'} />
+            <CollectionItem label="Avatar Icon" value={user?.inventory.equipped.avatarIcon ?? 'classic-avatar-icon'} />
             <CollectionItem label="Avatar Frame" value={user?.inventory.equipped.avatarFrame ?? 'rookie-avatar-frame'} />
             <CollectionItem label="Table" value={user?.inventory.equipped.tableTheme ?? 'classic-table-theme'} />
           </View>
@@ -377,7 +377,7 @@ function ResultRow({ result, userId }: { result: api.GameResult; userId?: string
   const reward = mine?.economy
     ? `${mine.economy.net >= 0 ? '+' : ''}${mine.economy.net} coins`
     : mine?.ranked
-      ? `${mine.ranked.mmrDelta > 0 ? '+' : ''}${mine.ranked.mmrDelta} MMR`
+      ? 'Ranked'
       : `+${mine?.progression?.xpGained ?? 0} XP`;
   return (
     <View style={styles.resultRow}>
@@ -428,6 +428,7 @@ function sortCosmetics(items: api.CosmeticItem[]) {
 function groupCosmeticsByType(items: api.CosmeticItem[]) {
   const groups = [
     { key: 'cardBack', title: 'Card Backs', items: items.filter(item => item.type === 'cardBack') },
+    { key: 'avatarIcon', title: 'Avatar Icons', items: items.filter(item => item.type === 'avatarIcon') },
     { key: 'avatarFrame', title: 'Avatar Frames', items: items.filter(item => item.type === 'avatarFrame') },
     { key: 'title', title: 'Titles', items: items.filter(item => item.type === 'title') },
     { key: 'tableTheme', title: 'Table Themes', items: items.filter(item => item.type === 'tableTheme') },
@@ -439,6 +440,7 @@ function groupCosmeticsByType(items: api.CosmeticItem[]) {
 
 function cosmeticTypeLabel(type: string) {
   if (type === 'cardBack') return 'Card';
+  if (type === 'avatarIcon') return 'Icon';
   if (type === 'avatarFrame') return 'Frame';
   if (type === 'tableTheme') return 'Table';
   return 'Title';
@@ -539,7 +541,7 @@ const styles = StyleSheet.create({
   resultIconText: { color: ui.text.inverse, fontSize: 14, fontWeight: '900' },
   rowReward: { color: ui.palette.gold, fontSize: 12, fontWeight: '900', maxWidth: 86, textAlign: 'right' },
   emptyText: { color: ui.text.muted, fontSize: 13, fontWeight: '800', lineHeight: 19, textAlign: 'center', marginVertical: 12 },
-  avatarLarge: { alignSelf: 'center', width: 118, height: 118, borderRadius: 59, borderWidth: 4, borderColor: ui.palette.emerald, backgroundColor: ui.palette.feltLight, alignItems: 'center', justifyContent: 'center' },
+  avatarLarge: { alignSelf: 'center', width: 118, height: 118, alignItems: 'center', justifyContent: 'center' },
   avatarLargeText: { color: ui.text.primary, fontSize: 54, fontWeight: '900' },
   avatarName: { color: ui.text.primary, fontSize: 22, fontWeight: '900', textAlign: 'center', marginTop: 12 },
   collectionRow: { gap: 8, marginVertical: 14 },

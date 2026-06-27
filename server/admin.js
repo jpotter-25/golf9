@@ -561,13 +561,13 @@ export function addSupportNote(store, ticketId, admin, note) {
   return { ticket: publicTicket(ticket) };
 }
 
-export function adminEconomySummary(users) {
+export function adminEconomySummary(users, economyConfig = null) {
   const allUsers = [...users.values()];
   return {
     users: allUsers.length,
     totalCoins: allUsers.reduce((sum, user) => sum + (user.currency?.coins || 0), 0),
     totalLifetimeCoins: allUsers.reduce((sum, user) => sum + (user.currency?.lifetimeCoins || 0), 0),
-    catalog: publicEconomyCatalog(),
+    catalog: publicEconomyCatalog(null, economyConfig),
   };
 }
 

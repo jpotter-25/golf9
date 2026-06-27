@@ -261,7 +261,7 @@ function ShopItemTile({ item, busy, onPress }: { item: api.CosmeticItem; busy: b
 }
 
 function cosmeticBadge(item: api.CosmeticItem) {
-  const label = item.type === 'cardBack' ? 'CB' : item.type === 'avatarFrame' ? 'AF' : item.type === 'tableTheme' ? 'TB' : 'T';
+  const label = item.type === 'cardBack' ? 'CB' : item.type === 'avatarIcon' ? 'AI' : item.type === 'avatarFrame' ? 'AF' : item.type === 'tableTheme' ? 'TB' : 'T';
   if (item.type === 'cardBack') {
     const visual = getCardBackVisual(item.id);
     return { label, style: { backgroundColor: visual.backgroundColor, borderColor: visual.borderColor } };
@@ -269,6 +269,9 @@ function cosmeticBadge(item: api.CosmeticItem) {
   if (item.type === 'avatarFrame') {
     const visual = getAvatarFrameVisual(item.id);
     return { label, style: { backgroundColor: visual.backgroundColor, borderColor: visual.borderColor } };
+  }
+  if (item.type === 'avatarIcon') {
+    return { label, style: { backgroundColor: '#123B32', borderColor: '#52E5A7' } };
   }
   if (item.type === 'tableTheme') {
     const visual = getTableThemeVisual(item.id);
@@ -293,6 +296,12 @@ function groupCosmeticsByType(items: api.CosmeticItem[]) {
       title: 'Card Backs',
       subtitle: 'The back design shown on your cards.',
       items: items.filter(item => item.type === 'cardBack'),
+    },
+    {
+      key: 'avatarIcon',
+      title: 'Avatar Icons',
+      subtitle: 'The icon shown inside your player avatar.',
+      items: items.filter(item => item.type === 'avatarIcon'),
     },
     {
       key: 'avatarFrame',

@@ -87,6 +87,11 @@
           <div class="panel">
             <h2>Economy</h2>
             <button id="loadEconomy">Refresh Economy</button>
+            <form id="economyConfigEditor" class="editor">
+              <label>Wager tables JSON <textarea name="wagerTables" rows="8" placeholder='[{"id":"wager-50","label":"50","buyIn":50,"description":"Buy in for 50 coins."}]'></textarea></label>
+              <label>Reason <input name="reason" placeholder="Required audit reason" /></label>
+              <button type="submit">Save Wager Config</button>
+            </form>
             <pre id="economyOutput"></pre>
           </div>
         </section>
@@ -180,6 +185,7 @@
               <select id="catalogFilter">
                 <option value="">All categories</option>
                 <option value="cardBack">Card backs</option>
+                <option value="avatarIcon">Avatar icons</option>
                 <option value="avatarFrame">Avatar frames</option>
                 <option value="title">Titles</option>
                 <option value="tableTheme">Table themes</option>
@@ -203,6 +209,7 @@
                   <label>Type
                     <select name="type">
                       <option value="cardBack">Card Back</option>
+                      <option value="avatarIcon">Avatar Icon</option>
                       <option value="avatarFrame">Avatar Frame</option>
                       <option value="title">Title</option>
                       <option value="tableTheme">Table Theme</option>

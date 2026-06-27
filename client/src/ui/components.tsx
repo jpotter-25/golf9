@@ -18,6 +18,7 @@ import { useNavigation, useRoute, type NavigationProp, type ParamListBase } from
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { getGameplayPreferences, setGameplayPreferences, subscribeGameplayPreferences } from '../services/preferences';
+import { PlayerAvatar } from '../components/PlayerAvatar';
 import { gradients, ui } from './theme';
 
 type ShellProps = {
@@ -107,9 +108,7 @@ function GlobalTopBar() {
         ) : null}
 
         <Pressable accessibilityRole="button" accessibilityLabel="Open profile" style={styles.playerChip} onPress={() => navigation.navigate('Profile')}>
-          <View style={styles.topAvatar}>
-            <Text style={styles.topAvatarText}>{user?.avatarInitial ?? '?'}</Text>
-          </View>
+          <PlayerAvatar cosmetics={user?.inventory.equipped} fallbackInitial={user?.avatarInitial ?? '?'} size={42} />
           <View style={styles.playerMeta}>
             <Text style={styles.playerName} numberOfLines={1}>{user?.displayName ?? 'Player'}</Text>
             <View style={styles.xpTrack}>
@@ -126,7 +125,7 @@ function GlobalTopBar() {
 
         <Pressable accessibilityRole="button" accessibilityLabel="Open ranked profile" style={styles.rankChip} onPress={() => navigation.navigate('Profile')}>
           <Trophy size={15} color={ui.palette.sky} strokeWidth={2.8} />
-          <Text style={styles.rankValue} numberOfLines={1}>{ranked?.mmr ?? 1000}</Text>
+          <Text style={styles.rankValue} numberOfLines={1}>{ranked?.league.name ?? 'Silver III'}</Text>
         </Pressable>
 
         <Pressable accessibilityRole="button" accessibilityLabel="Open settings" style={styles.topIconButton} onPress={() => setSettingsOpen(true)}>

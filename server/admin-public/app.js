@@ -67,6 +67,7 @@ function bindConsoleActions() {
   document.querySelector('#inviteEditor').addEventListener('submit', createInvite);
   document.querySelector('#loadTickets').addEventListener('click', loadTickets);
   document.querySelector('#loadEconomy').addEventListener('click', loadEconomy);
+  document.querySelector('#economyConfigEditor').addEventListener('submit', saveEconomyConfig);
   document.querySelector('#loadCompetitive').addEventListener('click', loadCompetitive);
   document.querySelector('#publishCompetitive').addEventListener('click', publishCompetitive);
   document.querySelector('#rollbackCompetitive').addEventListener('click', rollbackCompetitive);
@@ -142,7 +143,7 @@ function renderUserDetail(user) {
     </div>
     <div class="card">
       <strong>Equipped</strong>
-      <p class="muted">Card: ${escapeHtml(equipped.cardBack || 'default')} - Frame: ${escapeHtml(equipped.avatarFrame || 'default')} - Title: ${escapeHtml(equipped.title || 'default')} - Table: ${escapeHtml(equipped.tableTheme || 'default')}</p>
+      <p class="muted">Card: ${escapeHtml(equipped.cardBack || 'default')} - Icon: ${escapeHtml(equipped.avatarIcon || 'default')} - Frame: ${escapeHtml(equipped.avatarFrame || 'default')} - Title: ${escapeHtml(equipped.title || 'default')} - Table: ${escapeHtml(equipped.tableTheme || 'default')}</p>
     </div>
     <div class="card">
       <strong>Devices</strong>
@@ -288,6 +289,33 @@ async function loadTickets() {
 
 async function loadEconomy() {
   const data = await api('/economy');
+  document.querySelector('#economyOutput').textContent = JSON.stringify(data.economy, null, 2);
+  const form = document.querySelector('#economyConfigEditor');
+  if (form) {
+    form.wagerTables.value = JSON.stringify(data.config?.wagerTables || data.economy?.catalog?.wagerTables || [], null, 2);
+  }
+}
+
+async function saveEconomyConfig(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  let wagerTables;
+  try {
+    wagerTables = JSON.parse(form.wagerTables.value || '[]');
+  } catch {
+    alert('Wager tables JSON is invalid.');
+    return;
+  }
+  const reason = form.reason.value.trim();
+  if (!reason) {
+    alert('Reason is required.');
+    return;
+  }
+  const data = await api('/economy/config', {
+    method: 'PATCH',
+    body: JSON.stringify({ reason, config: { wagerTables } }),
+  });
+  form.reason.value = '';
   document.querySelector('#economyOutput').textContent = JSON.stringify(data.economy, null, 2);
 }
 

@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as NavigationBar from 'expo-navigation-bar';
 import { Audio } from 'expo-av';
-import { Bell, MessageCircle, MoreHorizontal, ShoppingBag, UserCircle } from 'lucide-react-native';
+import { Bell, MessageCircle, MoreHorizontal, ShoppingBag } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import type { GameState, Card, Grid } from '../game/types';
@@ -21,12 +21,13 @@ import {
 import GridView from '../components/Grid';
 import Piles from '../components/Piles';
 import CardView from '../components/Card';
+import { PlayerAvatar } from '../components/PlayerAvatar';
 import { useBoardMetrics } from '../utils/scaling';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
 import { connect, joinRoomSocket, onChatHistory, onChatMessage, onGameCelebration, onGameUpdate, onRoomUpdate, onSocketConnect, sendChatMessage, sendGameIntent, type ChatMessage, type ChatMessageType } from '../services/network';
 import { getGameplayPreferences, setGameplayPreferences, subscribeGameplayPreferences, type GameplayPreferences } from '../services/preferences';
-import { getAvatarFrameVisual, getTableThemeVisual, type EquippedCosmetics } from '../theme/cosmetics';
+import { getTableThemeVisual, type EquippedCosmetics } from '../theme/cosmetics';
 import { actionCopy, layerZ, ui, type GameActionModel, type GameLayerState, type GameNotice } from '../ui';
 import {
   cardValue,
@@ -200,8 +201,12 @@ export default function GameScreen({ route, navigation }: Props) {
 
   const openPlayerProfile = useCallback((userId?: string) => {
     if (!isOnline || !userId) return;
+    if (userId === user?.userId) {
+      navigation.navigate('Profile');
+      return;
+    }
     navigation.navigate('PlayerProfile', { userId });
-  }, [isOnline, navigation]);
+  }, [isOnline, navigation, user?.userId]);
 
   const showGameplayNotice = useCallback((
     notice: TurnNotice,
@@ -1258,6 +1263,8 @@ export default function GameScreen({ route, navigation }: Props) {
   };
 
   // ===== Render =====
+  const bottomRoomPlayer = roomPlayersById.get(bottomPlayer.userId);
+  const bottomConnected = !isOnline || (bottomRoomPlayer?.connected ?? bottomPlayer.connected ?? true);
   const timerLabel = `${secsLeft}s`;
   return (
     <LinearGradient colors={[tableTheme.backgroundColor, ui.palette.ink, ui.surface.base]} style={styles.container}>
@@ -1290,6 +1297,12 @@ export default function GameScreen({ route, navigation }: Props) {
         ) : null}
         <Pressable
           style={[styles.chatButton, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }]}
+          onPress={() => navigation.navigate('Shop')}
+        >
+          <ShoppingBag size={22} color={ui.palette.gold} strokeWidth={2.5} />
+        </Pressable>
+        <Pressable
+          style={[styles.chatButton, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }]}
           onPress={() => setAlertSettingsOpen(true)}
         >
           <MoreHorizontal size={23} color={ui.text.primary} strokeWidth={2.7} />
@@ -1301,72 +1314,56 @@ export default function GameScreen({ route, navigation }: Props) {
           </View>
         ) : null}
       </View>
-      <View style={styles.scoreStrip}>
-        {state.players.map((player, index) => {
-          const frame = getAvatarFrameVisual(playerCosmetics(player, index)?.avatarFrame);
-          const roomPlayer = roomPlayersById.get(player.userId);
-          const connected = !isOnline || (roomPlayer?.connected ?? player.connected ?? true);
-          return (
-            <Pressable
-              key={player.id ?? player.userId}
-              disabled={!isOnline}
-              onPress={() => openPlayerProfile(player.userId)}
-              style={[
-                styles.scorePill,
-                { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor },
-                index === activeIndex && [styles.scorePillActive, { borderColor: tableTheme.accentColor, backgroundColor: tableTheme.activePanelColor }],
-              ]}
-            >
-              <View style={[styles.scoreAvatar, { borderColor: frame.borderColor, backgroundColor: frame.backgroundColor }]}>
-                <Text style={styles.scoreAvatarText}>{player.avatarInitial ?? player.name.slice(0, 1).toUpperCase()}</Text>
-                <View style={[styles.connectionDot, connected ? styles.connectionDotOnline : styles.connectionDotOffline]} />
-              </View>
-              <View style={styles.scoreCopy}>
-                <Text style={[styles.scoreName, index === activeIndex && styles.activeName]}>{player.name}</Text>
-                <Text style={styles.scoreMeta}>{index === activeIndex && !isRoundReveal && !isRoundSummary ? 'TURN' : connected ? 'ONLINE' : 'OFFLINE'}</Text>
-              </View>
-              <View style={styles.scoreValues}>
-                <Text style={styles.scoreNow}>Now {visibleRoundScores[index] ?? 0}</Text>
-                <Text style={styles.scoreValue}>Tot {totals[index] ?? 0}</Text>
-              </View>
-            </Pressable>
-          );
-        })}
-      </View>
 
       {/* Table/Base Layer */}
       <View style={{ paddingHorizontal: 8, paddingBottom: 6 }}>
         <View style={[styles.oppRow, { justifyContent: oppCount === 3 ? 'space-between' : 'flex-start' }]}>
-          {opponents.map(({ p, i }, idx) => (
-            <Pressable
-              key={p.id ?? idx}
-              disabled={!isOnline}
-              onPress={() => openPlayerProfile(p.userId)}
-              style={[
-                styles.oppCard,
-                { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor },
-                i === activeIndex && [styles.oppCardActive, { borderColor: tableTheme.accentColor, backgroundColor: tableTheme.activePanelColor }],
-                {
-                  width: oppPanelWidth,
-                  padding: OPP_INNER_PAD,
-                  overflow: 'visible',
-                  marginRight: oppCount === 3 ? 0 : 8,
-                },
-              ]}
-            >
-              <SocialBurstBubble burst={socialBursts[p.userId]} compact />
-              <View style={styles.oppHeader}>
-                <Text style={[styles.subtle, styles.oppName, i === activeIndex && styles.activeName]} numberOfLines={1}>{p.name}</Text>
-                {i === activeIndex && !isRoundReveal && !isRoundSummary ? <Text style={styles.turnBadgeSmall}>TURN</Text> : null}
+          {opponents.map(({ p, i }, idx) => {
+            const roomPlayer = roomPlayersById.get(p.userId);
+            const connected = !isOnline || (roomPlayer?.connected ?? p.connected ?? true);
+            const active = i === activeIndex && !isRoundReveal && !isRoundSummary;
+            return (
+              <View
+                key={p.id ?? idx}
+                style={[
+                  styles.oppCard,
+                  { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor },
+                  i === activeIndex && [styles.oppCardActive, { borderColor: tableTheme.accentColor, backgroundColor: tableTheme.activePanelColor }],
+                  {
+                    width: oppPanelWidth,
+                    padding: OPP_INNER_PAD,
+                    overflow: 'visible',
+                    marginRight: oppCount === 3 ? 0 : 8,
+                  },
+                ]}
+              >
+                <SocialBurstBubble burst={socialBursts[p.userId]} compact />
+                <View style={styles.playerGridHeader}>
+                  <PlayerAvatar
+                    cosmetics={playerCosmetics(p, i)}
+                    fallbackInitial={p.avatarInitial ?? p.name}
+                    size={30}
+                    onPress={() => openPlayerProfile(p.userId)}
+                    disabled={!isOnline}
+                  />
+                  <View style={styles.playerGridNameBlock}>
+                    <Text style={[styles.subtle, styles.oppName, i === activeIndex && styles.activeName]} numberOfLines={1}>{p.name}</Text>
+                    <Text style={styles.playerGridMeta}>{active ? 'TURN' : connected ? 'ONLINE' : 'OFFLINE'}</Text>
+                  </View>
+                  <View style={styles.inlineScores}>
+                    <Text style={styles.scoreNow}>Now {visibleRoundScores[i] ?? 0}</Text>
+                    <Text style={styles.scoreValue}>Tot {totals[i] ?? 0}</Text>
+                  </View>
+                </View>
+                <GridView
+                  grid={p.grid}
+                  metrics={metrics.opp}
+                  activeCell={pending?.playerIndex === i ? pending : null}
+                  cardBackId={playerCosmetics(p, i)?.cardBack}
+                />
               </View>
-              <GridView
-                grid={p.grid}
-                metrics={metrics.opp}
-                activeCell={pending?.playerIndex === i ? pending : null}
-                cardBackId={playerCosmetics(p, i)?.cardBack}
-              />
-            </Pressable>
-          ))}
+            );
+          })}
         </View>
       </View>
 
@@ -1401,12 +1398,27 @@ export default function GameScreen({ route, navigation }: Props) {
       >
         <SocialBurstBubble burst={socialBursts[bottomPlayer.userId]} />
         <View style={styles.localTitleRow}>
-          <Pressable disabled={!isOnline} onPress={() => openPlayerProfile(bottomPlayer.userId)} style={styles.localTitlePressable}>
-            <Text style={[styles.meTitle, bottomIsActive && styles.activeName]}>
-              {isOnline || isSolo ? 'Your Grid' : bottomPlayer.name}
-            </Text>
-          </Pressable>
-          {bottomIsActive && !isRoundReveal && !isRoundSummary ? <Text style={styles.turnBadge}>{state.phase === 'peek' ? 'PEEK' : 'TURN'}</Text> : null}
+          <View style={styles.localIdentity}>
+            <PlayerAvatar
+              cosmetics={playerCosmetics(bottomPlayer, bottomIndex)}
+              fallbackInitial={bottomPlayer.avatarInitial ?? bottomPlayer.name}
+              size={38}
+              onPress={() => openPlayerProfile(bottomPlayer.userId)}
+              disabled={!isOnline}
+            />
+            <View style={styles.localTitlePressable}>
+              <Text style={[styles.meTitle, bottomIsActive && styles.activeName]} numberOfLines={1}>
+                {isOnline || isSolo ? 'Your Grid' : bottomPlayer.name}
+              </Text>
+              <Text style={styles.playerGridMeta}>
+                {bottomIsActive && !isRoundReveal && !isRoundSummary ? (state.phase === 'peek' ? 'PEEK' : 'TURN') : bottomConnected ? 'ONLINE' : 'OFFLINE'}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.localScoreBox}>
+            <Text style={styles.scoreNow}>Now {visibleRoundScores[bottomIndex] ?? 0}</Text>
+            <Text style={styles.scoreValue}>Tot {totals[bottomIndex] ?? 0}</Text>
+          </View>
         </View>
         <GridView
           grid={bottomPlayer.grid}
@@ -1498,32 +1510,11 @@ export default function GameScreen({ route, navigation }: Props) {
         <View style={styles.settingsScrim}>
           <View style={styles.settingsCard}>
             <View style={styles.settingsHeader}>
-              <Text style={styles.settingsTitle}>Table Menu</Text>
+              <Text style={styles.settingsTitle}>Settings</Text>
               <Pressable style={styles.settingsCloseButton} onPress={() => setAlertSettingsOpen(false)}>
                 <Text style={styles.chatCloseText}>X</Text>
               </Pressable>
             </View>
-            <Pressable
-              style={styles.menuAction}
-              onPress={() => {
-                setAlertSettingsOpen(false);
-                navigation.navigate('Profile');
-              }}
-            >
-              <UserCircle size={21} color={ui.palette.emerald} strokeWidth={2.5} />
-              <Text style={styles.menuActionText}>Profile</Text>
-            </Pressable>
-            <Pressable
-              style={styles.menuAction}
-              onPress={() => {
-                setAlertSettingsOpen(false);
-                navigation.navigate('Shop');
-              }}
-            >
-              <ShoppingBag size={21} color={ui.palette.gold} strokeWidth={2.5} />
-              <Text style={styles.menuActionText}>Shop</Text>
-            </Pressable>
-            <View style={styles.settingsDivider} />
             <View style={styles.settingsSectionHeader}>
               <Bell size={18} color={ui.palette.gold} strokeWidth={2.5} />
               <Text style={styles.settingsSectionTitle}>Turn Alerts</Text>
@@ -1758,7 +1749,7 @@ function RewardSummary({ progression }: { progression: api.MatchProgressionSumma
       {progression.ranked ? (
         <>
           <Text style={styles.rewardRanked}>
-            {progression.ranked.mmrDelta >= 0 ? '+' : ''}{progression.ranked.mmrDelta} MMR  {progression.ranked.mmrBefore}{' -> '}{progression.ranked.mmrAfter}
+            Ranked ladder updated
           </Text>
           <Text style={styles.rewardRankedMeta}>
             {progression.ranked.placementComplete
@@ -1804,7 +1795,7 @@ function formatProgressionSummary(progression: api.MatchProgressionSummary | nul
   if (!progression) return '';
   const lines = [`Rewards: +${progression.xpGained} XP, +${progression.coinsGained} coins`];
   if (progression.ranked) {
-    lines.push(`Ranked: ${progression.ranked.mmrDelta >= 0 ? '+' : ''}${progression.ranked.mmrDelta} MMR`);
+    lines.push('Ranked ladder updated');
     lines.push(progression.ranked.placementComplete
       ? `League: ${progression.ranked.leagueAfter.name}`
       : `Placement ${progression.ranked.placementsPlayed}/${progression.ranked.placementMatchesRequired}`);
@@ -2329,11 +2320,23 @@ const styles = StyleSheet.create({
   oppCardActive: { borderColor: '#4DA3FF', backgroundColor: '#17204A' },
   oppHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 2 },
   oppName: { flex: 1, minWidth: 0 },
+  playerGridHeader: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 5,
+  },
+  playerGridNameBlock: { flex: 1, minWidth: 0 },
+  playerGridMeta: { color: '#9BA3C7', fontSize: 8, fontWeight: '900', marginTop: 1 },
+  inlineScores: { alignItems: 'flex-end', flexShrink: 0 },
 
   localPanel: { position: 'relative', paddingHorizontal: 10, paddingTop: 8, paddingBottom: 6, borderTopWidth: 1, borderTopColor: 'transparent' },
   localPanelActive: { borderTopColor: '#4DA3FF', backgroundColor: '#0F1530' },
   localTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
+  localIdentity: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 },
   localTitlePressable: { flex: 1, minWidth: 0 },
+  localScoreBox: { alignItems: 'flex-end', marginLeft: 8 },
   meTitle: { color: '#E8ECF1', fontSize: 15, fontWeight: '900' },
   activeName: { color: '#E8ECF1' },
   turnBadge: {

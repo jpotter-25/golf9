@@ -1,15 +1,16 @@
 // client/src/screens/OnlineRoomScreen.tsx
-// Purpose: Online multiplayer room lobby with create, join, quick play, ready state, and countdown.
+// Purpose: Online multiplayer room lobby with create, join, auto-match, invites, and countdown.
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { ChevronLeft, DoorOpen, Send, Shield, Users, Zap } from 'lucide-react-native';
+import { ChevronLeft, DoorOpen, Shield, Users } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
-import { createOnlineRoom, inviteFriendToRoom, joinOnlineRoom, quickPlayOnlineRoom, socialMe, wagerPlayOnlineRoom, PublicPlayerSummary, RoomSummary } from '../services/api';
-import { joinRoomSocket, leaveOnlineRoom, onRoomUpdate, setReady, startOnlineGame } from '../services/network';
+import { createOnlineRoom, inviteFriendToRoom, joinOnlineRoom, quickPlayOnlineRoom, socialMe, wagerPlayOnlineRoom, PublicPlayerSummary, RoomPlayer, RoomSummary } from '../services/api';
+import { joinRoomSocket, leaveOnlineRoom, onRoomUpdate } from '../services/network';
 import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
+import { PlayerAvatar } from '../components/PlayerAvatar';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'OnlineRoom'>;
 
@@ -113,25 +114,6 @@ export default function OnlineRoomScreen({ route, navigation }: Props) {
     }
   };
 
-  const toggleReady = async () => {
-    if (!token || !room || !user) return;
-    try {
-      const current = room.players.find(player => player.userId === user.userId)?.ready ?? false;
-      await setReady(token, room.code, !current);
-    } catch (error) {
-      Alert.alert('Ready failed', error instanceof Error ? error.message : 'Try again.');
-    }
-  };
-
-  const start = async () => {
-    if (!token || !room) return;
-    try {
-      await startOnlineGame(token, room.code);
-    } catch (error) {
-      Alert.alert('Cannot start', error instanceof Error ? error.message : 'Try again.');
-    }
-  };
-
   const leave = async () => {
     try {
       if (token && room) await leaveOnlineRoom(token, room.code);
@@ -151,6 +133,14 @@ export default function OnlineRoomScreen({ route, navigation }: Props) {
     } finally {
       setInviteBusyId(null);
     }
+  };
+
+  const openPlayer = (player: RoomPlayer) => {
+    if (player.userId === user?.userId) {
+      navigation.navigate('Profile');
+      return;
+    }
+    navigation.navigate('PlayerProfile', { userId: player.userId });
   };
 
   if (!room) {
@@ -188,11 +178,8 @@ export default function OnlineRoomScreen({ route, navigation }: Props) {
     );
   }
 
-  const isHost = room.hostUserId === user?.userId;
   const isRanked = room.matchType === 'ranked' || route.params.ranked;
   const isPaid = room.matchType === 'wager' || !!room.economy?.buyIn;
-  const canStart = isHost && room.players.length >= 2 && !room.countdownEndsAt;
-  const meReady = room.players.find(player => player.userId === user?.userId)?.ready ?? false;
   const countdownLeft = room.countdownEndsAt
     ? Math.max(0, Math.ceil((room.countdownEndsAt - now) / 1000))
     : 0;
@@ -204,7 +191,7 @@ export default function OnlineRoomScreen({ route, navigation }: Props) {
   return (
     <ScreenShell scroll>
       <ScreenHeader
-        eyebrow={isRanked ? 'Competitive Table' : room.matchType === 'wager' ? 'Coin Table' : 'Private Table'}
+        eyebrow={isRanked ? 'Competitive Table' : room.matchType === 'wager' ? 'Coin Table' : 'Online Table'}
         title={tableTitle}
         subtitle={`${room.players.length}/${room.maxPlayers} players - ${room.rounds} rounds`}
         right={<StatusBadge label={room.status.toUpperCase()} tone={isRanked ? 'gold' : 'sky'} />}
@@ -217,7 +204,7 @@ export default function OnlineRoomScreen({ route, navigation }: Props) {
           </View>
           <View style={styles.summaryCopy}>
             <Text style={styles.summaryLabel}>Table Settings</Text>
-            <Text style={styles.summaryValue}>{room.maxPlayers} players - {room.rounds} rounds{isRanked ? ' - MMR tracked' : ''}</Text>
+            <Text style={styles.summaryValue}>{room.maxPlayers} players - {room.rounds} rounds{isRanked ? ' - ranked ladder' : ''}</Text>
           </View>
         </View>
       </PremiumPanel>
@@ -252,20 +239,29 @@ export default function OnlineRoomScreen({ route, navigation }: Props) {
           <Pressable
             key={player?.userId ?? `empty-${index}`}
             disabled={!player}
-            onPress={() => player && navigation.navigate('PlayerProfile', { userId: player.userId })}
+            onPress={() => player && openPlayer(player)}
             style={[styles.playerRow, !player && styles.emptyRow]}
           >
-            <Text style={styles.avatar}>{player?.avatarInitial ?? `${index + 1}`}</Text>
+            {player ? (
+              <PlayerAvatar
+                cosmetics={player.cosmetics}
+                fallbackInitial={player.avatarInitial}
+                size={34}
+                onPress={() => openPlayer(player)}
+              />
+            ) : (
+              <Text style={styles.avatar}>{index + 1}</Text>
+            )}
             <View style={styles.playerInfo}>
               <Text style={styles.playerName}>
                 {player?.displayName ?? 'Open seat'}
                 {player?.isHost ? '  HOST' : ''}
               </Text>
               <Text style={styles.status}>
-                {player ? `${player.connected ? 'Online' : 'Offline'} - ${player.ready ? 'Ready' : 'Not ready'}` : 'Waiting'}
+                {player ? (player.connected ? 'Online' : 'Offline') : 'Waiting'}
               </Text>
             </View>
-            <Text style={[styles.readyDot, player?.ready && styles.readyDotOn]}>{player?.ready ? 'READY' : ''}</Text>
+            <Text style={[styles.readyDot, player && styles.readyDotOn]}>{player ? 'SEATED' : ''}</Text>
           </Pressable>
         ))}
       </PremiumPanel>
@@ -302,17 +298,11 @@ export default function OnlineRoomScreen({ route, navigation }: Props) {
       ) : null}
 
       <View style={styles.actionsStack}>
-        {isRanked ? (
-          <View style={styles.rankedNotice}>
-            <Text style={styles.rankedNoticeText}>Ranked starts automatically when the table is ready.</Text>
-          </View>
-        ) : (
-          <ActionButton label={meReady ? 'Set Not Ready' : 'Set Ready'} Icon={Zap} onPress={toggleReady} />
-        )}
-
-        {isHost && !isRanked ? (
-          <ActionButton label={room.countdownEndsAt ? 'Countdown Started' : 'Start Game'} Icon={Send} disabled={!canStart} onPress={start} />
-        ) : null}
+        <View style={styles.rankedNotice}>
+          <Text style={styles.rankedNoticeText}>
+            {room.countdownEndsAt ? 'The table is full. Starting automatically.' : 'The game starts automatically when every seat is filled.'}
+          </Text>
+        </View>
 
         <ActionButton label="Leave Room" Icon={ChevronLeft} tone="ghost" onPress={leave} />
       </View>

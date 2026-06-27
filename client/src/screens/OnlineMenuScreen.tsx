@@ -1,5 +1,5 @@
 // client/src/screens/OnlineMenuScreen.tsx
-// Purpose: Online table browser for private rooms, free play, wagers, and ranked.
+// Purpose: Online table browser for casual auto-match, coded rooms, wagers, and ranked.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -20,12 +20,17 @@ const ROUND_OPTIONS: RoundCount[] = [5, 9];
 export default function OnlineMenuScreen({ navigation }: Props) {
   const { token, user, refreshProfile } = useAuth();
   const [joinCode, setJoinCode] = useState('');
+  const [autoOpen, setAutoOpen] = useState(false);
+  const [joinOpen, setJoinOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [earnOpen, setEarnOpen] = useState(false);
+  const [autoPlayers, setAutoPlayers] = useState<PlayerCount>(4);
+  const [autoRounds, setAutoRounds] = useState<RoundCount>(9);
   const [createPlayers, setCreatePlayers] = useState<PlayerCount>(4);
   const [createRounds, setCreateRounds] = useState<RoundCount>(9);
-  const [freePlayers, setFreePlayers] = useState<PlayerCount | null>(null);
-  const [freeRounds, setFreeRounds] = useState<RoundCount | null>(null);
+  const [wagerPlayers, setWagerPlayers] = useState<PlayerCount>(4);
+  const [wagerRounds, setWagerRounds] = useState<RoundCount>(9);
+  const [wagerIndex, setWagerIndex] = useState(0);
   const [rankedPlayers, setRankedPlayers] = useState<PlayerCount>(2);
   const [economy, setEconomy] = useState<api.EconomyCatalog | null>(null);
   const [freeRooms, setFreeRooms] = useState<api.RoomSummary[]>([]);
@@ -44,27 +49,26 @@ export default function OnlineMenuScreen({ navigation }: Props) {
   const normalizedCode = joinCode.trim().toUpperCase();
   const canJoin = normalizedCode.length === 4;
   const rankedLadder = user?.competitiveByPlayers?.[String(rankedPlayers) as '2' | '3' | '4'] ?? user?.competitive;
+  const selectedWager = wagerTables[Math.min(wagerIndex, Math.max(0, wagerTables.length - 1))];
 
   const loadTables = useCallback(async () => {
     if (!token) return;
     const [free, wager] = await Promise.all([
-      api.openRooms(token, {
-        matchType: 'casual',
-        maxPlayers: freePlayers || undefined,
-        rounds: freeRounds || undefined,
-      }),
+      api.openRooms(token, { matchType: 'casual' }),
       api.openRooms(token, { matchType: 'wager' }),
     ]);
     setFreeRooms(free.rooms);
     setWagerRooms(wager.rooms);
-  }, [freePlayers, freeRounds, token]);
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
     api.economyCatalog(token)
       .then(response => {
         setEconomy(response);
-        setWagerTables(response.wagerTables.filter(table => table.buyIn > 0));
+        const tables = response.wagerTables.filter(table => table.buyIn > 0);
+        setWagerTables(tables);
+        setWagerIndex(current => Math.min(current, Math.max(0, tables.length - 1)));
       })
       .catch(() => {});
   }, [token]);
@@ -121,41 +125,22 @@ export default function OnlineMenuScreen({ navigation }: Props) {
       <ScreenHeader
         eyebrow="Online Multiplayer"
         title="Open Online Tables"
-        subtitle="Create a room, browse public tables, or queue for ranked."
+        subtitle="Auto-match, join by code, create tables, wager, or queue for ranked."
       />
 
       <PremiumPanel tone="felt">
         <View style={styles.cardHeader}>
           <View style={styles.cardCopy}>
-            <Text style={styles.cardTitle}>Create Room</Text>
-            <Text style={styles.cardMeta}>Private room with a code for friends.</Text>
+            <Text style={styles.cardTitle}>Casual Tables</Text>
+            <Text style={styles.cardMeta}>No buy-in. Match automatically, join a code, or host a public room.</Text>
           </View>
           <Users size={26} color={ui.palette.emerald} strokeWidth={2.6} />
         </View>
-        <ActionButton label="Set Up Private Room" Icon={DoorOpen} onPress={() => setCreateOpen(true)} />
-      </PremiumPanel>
-
-      <PremiumPanel>
-        <View style={styles.cardHeader}>
-          <View style={styles.cardCopy}>
-            <Text style={styles.cardTitle}>Free Play</Text>
-            <Text style={styles.cardMeta}>No buy-in. Earn coins without risking your stack.</Text>
-          </View>
-          <Sparkles size={26} color={ui.palette.gold} strokeWidth={2.6} />
+        <View style={styles.casualActions}>
+          <ActionButton label="Auto-Match" Icon={Sparkles} onPress={() => setAutoOpen(true)} />
+          <ActionButton label="Join Room" Icon={Search} tone="secondary" onPress={() => setJoinOpen(true)} />
+          <ActionButton label="Create Room" Icon={DoorOpen} tone="ghost" onPress={() => setCreateOpen(true)} />
         </View>
-        <FilterRow
-          players={freePlayers}
-          rounds={freeRounds}
-          onPlayers={setFreePlayers}
-          onRounds={setFreeRounds}
-          onClear={() => { setFreePlayers(null); setFreeRounds(null); }}
-        />
-        <ActionButton
-          label="Find Free Match"
-          Icon={Search}
-          tone="ghost"
-          onPress={() => navigation.navigate('OnlineRoom', { players: freePlayers ?? 4, rounds: freeRounds ?? 9, quickPlay: true })}
-        />
         <RoomList rooms={freeRooms} emptyText="No public free tables are waiting right now." busyRoomCode={busyRoomCode} onJoin={joinOpenRoom} />
       </PremiumPanel>
 
@@ -167,25 +152,25 @@ export default function OnlineMenuScreen({ navigation }: Props) {
           </View>
           <Coins size={26} color={ui.palette.gold} strokeWidth={2.6} />
         </View>
-        <View style={styles.wagerGrid}>
-          {wagerTables.map(table => {
-            const canAfford = balance >= table.buyIn;
-            const waiting = openWagerByTier.get(table.buyIn)?.length ?? 0;
-            return (
-              <Pressable
-                key={table.id}
-                style={[styles.wagerButton, !canAfford && styles.disabled]}
-                disabled={!canAfford}
-                onPress={() => navigation.navigate('OnlineRoom', { players: 4, rounds: 9, wagerBuyIn: table.buyIn })}
-              >
-                <Text style={styles.wagerText}>{table.buyIn}</Text>
-                <Text style={styles.wagerLabel}>{table.label}</Text>
-                <Text style={styles.wagerMeta}>{waiting ? `${waiting} waiting` : canAfford ? 'Find table' : 'Need coins'}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        <RoomList rooms={wagerRooms.slice(0, 4)} emptyText="No public wager tables are waiting right now." busyRoomCode={busyRoomCode} onJoin={joinOpenRoom} />
+        <WagerSlider tables={wagerTables} selectedIndex={wagerIndex} onSelect={setWagerIndex} balance={balance} waitingByBuyIn={openWagerByTier} />
+        <Text style={styles.modalLabel}>Players</Text>
+        <Segmented values={PLAYER_OPTIONS} selected={wagerPlayers} onSelect={setWagerPlayers} suffix="P" />
+        <Text style={styles.modalLabel}>Rounds</Text>
+        <Segmented values={ROUND_OPTIONS} selected={wagerRounds} onSelect={setWagerRounds} suffix="R" />
+        <ActionButton
+          label={selectedWager ? `Find ${selectedWager.buyIn.toLocaleString()} Coin Wager` : 'Wagers Unavailable'}
+          Icon={Coins}
+          tone="gold"
+          disabled={!selectedWager || balance < selectedWager.buyIn}
+          onPress={() => selectedWager && navigation.navigate('OnlineRoom', { players: wagerPlayers, rounds: wagerRounds, wagerBuyIn: selectedWager.buyIn })}
+          style={styles.wagerAction}
+        />
+        <RoomList
+          rooms={selectedWager ? wagerRooms.filter(room => room.economy.buyIn === selectedWager.buyIn).slice(0, 4) : []}
+          emptyText="No public wager tables are waiting at this buy-in."
+          busyRoomCode={busyRoomCode}
+          onJoin={joinOpenRoom}
+        />
       </PremiumPanel>
 
       <PremiumPanel tone="gold">
@@ -199,8 +184,8 @@ export default function OnlineMenuScreen({ navigation }: Props) {
         <Segmented values={PLAYER_OPTIONS} selected={rankedPlayers} onSelect={setRankedPlayers} suffix="P" />
         <View style={styles.rankedStats}>
           <StatMini label="Rounds" value="9" dark />
-          <StatMini label="MMR" value={String(rankedLadder?.mmr ?? 1000)} dark />
           <StatMini label="League" value={rankedLadder?.league.name ?? 'Silver III'} dark />
+          <StatMini label="Ladder" value={`${rankedPlayers}P`} dark />
         </View>
         <ActionButton
           label={`Find ${rankedPlayers}-Player Ranked Match`}
@@ -210,28 +195,35 @@ export default function OnlineMenuScreen({ navigation }: Props) {
         />
       </PremiumPanel>
 
-      <PremiumPanel>
-        <View style={styles.cardHeader}>
-          <View style={styles.cardCopy}>
-            <Text style={styles.cardTitle}>Join By Code</Text>
-            <Text style={styles.cardMeta}>Enter the host room code.</Text>
-          </View>
-          <Search size={26} color={ui.palette.sky} strokeWidth={2.6} />
-        </View>
-        <TextInput
-          style={styles.input}
-          placeholder="ROOM CODE"
-          placeholderTextColor={ui.text.muted}
-          value={joinCode}
-          onChangeText={text => setJoinCode(text.replace(/[^a-z0-9]/gi, '').slice(0, 4).toUpperCase())}
-          autoCapitalize="characters"
-          autoCorrect={false}
-          maxLength={4}
-        />
-        <ActionButton label="Join Room" Icon={DoorOpen} tone="secondary" disabled={!canJoin} onPress={joinCodeRoom} />
-      </PremiumPanel>
-
       <ActionButton label="Earn Coins & Challenges" Icon={Gift} tone="ghost" onPress={() => setEarnOpen(true)} />
+
+      <MatchPreferenceModal
+        visible={autoOpen}
+        title="Auto-Match"
+        text="Choose your casual table preferences. If no match is waiting, Golf 9 creates one for you."
+        players={autoPlayers}
+        rounds={autoRounds}
+        actionLabel="Find Match"
+        onPlayers={setAutoPlayers}
+        onRounds={setAutoRounds}
+        onClose={() => setAutoOpen(false)}
+        onAction={() => {
+          setAutoOpen(false);
+          navigation.navigate('OnlineRoom', { players: autoPlayers, rounds: autoRounds, quickPlay: true });
+        }}
+      />
+
+      <JoinRoomModal
+        visible={joinOpen}
+        joinCode={joinCode}
+        canJoin={canJoin}
+        onChange={setJoinCode}
+        onClose={() => setJoinOpen(false)}
+        onJoin={() => {
+          setJoinOpen(false);
+          joinCodeRoom();
+        }}
+      />
 
       <CreateRoomModal
         visible={createOpen}
@@ -262,30 +254,127 @@ export default function OnlineMenuScreen({ navigation }: Props) {
   );
 }
 
-function FilterRow({
+function WagerSlider({
+  tables,
+  selectedIndex,
+  onSelect,
+  balance,
+  waitingByBuyIn,
+}: {
+  tables: api.WagerTable[];
+  selectedIndex: number;
+  onSelect: (value: number) => void;
+  balance: number;
+  waitingByBuyIn: Map<number, api.RoomSummary[]>;
+}) {
+  const selected = tables[selectedIndex];
+  if (!selected) return <Text style={styles.emptyText}>Wager tables are not configured yet.</Text>;
+  const waiting = waitingByBuyIn.get(selected.buyIn)?.length ?? 0;
+  const canAfford = balance >= selected.buyIn;
+  return (
+    <View style={styles.wagerSliderBlock}>
+      <View style={styles.wagerSelectedRow}>
+        <View>
+          <Text style={styles.wagerSelectedLabel}>Buy-in</Text>
+          <Text style={styles.wagerSelectedValue}>{selected.buyIn.toLocaleString()} coins</Text>
+        </View>
+        <StatusBadge label={waiting ? `${waiting} waiting` : canAfford ? 'Ready' : 'Need coins'} tone={canAfford ? 'gold' : 'danger'} />
+      </View>
+      <View style={styles.wagerTrack}>
+        {tables.map((table, index) => {
+          const active = index === selectedIndex;
+          const affordable = balance >= table.buyIn;
+          return (
+            <Pressable key={table.id} style={styles.wagerStepTouch} onPress={() => onSelect(index)}>
+              <View style={[styles.wagerStep, active && styles.wagerStepActive, !affordable && styles.wagerStepLocked]} />
+              <Text style={[styles.wagerStepText, active && styles.wagerStepTextActive]} numberOfLines={1}>
+                {table.buyIn >= 1000 ? `${table.buyIn / 1000}k` : table.buyIn}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function MatchPreferenceModal({
+  visible,
+  title,
+  text,
   players,
   rounds,
+  actionLabel,
   onPlayers,
   onRounds,
-  onClear,
+  onClose,
+  onAction,
 }: {
-  players: PlayerCount | null;
-  rounds: RoundCount | null;
-  onPlayers: (value: PlayerCount | null) => void;
-  onRounds: (value: RoundCount | null) => void;
-  onClear: () => void;
+  visible: boolean;
+  title: string;
+  text: string;
+  players: PlayerCount;
+  rounds: RoundCount;
+  actionLabel: string;
+  onPlayers: (value: PlayerCount) => void;
+  onRounds: (value: RoundCount) => void;
+  onClose: () => void;
+  onAction: () => void;
 }) {
   return (
-    <View style={styles.filterBlock}>
-      <Text style={styles.filterLabel}>Filters</Text>
-      <View style={styles.filterRow}>
-        <Segmented values={PLAYER_OPTIONS} selected={players} onSelect={value => onPlayers(value === players ? null : value)} suffix="P" />
-        <Segmented values={ROUND_OPTIONS} selected={rounds} onSelect={value => onRounds(value === rounds ? null : value)} suffix="R" />
+    <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard}>
+          <Pressable style={styles.modalClose} onPress={onClose}><X size={24} color={ui.text.primary} strokeWidth={3} /></Pressable>
+          <Text style={styles.modalTitle}>{title}</Text>
+          <Text style={styles.modalText}>{text}</Text>
+          <Text style={styles.modalLabel}>Players</Text>
+          <Segmented values={PLAYER_OPTIONS} selected={players} onSelect={onPlayers} suffix="P" />
+          <Text style={styles.modalLabel}>Rounds</Text>
+          <Segmented values={ROUND_OPTIONS} selected={rounds} onSelect={onRounds} suffix="R" />
+          <ActionButton label={actionLabel} Icon={Search} onPress={onAction} style={styles.modalAction} />
+        </View>
       </View>
-      <Pressable style={styles.clearFilter} onPress={onClear}>
-        <Text style={styles.clearFilterText}>Show all waiting tables</Text>
-      </Pressable>
-    </View>
+    </Modal>
+  );
+}
+
+function JoinRoomModal({
+  visible,
+  joinCode,
+  canJoin,
+  onChange,
+  onClose,
+  onJoin,
+}: {
+  visible: boolean;
+  joinCode: string;
+  canJoin: boolean;
+  onChange: (value: string) => void;
+  onClose: () => void;
+  onJoin: () => void;
+}) {
+  return (
+    <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard}>
+          <Pressable style={styles.modalClose} onPress={onClose}><X size={24} color={ui.text.primary} strokeWidth={3} /></Pressable>
+          <Text style={styles.modalTitle}>Join Room</Text>
+          <Text style={styles.modalText}>Enter the 4-character room code.</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="ROOM CODE"
+            placeholderTextColor={ui.text.muted}
+            value={joinCode}
+            onChangeText={text => onChange(text.replace(/[^a-z0-9]/gi, '').slice(0, 4).toUpperCase())}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxLength={4}
+          />
+          <ActionButton label="Join Room" Icon={DoorOpen} tone="secondary" disabled={!canJoin} onPress={onJoin} />
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -357,12 +446,12 @@ function CreateRoomModal({
         <View style={styles.modalCard}>
           <Pressable style={styles.modalClose} onPress={onClose}><X size={24} color={ui.text.primary} strokeWidth={3} /></Pressable>
           <Text style={styles.modalTitle}>Create Room</Text>
-          <Text style={styles.modalText}>Choose the private table setup before sharing the room code.</Text>
+          <Text style={styles.modalText}>Choose the table setup. The room gets a code and also appears in the open casual pool.</Text>
           <Text style={styles.modalLabel}>Players</Text>
           <Segmented values={PLAYER_OPTIONS} selected={players} onSelect={onPlayers} suffix="P" />
           <Text style={styles.modalLabel}>Rounds</Text>
           <Segmented values={ROUND_OPTIONS} selected={rounds} onSelect={onRounds} suffix="R" />
-          <ActionButton label="Create Private Room" Icon={DoorOpen} onPress={onCreate} style={styles.modalAction} />
+          <ActionButton label="Create Room" Icon={DoorOpen} onPress={onCreate} style={styles.modalAction} />
         </View>
       </View>
     </Modal>
@@ -437,6 +526,7 @@ const styles = StyleSheet.create({
   cardCopy: { flex: 1, minWidth: 0 },
   cardTitle: { color: ui.text.primary, fontSize: 20, fontWeight: '900' },
   cardMeta: { color: ui.text.secondary, fontSize: 13, fontWeight: '800', lineHeight: 18, marginTop: 4 },
+  casualActions: { gap: 10 },
   filterBlock: { gap: 8, marginBottom: 12 },
   filterLabel: { color: ui.text.muted, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
   filterRow: { gap: 8 },
@@ -482,6 +572,51 @@ const styles = StyleSheet.create({
   roomTitle: { color: ui.text.primary, fontSize: 14, fontWeight: '900' },
   roomMeta: { color: ui.text.secondary, fontSize: 12, fontWeight: '800', marginTop: 3 },
   emptyText: { color: ui.text.muted, fontSize: 12, fontWeight: '800', marginTop: 12, textAlign: 'center' },
+  wagerSliderBlock: { gap: 12, marginBottom: 14 },
+  wagerSelectedRow: {
+    minHeight: 62,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: ui.border.gold,
+    backgroundColor: '#1A1830',
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  wagerSelectedLabel: { color: ui.text.muted, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
+  wagerSelectedValue: { color: ui.palette.gold, fontSize: 24, fontWeight: '900', marginTop: 2 },
+  wagerTrack: {
+    minHeight: 58,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: ui.border.soft,
+    backgroundColor: ui.surface.glass,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  wagerStepTouch: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 54 },
+  wagerStep: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: ui.border.strong,
+    borderWidth: 1,
+    borderColor: ui.border.soft,
+  },
+  wagerStepActive: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: ui.palette.gold,
+    borderColor: ui.palette.gold,
+  },
+  wagerStepLocked: { opacity: 0.35 },
+  wagerStepText: { color: ui.text.muted, fontSize: 9, fontWeight: '900', marginTop: 4 },
+  wagerStepTextActive: { color: ui.palette.gold },
+  wagerAction: { marginTop: 12 },
   wagerGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   wagerButton: {
     width: '48%',

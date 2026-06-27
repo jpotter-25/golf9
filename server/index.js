@@ -76,6 +76,7 @@ import {
 import {
   calculatePayouts,
   claimDailyTableBonus,
+  normalizeEconomyConfigStore,
   normalizeBuyIn,
   publicDailyBonus,
   publicEconomyCatalog,
@@ -168,7 +169,7 @@ const EXTRA_LISTEN_PORTS = [...new Set(
 )];
 const CLIENT_ORIGINS = (process.env.CLIENT_ORIGINS || '*').split(',');
 const MAX_PROCESSED_ACTION_IDS = 500;
-const ROOM_COUNTDOWN_MS = Number(process.env.ROOM_COUNTDOWN_MS || 3000);
+const ROOM_COUNTDOWN_MS = Number(process.env.ROOM_COUNTDOWN_MS || 7000);
 const CHAT_HISTORY_LIMIT = 80;
 const CHAT_MESSAGE_MAX_LENGTH = 160;
 const CHAT_RATE_LIMIT_MS = 800;
@@ -269,6 +270,7 @@ const competitiveStore = normalizeCompetitiveConfigStore({});
 let rankedSeason = normalizeRankedSeason(null, Date.now(), liveCompetitiveConfig(competitiveStore));
 const adminStore = normalizeAdminStore({});
 const catalogStore = normalizeCatalogStore({});
+const economyStore = normalizeEconomyConfigStore({});
 const postgresStore = createPostgresStore(DATABASE_URL);
 const googleOAuthClient = new OAuth2Client();
 let storeReady = false;
@@ -277,6 +279,10 @@ let lastDailyPushScanAt = 0;
 
 function rankedConfig() {
   return liveCompetitiveConfig(competitiveStore);
+}
+
+function economyConfig() {
+  return normalizeEconomyConfigStore(economyStore);
 }
 
 function uniqueByUserId(items) {
@@ -369,6 +375,22 @@ function publicAuthProviders(user) {
     google: !!user.authProviders.google,
     facebook: !!user.authProviders.facebook,
   };
+}
+
+function publicCompetitiveRankOnly(competitive = {}) {
+  return {
+    league: competitive.league,
+    placementComplete: !!competitive.placementComplete,
+    placementsRemaining: competitive.placementsRemaining ?? 0,
+    rankedGames: competitive.rankedGames ?? 0,
+    wins: competitive.wins ?? 0,
+    losses: competitive.losses ?? 0,
+    seasonBestLeague: competitive.seasonBestLeague,
+  };
+}
+
+function publicCompetitiveByPlayersRankOnly(competitiveByPlayers = {}) {
+  return Object.fromEntries(Object.entries(competitiveByPlayers || {}).map(([count, value]) => [count, publicCompetitiveRankOnly(value)]));
 }
 
 function normalizePushTokenValue(value) {
@@ -552,6 +574,7 @@ function applyStoreState(parsed = {}) {
   clubs.clear();
   normalizeCatalogStore(Object.assign(catalogStore, parsed.catalog || {}));
   seedCatalogStore(catalogStore);
+  Object.assign(economyStore, normalizeEconomyConfigStore(parsed.economyConfig || {}));
   normalizeAdminStore(Object.assign(adminStore, {
     admins: parsed.admins || [],
     adminSessions: parsed.adminSessions || [],
@@ -587,6 +610,7 @@ function loadJsonStore() {
 function storeSnapshot() {
   normalizeCatalogStore(catalogStore);
   seedCatalogStore(catalogStore);
+  Object.assign(economyStore, normalizeEconomyConfigStore(economyStore));
   normalizeCompetitiveConfigStore(competitiveStore);
   normalizeAdminStore(adminStore);
   rankedSeason = normalizeRankedSeason(rankedSeason, Date.now(), rankedConfig());
@@ -599,6 +623,7 @@ function storeSnapshot() {
     results,
     rankedSeason,
     competitiveConfig: competitiveStore,
+    economyConfig: economyStore,
     catalog: catalogStore,
     clubs: [...clubs.values()],
     admins: adminStore.admins,
@@ -998,12 +1023,11 @@ function publicPlayerCard(viewer, target, extra = {}) {
       columnClears: profile.statistics.columnClears,
     },
     competitive: {
-      mmr: profile.competitive.mmr,
       league: profile.competitive.league,
       rankedGames: profile.competitive.rankedGames,
       wins: profile.competitive.wins,
     },
-    competitiveByPlayers: profile.competitiveByPlayers,
+    competitiveByPlayers: publicCompetitiveByPlayersRankOnly(profile.competitiveByPlayers),
     cosmetics: profile.inventory.equipped,
     club: profile.club,
     relationship: relationshipBetween(viewer, target),
@@ -1045,16 +1069,8 @@ function publicViewedProfile(viewer, target) {
     stats: profile.stats,
     statistics: profile.statistics,
     achievements: unlockedAchievements,
-    competitive: {
-      mmr: profile.competitive.mmr,
-      league: profile.competitive.league,
-      placementComplete: profile.competitive.placementComplete,
-      rankedGames: profile.competitive.rankedGames,
-      wins: profile.competitive.wins,
-      losses: profile.competitive.losses,
-      seasonBestLeague: profile.competitive.seasonBestLeague,
-    },
-    competitiveByPlayers: profile.competitiveByPlayers,
+    competitive: publicCompetitiveRankOnly(profile.competitive),
+    competitiveByPlayers: publicCompetitiveByPlayersRankOnly(profile.competitiveByPlayers),
     cosmetics: profile.inventory.equipped,
     club: profile.club,
     relationship: relationshipBetween(viewer, target),
@@ -1407,7 +1423,7 @@ function roomSummary(room) {
     } : { buyIn: 0, pot: 0, chargedAt: null },
     ranked: room.matchType === 'ranked' ? {
       seasonId: room.ranked?.seasonId || rankedSeason.id,
-      averageMmr: room.ranked?.averageMmr || null,
+      league: leagueForMmr(room.ranked?.averageMmr || 1000, rankedConfig()).name,
       playerCount: room.ranked?.playerCount || room.maxPlayers,
       buyIn: room.economy?.buyIn || 0,
     } : null,
@@ -1415,7 +1431,8 @@ function roomSummary(room) {
       userId: player.userId,
       displayName: player.displayName,
       avatarInitial: player.avatarInitial,
-      ready: room.ready.get(player.userId) || false,
+      cosmetics: player.inventory?.equipped || player.cosmetics || null,
+      ready: true,
       connected: room.connected.get(player.userId) || false,
       isHost: player.userId === room.hostUserId,
     })),
@@ -1653,13 +1670,13 @@ function normalizeRoomOptions({ maxPlayers = 4, rounds = 9, buyIn = 0 } = {}) {
   return {
     maxPlayers: Math.max(2, Math.min(4, Number(maxPlayers) || 4)),
     rounds: Number(rounds) === 5 ? 5 : 9,
-    buyIn: normalizeBuyIn(buyIn),
+    buyIn: normalizeBuyIn(buyIn, economyConfig()),
   };
 }
 
 function normalizeWagerOptions(body = {}) {
   const options = normalizeRoomOptions(body);
-  return { ...options, buyIn: normalizeBuyIn(body.buyIn) };
+  return { ...options, buyIn: normalizeBuyIn(body.buyIn, economyConfig()) };
 }
 
 function normalizeRankedRoomOptions(body = {}) {
@@ -1709,7 +1726,7 @@ function addUserToRoom(room, user) {
   if (room.players.length >= room.maxPlayers) throw new Error('Room is full.');
   const player = safeUser(user);
   room.players.push(player);
-  room.ready.set(player.userId, false);
+  room.ready.set(player.userId, true);
   room.connected.set(player.userId, false);
 }
 
@@ -1733,7 +1750,7 @@ function makeRoom(hostUser, { maxPlayers = 4, rounds = 9, matchType = 'casual', 
     isPublic: Boolean(isPublic),
     status: 'lobby',
     players: [host],
-    ready: new Map([[host.userId, false]]),
+    ready: new Map([[host.userId, true]]),
     connected: new Map([[host.userId, false]]),
     game: null,
     processedActionIds: new Set(),
@@ -2344,7 +2361,7 @@ app.get('/admin/api/users/:userId', requireAdmin(adminStore, 'users:read'), (req
       rankedSeason,
       results,
       adminCosmeticCatalogFor(user, rankedSeason, currentCatalog(), rankedConfig()),
-      publicEconomyCatalog(user),
+      publicEconomyCatalog(user, economyConfig()),
       rankedConfig()
     ),
   });
@@ -2615,7 +2632,27 @@ app.post('/admin/api/catalog/versions/:versionId/rollback', requireAdmin(adminSt
   return res.json(result);
 });
 
-app.get('/admin/api/economy', requireAdmin(adminStore, 'metrics:read'), (_req, res) => res.json({ economy: adminEconomySummary(users) }));
+app.get('/admin/api/economy', requireAdmin(adminStore, 'metrics:read'), (_req, res) => {
+  const config = economyConfig();
+  return res.json({ economy: adminEconomySummary(users, config), config });
+});
+
+app.patch('/admin/api/economy/config', requireAdmin(adminStore, 'economy:write'), (req, res) => {
+  const reason = cleanAdminReason(req.body?.reason);
+  if (!reason) return res.status(400).json({ error: 'Reason is required.' });
+  const before = economyConfig();
+  const next = normalizeEconomyConfigStore({
+    ...economyStore,
+    ...(req.body?.config || req.body || {}),
+    updatedAt: Date.now(),
+    updatedBy: req.admin.admin.displayName,
+  });
+  Object.assign(economyStore, next);
+  writeAudit(adminStore, req, req.admin.admin, 'admin.economy.config.update', {}, { reason, before, after: next });
+  saveStore();
+  return res.json({ economy: adminEconomySummary(users, next), config: next });
+});
+
 app.get('/admin/api/competitive/overview', requireAdmin(adminStore, 'competitive:read'), (_req, res) => res.json({ overview: adminCompetitiveOverview() }));
 
 app.get('/admin/api/competitive/config', requireAdmin(adminStore, 'competitive:read'), (_req, res) => {
@@ -3456,13 +3493,13 @@ app.delete('/friends/:userId', requireAuth, (req, res) => {
   return res.json({ social: socialSummary(req.auth.user) });
 });
 
-app.get('/economy/catalog', requireAuth, (req, res) => res.json(publicEconomyCatalog(req.auth.user)));
+app.get('/economy/catalog', requireAuth, (req, res) => res.json(publicEconomyCatalog(req.auth.user, economyConfig())));
 
 app.post('/economy/daily-bonus/claim', requireAuth, (req, res) => {
   const result = claimDailyTableBonus(req.auth.user);
   if (result.error) return res.status(400).json({ error: result.error, dailyBonus: result.dailyBonus, user: safeUser(req.auth.user) });
   saveStore();
-  return res.json({ ...result, user: safeUser(req.auth.user), economy: publicEconomyCatalog(req.auth.user) });
+  return res.json({ ...result, user: safeUser(req.auth.user), economy: publicEconomyCatalog(req.auth.user, economyConfig()) });
 });
 
 app.get('/ranked/me', requireAuth, (req, res) => {
@@ -3593,7 +3630,7 @@ app.post('/results/local', requireAuth, (req, res) => {
 });
 
 app.post('/rooms', requireAuth, (req, res) => {
-  const room = makeRoom(req.auth.user, req.body || {});
+  const room = makeRoom(req.auth.user, { ...(req.body || {}), isPublic: req.body?.isPublic !== false });
   return res.json({ room: roomSummary(room) });
 });
 
@@ -3603,7 +3640,7 @@ app.get('/rooms/open', requireAuth, (req, res) => {
     : null;
   const maxPlayers = req.query.maxPlayers ? normalizeRankedPlayerCount(req.query.maxPlayers) : null;
   const rounds = req.query.rounds ? (Number(req.query.rounds) === 5 ? 5 : 9) : null;
-  const buyIn = req.query.buyIn !== undefined ? normalizeBuyIn(req.query.buyIn) : null;
+  const buyIn = req.query.buyIn !== undefined ? normalizeBuyIn(req.query.buyIn, economyConfig()) : null;
   const openRooms = [...rooms.values()]
     .filter(room => room.isPublic)
     .filter(room => room.status === 'lobby')
@@ -3835,12 +3872,12 @@ io.on('connection', (socket) => {
     return cb({ room: roomSummary(room), game: room.game ? gameViewFor(room, userId) : null, chat: publicChatHistory(room) });
   });
 
-  socket.on('room:ready', ({ code, ready }, cb = () => {}) => {
+  socket.on('room:ready', ({ code }, cb = () => {}) => {
     const room = rooms.get(String(code || '').toUpperCase());
     const userId = socket.auth.user.userId;
     if (!room || !room.players.some(player => player.userId === userId)) return cb({ error: 'Room not found.' });
     if (room.status !== 'lobby') return cb({ error: 'Game already started.' });
-    room.ready.set(userId, Boolean(ready));
+    room.ready.set(userId, true);
     room.updatedAt = Date.now();
     broadcastRoom(room);
     return cb({ room: roomSummary(room) });

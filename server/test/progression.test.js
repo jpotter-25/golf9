@@ -33,8 +33,10 @@ test('normalizes legacy profile stats into progression defaults', () => {
   assert.equal(legacy.currency.coins, 0);
   assert.equal(legacy.currency.dailyBonus.streak, 0);
   assert.ok(legacy.inventory.cosmetics.includes('classic-card-back'));
+  assert.ok(legacy.inventory.cosmetics.includes('classic-avatar-icon'));
   assert.ok(legacy.inventory.cosmetics.includes('rookie-title'));
   assert.ok(legacy.inventory.cosmetics.includes('classic-table-theme'));
+  assert.equal(legacy.inventory.equipped.avatarIcon, 'classic-avatar-icon');
   assert.equal(legacy.inventory.equipped.tableTheme, 'classic-table-theme');
   assert.equal(legacy.challenges.daily.items.length > 0, true);
 });
@@ -114,6 +116,21 @@ test('currency shop purchases and equips owned cosmetics', () => {
   const catalog = publicCosmeticCatalog(account);
   assert.equal(catalog.find(item => item.id === 'gold-trim-card-back')?.equipped, true);
   assert.equal(catalog.some(item => item.type === 'tableTheme'), true);
+});
+
+test('avatar icon cosmetics persist and equip safely for old users', () => {
+  const account = user({ currency: { coins: 1000, lifetimeCoins: 1000 } });
+  normalizeUserProgression(account);
+  assert.equal(account.inventory.equipped.avatarIcon, 'classic-avatar-icon');
+
+  const purchased = purchaseCosmetic(account, 'spark-avatar-icon');
+  assert.equal(purchased.error, undefined);
+  const equipped = equipCosmetic(account, 'spark-avatar-icon');
+  assert.equal(equipped.error, undefined);
+  assert.equal(account.inventory.equipped.avatarIcon, 'spark-avatar-icon');
+
+  const profileCatalog = publicCosmeticCatalog(account);
+  assert.equal(profileCatalog.find(item => item.id === 'spark-avatar-icon')?.equipped, true);
 });
 
 test('ranked cosmetics require season-best eligibility and coins', () => {

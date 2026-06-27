@@ -44,7 +44,15 @@ export type SocialProfileRequiredResponse = {
   inviteRequired: boolean;
 };
 export type SocialAuthResponse = AuthResponse | SocialProfileRequiredResponse;
-export type RoomPlayer = { userId: string; displayName: string; avatarInitial: string; ready: boolean; connected: boolean; isHost: boolean };
+export type RoomPlayer = {
+  userId: string;
+  displayName: string;
+  avatarInitial: string;
+  cosmetics?: PlayerInventory['equipped'] | null;
+  ready: boolean;
+  connected: boolean;
+  isHost: boolean;
+};
 export type RoomSummary = {
   code: string;
   hostUserId: string;
@@ -56,7 +64,7 @@ export type RoomSummary = {
   openSeats: number;
   countdownEndsAt?: number | null;
   economy: MatchEconomy;
-  ranked?: { seasonId: string; averageMmr: number | null; playerCount: number; buyIn: number } | null;
+  ranked?: { seasonId: string; league?: string; playerCount: number; buyIn: number } | null;
   players: RoomPlayer[];
 };
 
@@ -97,7 +105,7 @@ export type PublicPlayerSummary = {
   level: number;
   stats: { gamesPlayed: number; wins: number };
   statistics: Pick<PlayerStatistics, 'gamesPlayed' | 'wins' | 'bestTotal' | 'bestRound' | 'columnClears'>;
-  competitive: Pick<CompetitiveState, 'mmr' | 'league' | 'rankedGames' | 'wins'>;
+  competitive: Pick<CompetitiveState, 'league' | 'rankedGames' | 'wins'>;
   competitiveByPlayers?: RankedLadders;
   cosmetics: PlayerInventory['equipped'];
   club: ClubSummary | null;
@@ -142,9 +150,9 @@ export type PublicPlayerProfile = {
   statistics: PlayerStatistics;
   achievements: Achievement[];
   competitive: {
-    mmr: number;
     league: RankedLeague;
     placementComplete: boolean;
+    placementsRemaining?: number;
     rankedGames: number;
     wins: number;
     losses: number;
@@ -226,7 +234,7 @@ export type DailyBonus = {
 
 export type PlayerInventory = {
   cosmetics: string[];
-  equipped: { cardBack: string; avatarFrame: string; title: string; tableTheme: string };
+  equipped: { cardBack: string; avatarFrame: string; avatarIcon: string; title: string; tableTheme: string };
 };
 
 export type MatchProgressionSummary = {
@@ -263,7 +271,7 @@ export type ChallengeBuckets = {
   weekly: { periodStart: number; expiresAt: number; items: Challenge[] };
 };
 
-export type CosmeticType = 'cardBack' | 'avatarFrame' | 'title' | 'tableTheme';
+export type CosmeticType = 'cardBack' | 'avatarFrame' | 'avatarIcon' | 'title' | 'tableTheme';
 
 export type MatchType = 'casual' | 'wager' | 'ranked';
 

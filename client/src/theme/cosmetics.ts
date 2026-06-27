@@ -1,6 +1,7 @@
 export type EquippedCosmetics = {
   cardBack?: string;
   avatarFrame?: string;
+  avatarIcon?: string;
   title?: string;
   tableTheme?: string;
 };
@@ -14,6 +15,12 @@ export type CardBackVisual = {
 
 export type AvatarFrameVisual = {
   borderColor: string;
+  backgroundColor: string;
+};
+
+export type AvatarIconVisual = {
+  icon: 'user' | 'sparkles' | 'shield' | 'trophy';
+  color: string;
   backgroundColor: string;
 };
 
@@ -104,6 +111,34 @@ const AVATAR_FRAMES: Record<string, AvatarFrameVisual> = {
   },
 };
 
+const AVATAR_ICONS: Record<string, AvatarIconVisual> = {
+  'classic-avatar-icon': {
+    icon: 'user',
+    color: '#E8ECF1',
+    backgroundColor: '#123B32',
+  },
+  'spark-avatar-icon': {
+    icon: 'sparkles',
+    color: '#FFCC66',
+    backgroundColor: '#182244',
+  },
+  'shield-avatar-icon': {
+    icon: 'shield',
+    color: '#9BE7FF',
+    backgroundColor: '#102838',
+  },
+  'trophy-avatar-icon': {
+    icon: 'trophy',
+    color: '#FFE6A3',
+    backgroundColor: '#2B2515',
+  },
+  's1-diamond-avatar-icon': {
+    icon: 'sparkles',
+    color: '#BDEBFF',
+    backgroundColor: '#102838',
+  },
+};
+
 const TABLE_THEMES: Record<string, TableThemeVisual> = {
   'classic-table-theme': {
     backgroundColor: '#0B1023',
@@ -153,6 +188,10 @@ export function getCardBackVisual(cardBackId?: string | null): CardBackVisual {
 
 export function getAvatarFrameVisual(avatarFrameId?: string | null): AvatarFrameVisual {
   return AVATAR_FRAMES[avatarFrameId || ''] || AVATAR_FRAMES['rookie-avatar-frame'];
+}
+
+export function getAvatarIconVisual(avatarIconId?: string | null): AvatarIconVisual {
+  return AVATAR_ICONS[avatarIconId || ''] || AVATAR_ICONS['classic-avatar-icon'];
 }
 
 export function getTableThemeVisual(tableThemeId?: string | null): TableThemeVisual {

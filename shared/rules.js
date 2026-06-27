@@ -22,6 +22,7 @@ export function sanitizePlayerIdentity(user) {
     cosmetics: {
       cardBack: user.inventory?.equipped?.cardBack || user.cosmetics?.cardBack || 'classic-card-back',
       avatarFrame: user.inventory?.equipped?.avatarFrame || user.cosmetics?.avatarFrame || 'rookie-avatar-frame',
+      avatarIcon: user.inventory?.equipped?.avatarIcon || user.cosmetics?.avatarIcon || 'classic-avatar-icon',
       title: user.inventory?.equipped?.title || user.cosmetics?.title || 'rookie-title',
       tableTheme: user.inventory?.equipped?.tableTheme || user.cosmetics?.tableTheme || 'classic-table-theme',
     },
@@ -109,6 +110,7 @@ export function createGameState(playerIdentities, options = {}) {
       cosmetics: identity.cosmetics || {
         cardBack: 'classic-card-back',
         avatarFrame: 'rookie-avatar-frame',
+        avatarIcon: 'classic-avatar-icon',
         title: 'rookie-title',
         tableTheme: 'classic-table-theme',
       },

@@ -3,7 +3,7 @@ import { publicDailyBonus } from './economy.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SEASON_REWARD_GRACE_MS = 30 * DAY_MS;
-const STARTER_COSMETICS = ['classic-card-back', 'rookie-avatar-frame', 'rookie-title', 'classic-table-theme'];
+const STARTER_COSMETICS = ['classic-card-back', 'rookie-avatar-frame', 'classic-avatar-icon', 'rookie-title', 'classic-table-theme'];
 
 export const COSMETIC_CATALOG = [
   { id: 'classic-card-back', type: 'cardBack', name: 'Classic', description: 'The original Golf 9 card back.', rarity: 'starter', price: 0, shopCategory: 'starter' },
@@ -25,6 +25,11 @@ export const COSMETIC_CATALOG = [
   { id: 's1-bronze-frame', type: 'avatarFrame', name: 'Season 1 Bronze', description: 'Play ranked this season, then buy this ranked frame.', rarity: 'rare', price: 750, shopCategory: 'ranked', unlockRequirement: 'rank', requiredMmr: 0, requiredLeague: 'Bronze', seasonId: 'season-1' },
   { id: 's1-diamond-frame', type: 'avatarFrame', name: 'Season 1 Diamond', description: 'Reach Diamond this season, then buy this ranked frame.', rarity: 'epic', price: 7500, shopCategory: 'ranked', unlockRequirement: 'rank', requiredMmr: 4000, requiredLeague: 'Diamond', seasonId: 'season-1' },
   { id: 'club-emerald-frame', type: 'avatarFrame', name: 'Club Emerald', description: 'An emerald club avatar frame for active clubmates.', rarity: 'rare', price: 0, shopCategory: 'club', unlockRequirement: 'club' },
+  { id: 'classic-avatar-icon', type: 'avatarIcon', name: 'Classic Nine', description: 'The starter Golf 9 avatar icon.', rarity: 'starter', price: 0, shopCategory: 'starter' },
+  { id: 'spark-avatar-icon', type: 'avatarIcon', name: 'Spark', description: 'A bright table-night avatar icon.', rarity: 'rare', price: 500, shopCategory: 'coin' },
+  { id: 'shield-avatar-icon', type: 'avatarIcon', name: 'Shield', description: 'A clean competitive avatar icon.', rarity: 'rare', price: 700, shopCategory: 'coin' },
+  { id: 'trophy-avatar-icon', type: 'avatarIcon', name: 'Trophy', description: 'A winner-circle avatar icon.', rarity: 'epic', price: 1200, shopCategory: 'coin' },
+  { id: 's1-diamond-avatar-icon', type: 'avatarIcon', name: 'Season 1 Diamond Icon', description: 'Reach Diamond this season, then buy this ranked avatar icon.', rarity: 'epic', price: 8000, shopCategory: 'ranked', unlockRequirement: 'rank', requiredMmr: 4000, requiredLeague: 'Diamond', seasonId: 'season-1' },
   { id: 'rookie-title', type: 'title', name: 'Rookie', description: 'Your first Golf 9 title.', rarity: 'starter', price: 0, shopCategory: 'starter' },
   { id: 'column-cleaner-title', type: 'title', name: 'Column Cleaner', description: 'A title for players who love three-of-a-kind clears.', rarity: 'rare', price: 600, shopCategory: 'coin' },
   { id: 'table-shark-title', type: 'title', name: 'Table Shark', description: 'A confident title for the lobby.', rarity: 'epic', price: 1200, shopCategory: 'coin' },
@@ -356,6 +361,7 @@ function defaultInventory(user) {
     equipped: {
       cardBack: user.inventory?.equipped?.cardBack || 'classic-card-back',
       avatarFrame: user.inventory?.equipped?.avatarFrame || 'rookie-avatar-frame',
+      avatarIcon: user.inventory?.equipped?.avatarIcon || 'classic-avatar-icon',
       title: user.inventory?.equipped?.title || 'rookie-title',
       tableTheme: user.inventory?.equipped?.tableTheme || 'classic-table-theme',
     },

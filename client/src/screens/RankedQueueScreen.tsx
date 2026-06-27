@@ -91,7 +91,6 @@ export default function RankedQueueScreen({ route, navigation }: Props) {
   };
 
   const league = competitive?.league.name ?? 'Silver III';
-  const mmr = competitive?.mmr ?? 1000;
   const placementsRemaining = competitive?.placementsRemaining ?? 5;
   const waitedSeconds = queue?.joinedAt ? Math.floor((now - queue.joinedAt) / 1000) : 0;
   const seasonDaysLeft = competitive?.season?.endsAt
@@ -105,7 +104,7 @@ export default function RankedQueueScreen({ route, navigation }: Props) {
       <ScreenHeader
         eyebrow="Ranked Match"
         title={`${players}-Player Ranked`}
-        subtitle={`${league} - ${mmr} MMR - always 9 rounds`}
+        subtitle={`${league} - always 9 rounds`}
         right={<StatusBadge label={queue?.matchedRoomCode ? 'FOUND' : 'SEARCHING'} tone={queue?.matchedRoomCode ? 'gold' : 'sky'} />}
       />
 
@@ -123,7 +122,7 @@ export default function RankedQueueScreen({ route, navigation }: Props) {
       <PremiumPanel>
         <MetricRow Icon={Users} label="Queue" value={`${players} players - 9 rounds`} />
         <MetricRow Icon={Trophy} label="Entry" value="Free ladder match" />
-        <MetricRow Icon={Radar} label="Search" value={`+/- ${queue?.searchRange ?? 100} MMR`} />
+        <MetricRow Icon={Radar} label="Search" value="League-based" />
         <MetricRow Icon={Sparkles} label="Waiting" value={`${waitedSeconds}s`} />
         <MetricRow Icon={Users} label="Found" value={`${queue?.queuedPlayers ?? 1}/${players}`} />
       </PremiumPanel>

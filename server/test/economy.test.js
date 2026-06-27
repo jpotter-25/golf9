@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculatePayouts, claimDailyTableBonus, payoutSlotsFor, publicEconomyCatalog, rankedBuyInForMmr } from '../economy.js';
+import { calculatePayouts, claimDailyTableBonus, normalizeBuyIn, normalizeEconomyConfigStore, payoutSlotsFor, publicEconomyCatalog, rankedBuyInForMmr } from '../economy.js';
 
 test('payout slots follow wager table rules', () => {
   assert.deepEqual(payoutSlotsFor(2, 100), [200, 0]);
@@ -56,4 +56,19 @@ test('economy catalog explains coin sources and deprecates ranked fees', () => {
   assert.equal(catalog.rankedFees.length, 0);
   assert.equal(catalog.dailyBonus?.canClaim, true);
   assert.ok(catalog.coinSources.some(item => item.id === 'free-play'));
+});
+
+test('configured wager steps feed the public economy catalog and buy-in validation', () => {
+  const config = normalizeEconomyConfigStore({
+    wagerTables: [
+      { id: 'free', buyIn: 0, label: 'Free' },
+      { id: 'wager-50', buyIn: 50, label: '50' },
+      { id: 'wager-1000', buyIn: 1000, label: '1k' },
+      { id: 'wager-50000', buyIn: 50000, label: '50k' },
+    ],
+  });
+  const catalog = publicEconomyCatalog(null, config);
+  assert.deepEqual(catalog.wagerTables.map(table => table.buyIn), [0, 50, 1000, 50000]);
+  assert.equal(normalizeBuyIn(50000, config), 50000);
+  assert.equal(normalizeBuyIn(750, config), 0);
 });

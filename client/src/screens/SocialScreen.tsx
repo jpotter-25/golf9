@@ -11,6 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
 import { connect, onSocialUpdate } from '../services/network';
 import { ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
+import { PlayerAvatar } from '../components/PlayerAvatar';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Social'>;
 
@@ -255,9 +256,7 @@ function PlayerRow({ player, busy, onView, onPrimary }: { player: api.PublicPlay
 function PlayerSummary({ player, onView }: { player: api.PublicPlayerSummary; onView: () => void }) {
   return (
     <Pressable style={styles.playerSummary} onPress={onView}>
-      <View style={[styles.avatar, player.status.online && styles.avatarOnline]}>
-        <Text style={styles.avatarText}>{player.avatarInitial}</Text>
-      </View>
+      <PlayerAvatar cosmetics={player.cosmetics} fallbackInitial={player.avatarInitial} size={42} />
       <View style={styles.rowCopy}>
         <Text style={styles.rowTitle} numberOfLines={1}>{player.displayName}</Text>
         <Text style={styles.rowMeta} numberOfLines={1}>

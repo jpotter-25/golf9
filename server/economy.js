@@ -1,10 +1,18 @@
-export const WAGER_TABLES = [
+export const DEFAULT_WAGER_TABLES = [
   { id: 'free', label: 'Free Play', buyIn: 0, description: 'No entry fee. Earn coins slowly through match rewards.' },
   { id: 'casual-50', label: 'Casual Stakes', buyIn: 50, description: 'A light coin table.' },
   { id: 'competitive-100', label: 'Competitive', buyIn: 100, description: 'A standard wager table.' },
   { id: 'high-250', label: 'High Stakes', buyIn: 250, description: 'A bigger table for confident players.' },
   { id: 'elite-500', label: 'Elite', buyIn: 500, description: 'Top-end wager table.' },
+  { id: 'pro-1000', label: 'Pro', buyIn: 1000, description: 'A serious coin table.' },
+  { id: 'pro-2000', label: 'Double Pro', buyIn: 2000, description: 'A bigger table for confident regulars.' },
+  { id: 'champion-5000', label: 'Champion', buyIn: 5000, description: 'A high-pressure coin table.' },
+  { id: 'champion-10000', label: 'Double Champion', buyIn: 10000, description: 'A major buy-in for experienced players.' },
+  { id: 'legend-25000', label: 'Legend', buyIn: 25000, description: 'A premium coin table.' },
+  { id: 'legend-50000', label: 'Double Legend', buyIn: 50000, description: 'The current top-end wager table.' },
 ];
+
+export const WAGER_TABLES = DEFAULT_WAGER_TABLES;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAILY_TABLE_BONUS_BASE = 100;
@@ -16,6 +24,54 @@ const LOW_BALANCE_THRESHOLD = 100;
 function safeInteger(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.floor(number) : fallback;
+}
+
+function cleanText(value, max = 120) {
+  return String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function slugForBuyIn(buyIn) {
+  return buyIn > 0 ? `wager-${buyIn}` : 'free';
+}
+
+function defaultLabelForBuyIn(buyIn) {
+  if (buyIn <= 0) return 'Free Play';
+  return buyIn.toLocaleString('en-US');
+}
+
+function normalizeWagerTable(input = {}) {
+  const buyIn = Math.max(0, safeInteger(input.buyIn, 0));
+  return {
+    id: cleanText(input.id || slugForBuyIn(buyIn), 64) || slugForBuyIn(buyIn),
+    label: cleanText(input.label || defaultLabelForBuyIn(buyIn), 48) || defaultLabelForBuyIn(buyIn),
+    buyIn,
+    description: cleanText(input.description || (buyIn ? `Buy in for ${defaultLabelForBuyIn(buyIn)} coins.` : 'No entry fee. Earn coins slowly through match rewards.'), 180),
+    enabled: input.enabled !== undefined ? Boolean(input.enabled) : true,
+    sortOrder: safeInteger(input.sortOrder, buyIn),
+  };
+}
+
+export function normalizeWagerTables(input = DEFAULT_WAGER_TABLES) {
+  const source = Array.isArray(input) && input.length ? input : DEFAULT_WAGER_TABLES;
+  const byBuyIn = new Map();
+  for (const entry of source) {
+    const table = normalizeWagerTable(entry);
+    if (!table.enabled && !byBuyIn.has(table.buyIn)) continue;
+    byBuyIn.set(table.buyIn, table);
+  }
+  if (!byBuyIn.has(0)) byBuyIn.set(0, normalizeWagerTable(DEFAULT_WAGER_TABLES[0]));
+  return [...byBuyIn.values()]
+    .filter(table => table.enabled !== false)
+    .sort((a, b) => a.buyIn - b.buyIn || a.label.localeCompare(b.label));
+}
+
+export function normalizeEconomyConfigStore(input = {}) {
+  const config = input && typeof input === 'object' ? input : {};
+  return {
+    wagerTables: normalizeWagerTables(config.wagerTables),
+    updatedAt: safeInteger(config.updatedAt, 0) || null,
+    updatedBy: cleanText(config.updatedBy || '', 80) || null,
+  };
 }
 
 function utcDayStart(now = Date.now()) {
@@ -74,9 +130,10 @@ export function claimDailyTableBonus(user, now = Date.now()) {
   };
 }
 
-export function publicEconomyCatalog(user = null) {
+export function publicEconomyCatalog(user = null, config = null) {
+  const economyConfig = normalizeEconomyConfigStore(config || {});
   return {
-    wagerTables: WAGER_TABLES,
+    wagerTables: economyConfig.wagerTables,
     rankedFees: [],
     coinSources: [
       { id: 'daily-table-bonus', title: 'Daily Table Bonus', description: 'Claim free coins once per day, with a boost when your balance is low.' },
@@ -89,9 +146,9 @@ export function publicEconomyCatalog(user = null) {
   };
 }
 
-export function normalizeBuyIn(value) {
+export function normalizeBuyIn(value, config = null) {
   const buyIn = Math.max(0, safeInteger(value, 0));
-  return WAGER_TABLES.some(table => table.buyIn === buyIn) ? buyIn : 0;
+  return normalizeEconomyConfigStore(config || {}).wagerTables.some(table => table.buyIn === buyIn) ? buyIn : 0;
 }
 
 export function rankedBuyInForMmr(mmr) {
