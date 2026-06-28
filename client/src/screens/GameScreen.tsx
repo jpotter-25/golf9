@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Alert, Modal, useWindowDimensions, TextInput, ScrollView, KeyboardAvoidingView, Platform, Vibration, Switch, AppState } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Alert, Modal, useWindowDimensions, TextInput, ScrollView, KeyboardAvoidingView, Platform, Vibration, Switch, AppState, BackHandler } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -359,6 +359,23 @@ export default function GameScreen({ route, navigation }: Props) {
       cleanupCelebration();
     };
   }, [applyOnlineGameState, isOnline, resyncOnlineRoom, roomCode, showSocialBurst, token, user?.userId]);
+
+  useEffect(() => {
+    if (!isOnline || state.completed) return;
+    const message = 'Finish this match before leaving the table.';
+    const unsubscribe = navigation.addListener('beforeRemove', event => {
+      event.preventDefault();
+      Alert.alert('Match in progress', message);
+    });
+    const backSubscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      Alert.alert('Match in progress', message);
+      return true;
+    });
+    return () => {
+      unsubscribe();
+      backSubscription.remove();
+    };
+  }, [isOnline, navigation, state.completed]);
 
   useEffect(() => {
     if (!isOnline) return;

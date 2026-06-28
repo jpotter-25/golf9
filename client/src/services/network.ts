@@ -72,8 +72,11 @@ export function startOnlineGame(token: string, code: string): Promise<void> {
 
 export function leaveOnlineRoom(token: string, code: string): Promise<void> {
   const s = connect(token);
-  return new Promise((resolve) => {
-    s.emit('room:leave', { code }, () => resolve());
+  return new Promise((resolve, reject) => {
+    s.emit('room:leave', { code }, (res: { error?: string }) => {
+      if (res.error) reject(new Error(res.error));
+      else resolve();
+    });
   });
 }
 

@@ -117,8 +117,18 @@ export default function OnlineRoomScreen({ route, navigation }: Props) {
   const leave = async () => {
     try {
       if (token && room) await leaveOnlineRoom(token, room.code);
-    } finally {
       navigation.goBack();
+    } catch (error) {
+      Alert.alert('Match in progress', error instanceof Error ? error.message : 'Finish this match before leaving the table.');
+      if (room?.status === 'playing') {
+        navigation.replace('Game', {
+          players: room.maxPlayers,
+          rounds: room.rounds,
+          mode: 'online',
+          roomCode: room.code,
+          online: true,
+        });
+      }
     }
   };
 

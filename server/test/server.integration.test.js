@@ -748,6 +748,111 @@ test('auth, room readiness, authoritative intents, duplicate rejection, and held
   });
 });
 
+test('active playing matches force rejoin and block new tables', async () => {
+  await withServer(async (baseUrl) => {
+    const one = await signup(baseUrl, `ActiveOne${Date.now()}`);
+    const two = await signup(baseUrl, `ActiveTwo${Date.now()}`);
+    const three = await signup(baseUrl, `ActiveThree${Date.now()}`);
+
+    const created = await json(await fetch(`${baseUrl}/rooms`, {
+      method: 'POST',
+      headers: authHeaders(one.token),
+      body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
+    }));
+    const code = created.room.code;
+    await json(await fetch(`${baseUrl}/rooms/${code}/join`, { method: 'POST', headers: authHeaders(two.token) }));
+
+    const socketOne = io(baseUrl, { transports: ['websocket'], auth: { token: one.token }, forceNew: true });
+    const socketTwo = io(baseUrl, { transports: ['websocket'], auth: { token: two.token }, forceNew: true });
+    await Promise.all([once(socketOne, 'connect'), once(socketTwo, 'connect')]);
+
+    try {
+      assert.equal((await emitAck(socketOne, 'room:join', { code })).room.code, code);
+      assert.equal((await emitAck(socketTwo, 'room:join', { code })).room.code, code);
+      assert.deepEqual(await emitAck(socketOne, 'room:start', { code }), { ok: true });
+
+      const active = await json(await fetch(`${baseUrl}/rooms/active`, { headers: authHeaders(one.token) }));
+      assert.equal(active.active, true);
+      assert.equal(active.mustRejoin, true);
+      assert.equal(active.room.code, code);
+      assert.equal(active.game.players.length, 2);
+
+      const leave = await emitAck(socketOne, 'room:leave', { code });
+      assert.equal(leave.error, 'Finish your active match before leaving the table.');
+      assert.equal(leave.activeRoom.code, code);
+
+      socketOne.disconnect();
+      const activeAfterDisconnect = await json(await fetch(`${baseUrl}/rooms/active`, { headers: authHeaders(one.token) }));
+      assert.equal(activeAfterDisconnect.active, true);
+      assert.equal(activeAfterDisconnect.room.players.some(player => player.userId === one.user.userId), true);
+
+      const otherRoom = await json(await fetch(`${baseUrl}/rooms`, {
+        method: 'POST',
+        headers: authHeaders(three.token),
+        body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
+      }));
+
+      const conflictRequests = [
+        fetch(`${baseUrl}/rooms`, {
+          method: 'POST',
+          headers: authHeaders(one.token),
+          body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
+        }),
+        fetch(`${baseUrl}/rooms/${otherRoom.room.code}/join`, { method: 'POST', headers: authHeaders(one.token) }),
+        fetch(`${baseUrl}/rooms/quick-play`, {
+          method: 'POST',
+          headers: authHeaders(one.token),
+          body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
+        }),
+        fetch(`${baseUrl}/rooms/wager-play`, {
+          method: 'POST',
+          headers: authHeaders(one.token),
+          body: JSON.stringify({ maxPlayers: 2, rounds: 5, buyIn: 50 }),
+        }),
+        fetch(`${baseUrl}/ranked/queue`, {
+          method: 'POST',
+          headers: authHeaders(one.token),
+          body: JSON.stringify({ maxPlayers: 2, rounds: 9 }),
+        }),
+      ];
+
+      for (const request of conflictRequests) {
+        const res = await request;
+        const body = await res.json();
+        assert.equal(res.status, 409);
+        assert.equal(body.activeRoom.code, code);
+      }
+
+      await json(await fetch(`${baseUrl}/friends/requests`, {
+        method: 'POST',
+        headers: authHeaders(three.token),
+        body: JSON.stringify({ userId: one.user.userId }),
+      }));
+      const oneSocial = await json(await fetch(`${baseUrl}/social/me`, { headers: authHeaders(one.token) }));
+      const requestId = oneSocial.social.incomingRequests[0].id;
+      await json(await fetch(`${baseUrl}/friends/requests/${requestId}/accept`, {
+        method: 'POST',
+        headers: authHeaders(one.token),
+      }));
+      const invite = await json(await fetch(`${baseUrl}/rooms/${otherRoom.room.code}/invites`, {
+        method: 'POST',
+        headers: authHeaders(three.token),
+        body: JSON.stringify({ userId: one.user.userId }),
+      }));
+      const acceptInvite = await fetch(`${baseUrl}/rooms/invites/${invite.invite.id}/accept`, {
+        method: 'POST',
+        headers: authHeaders(one.token),
+      });
+      const acceptInviteBody = await acceptInvite.json();
+      assert.equal(acceptInvite.status, 409);
+      assert.equal(acceptInviteBody.activeRoom.code, code);
+    } finally {
+      socketOne.disconnect();
+      socketTwo.disconnect();
+    }
+  });
+});
+
 test('loads durable profile stats and completed results', async () => {
   const token = 'seed-token';
   const userId = 'seed-user';

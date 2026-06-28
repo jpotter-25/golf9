@@ -2,6 +2,7 @@
 // Purpose: Typed REST helpers for authentication and room setup.
 
 import { SERVER_URL } from '../config';
+import type { GameState } from '../game/types';
 import { getInstallId } from '../utils/deviceIdentity';
 
 export type UserProfile = {
@@ -69,6 +70,13 @@ export type RoomSummary = {
   economy: MatchEconomy;
   ranked?: { seasonId: string; league?: string; playerCount: number; buyIn: number } | null;
   players: RoomPlayer[];
+};
+
+export type ActiveRoomResponse = {
+  active: boolean;
+  mustRejoin: boolean;
+  room: RoomSummary | null;
+  game?: GameState | null;
 };
 
 export type SocialRelationship = 'self' | 'friend' | 'incoming' | 'outgoing' | 'none';
@@ -874,6 +882,10 @@ export function recordLocalResult(token: string, payload: LocalResultPayload): P
 
 export function createOnlineRoom(token: string, maxPlayers: number, rounds: number): Promise<{ room: RoomSummary }> {
   return request<{ room: RoomSummary }>('/rooms', { method: 'POST', body: JSON.stringify({ maxPlayers, rounds }) }, token);
+}
+
+export function activeRoom(token: string): Promise<ActiveRoomResponse> {
+  return request<ActiveRoomResponse>('/rooms/active', {}, token);
 }
 
 export function openRooms(token: string, filters: OpenRoomFilters = {}): Promise<{ rooms: RoomSummary[] }> {

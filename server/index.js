@@ -1044,6 +1044,55 @@ function activeRoomForUser(userId) {
   ) || null;
 }
 
+function activePlayingRoomForUser(userId) {
+  return [...rooms.values()].find(room =>
+    room.status === 'playing'
+    && room.game
+    && !room.game.completed
+    && room.players.some(player => player.userId === userId)
+  ) || null;
+}
+
+function refreshActivePlayingRoomForUser(userId) {
+  let room = activePlayingRoomForUser(userId);
+  if (!room) return null;
+  const gameChanged = resolveRoomExpiredTimers(room);
+  if (gameChanged) {
+    recordCompletedGame(room);
+    room.updatedAt = Date.now();
+    broadcastRoom(room);
+  }
+  room = activePlayingRoomForUser(userId);
+  return room || null;
+}
+
+function activeRoomPayloadForUser(userId) {
+  const room = refreshActivePlayingRoomForUser(userId);
+  if (!room) return { active: false, mustRejoin: false, room: null, game: null };
+  return {
+    active: true,
+    mustRejoin: true,
+    room: roomSummary(room),
+    game: gameViewFor(room, userId),
+  };
+}
+
+function activeMatchConflictForUser(userId) {
+  const room = refreshActivePlayingRoomForUser(userId);
+  if (!room) return null;
+  return {
+    error: 'Finish your active match before joining another table.',
+    activeRoom: roomSummary(room),
+  };
+}
+
+function blockActiveMatch(req, res) {
+  const conflict = activeMatchConflictForUser(req.auth.user.userId);
+  if (!conflict) return false;
+  res.status(409).json(conflict);
+  return true;
+}
+
 function userStatus(userId) {
   const activeSockets = userSockets.get(userId);
   const room = activeRoomForUser(userId);
@@ -3610,6 +3659,7 @@ app.get('/ranked/me', requireAuth, (req, res) => {
 
 app.post('/ranked/queue', requireAuth, (req, res) => {
   rankedSeason = normalizeRankedSeason(rankedSeason, Date.now(), rankedConfig());
+  if (blockActiveMatch(req, res)) return;
   const activeRoom = activeRankedRoomForUser(req.auth.user.userId);
   if (activeRoom) {
     return res.json({
@@ -3725,7 +3775,10 @@ app.post('/results/local', requireAuth, (req, res) => {
   return res.json({ result, progression, user: safeUser(req.auth.user) });
 });
 
+app.get('/rooms/active', requireAuth, (req, res) => res.json(activeRoomPayloadForUser(req.auth.user.userId)));
+
 app.post('/rooms', requireAuth, (req, res) => {
+  if (blockActiveMatch(req, res)) return;
   const room = makeRoom(req.auth.user, { ...(req.body || {}), isPublic: req.body?.isPublic !== false });
   return res.json({ room: roomSummary(room) });
 });
@@ -3753,6 +3806,7 @@ app.get('/rooms/open', requireAuth, (req, res) => {
 });
 
 app.post('/rooms/quick-play', requireAuth, (req, res) => {
+  if (blockActiveMatch(req, res)) return;
   const options = normalizeRoomOptions(req.body || {});
   const existingForUser = [...rooms.values()].find(room =>
     room.status === 'lobby'
@@ -3788,6 +3842,7 @@ app.post('/rooms/quick-play', requireAuth, (req, res) => {
 });
 
 app.post('/rooms/wager-play', requireAuth, (req, res) => {
+  if (blockActiveMatch(req, res)) return;
   const options = normalizeWagerOptions(req.body || {});
   if (!options.buyIn) return res.status(400).json({ error: 'Choose a wager table buy-in.' });
   const error = buyInError(req.auth.user, options.buyIn);
@@ -3829,6 +3884,7 @@ app.post('/rooms/wager-play', requireAuth, (req, res) => {
 });
 
 app.post('/rooms/:code/join', requireAuth, (req, res) => {
+  if (blockActiveMatch(req, res)) return;
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found.' });
   if (room.status !== 'lobby') return res.status(409).json({ error: 'Game already started.' });
@@ -3886,6 +3942,7 @@ app.post('/rooms/:code/invites', requireAuth, (req, res) => {
 });
 
 app.post('/rooms/invites/:inviteId/accept', requireAuth, (req, res) => {
+  if (blockActiveMatch(req, res)) return;
   normalizeSocial(req.auth.user);
   const invite = req.auth.user.social.roomInvites.find(item => item.id === req.params.inviteId);
   if (!invite) return res.status(404).json({ error: 'Invite not found.' });
@@ -3997,6 +4054,12 @@ io.on('connection', (socket) => {
     const room = rooms.get(String(code || '').toUpperCase());
     const userId = socket.auth.user.userId;
     if (!room) return cb({ ok: true });
+    if (room.status === 'playing' && room.game && !room.game.completed) {
+      return cb({
+        error: 'Finish your active match before leaving the table.',
+        activeRoom: roomSummary(room),
+      });
+    }
     room.players = room.players.filter(player => player.userId !== userId);
     room.ready.delete(userId);
     room.connected.delete(userId);
@@ -4207,7 +4270,8 @@ setInterval(() => {
   for (const [code, room] of rooms) {
     const gameChanged = resolveRoomExpiredTimers(room);
     recordCompletedGame(room);
-    if (now - room.updatedAt > ROOM_TTL_MS) {
+    const keepActiveMatch = room.status === 'playing' && room.game && !room.game.completed;
+    if (!keepActiveMatch && now - room.updatedAt > ROOM_TTL_MS) {
       cancelRoomCountdown(room);
       rooms.delete(code);
     }
