@@ -82,6 +82,10 @@ const TABLE_GIFTS: GiftOption[] = [
   { id: 'gift-gem', label: 'Gem', accent: '#BDEBFF', icon: '\u{1F48E}', price: 250 },
   { id: 'gift-crown', label: 'Crown', accent: '#FFCC66', icon: '\u{1F451}', price: 500 },
 ];
+const QUIET_ONLINE_ACTION_ERRORS = new Set([
+  'Timer expired. Board updated.',
+  'Card cannot be peeked.',
+]);
 const SOLO_AI_SOURCE_PAUSE_MS = 1300;
 const SOLO_AI_TARGET_PAUSE_MS = 1900;
 const TURN_CHIME_URI = 'data:audio/wav;base64,UklGRsQFAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YaAFAAAAAEkA4QAtAakAT/+7/eT8jP2//6ICxgTdBHsCcf6Q+tn4c/r9/pAEhQi/CL8EEv639830Bve8/QsGFAzIDHEHNP459czwUfP9+w8HZw/sEIgK2f4f8+PsW+/F+ZYHcxIfFf4NAABw8R7pMusY950HLxVVGckRqQEz8Ijl3ub88yEHjxeCHeEV0QNw7y3ibeJ28CEGixmZITwadwYr7xjf6t3M7H4EIBrFI/8c6gi+8JLfSd3v6kACiRiOI0MeEwvP8pjgzNwo6QAA2BY0I2gfMQ3t9L3hctx358D9ERW3Im4gQg8W9wHjO9zg5YL7NBMWIlIhRBFJ+WPkKdxj5En5RBFSIRYiNBOC++DlO9wB4xb3Qg9uILciERXA/Xfncty94e30MQ1oHzQj2BYAACjpzNyY4M/yEwtDHo4jiRhAAu/qSd2S377w6gj/HMUjIBp+BMzs6t2u3rzutwadG9cjnRu3Brzurt7q3czsfgQgGsUj/xzqCL7wkt9J3e/qQAKJGI4jQx4TC8/ymODM3CjpAADYFjQjaB8xDe30veFy3HfnwP0RFbcibiBCDxb3AeM73ODlgvs0ExYiUiFEEUn5Y+Qp3GPkSflEEVIhFiI0E4L74OU73AHjFvdCD24gtyIRFcD9d+dy3L3h7fQxDWgfNCPYFgAAKOnM3Jjgz/ITC0MejiOJGEAC7+pJ3ZLfvvDqCP8cxSMgGn4EzOzq3a7evO63Bp0b1yOdG7cGvO6u3urdzOx+BCAaxSP/HOoIvvCS30nd7+pAAokYjiNDHhMLz/KY4MzcKOkAANgWNCNoHzEN7fS94XLcd+fA/REVtyJuIEIPFvcB4zvc4OWC+zQTFiJSIUQRSflj5CncY+RJ+UQRUiEWIjQTgvvg5TvcAeMW90IPbiC3IhEVwP1353LcveHt9DENaB80I9gWAAAo6czcmODP8hMLQx6OI4kYQALv6kndkt++8OoI/xzFIyAafgTM7Ordrt687rcGnRvXI50btwa87q7e6t3M7H4EIBrFI/8c6gi+8JLfSd3v6kACiRiOI0MeEwvP8pjgzNwo6QAA2BY0I2gfMQ3t9L3hctx358D9ERW3Im4gQg8W9wHjO9zg5YL7NBMWIlIhRBFJ+WPkKdxj5En5RBFSIRYiNBOC++DlO9wB4xb3Qg9uILciERXA/Xfncty94e30MQ1oHzQj2BYAACjpzNyY4M/yEwtDHo4jiRhAAu/qSd2S377w6gj/HMUjIBp+BMzs6t2u3rzutwadG9cjnRu3Brzurt7q3czsfgQgGsUj/xzqCL7wkt9J3e/qQAKJGI4jQx4TC8/ymODM3CjpAADYFjQjaB8xDe30veFy3HfnwP0RFbcibiBCDxb3AeM73ODlgvs0ExYiKCEYEWP58OQP3TflhfmTENMfYSAmEsf7k+e83i7lzff2DYIdah/2Evz9KuqI4F/lT/Z6CysbRx6IEwAAsuxu4sflDfUjCdAY+hzfE9ABJu9n5GLmBfT0BngWixv8E2oDgPFw5i3nOfPwBCkU/BniE80EvvOC6CTop/IZA+URUxiSE/kF2vWZ6kPpT/J0AbQPlBYQE+wG0vev7IfqLvIAAJgNxRRfEqcHovnA7unrQ/LA/pYL6xKDESoIR/vH8GftjPK2/bMJCxF/EHYIvvy/8vruBfPh/PEHKQ9XD4wIBv6j9J/wrfNC/FUGTA0PDm0IHP9v9lDygPTZ++IEdwusDBwIAAAe+Aj0e/Wl+5kDrwkzC5sHsACu+cL1mfan+38C+QeoCewGKwEa+3v31vfb+5QBWgYQCBMGcgFg/Cv5L/lB/NoA1QRwBhMFhAF7/dD6n/rX/FQAbwPNBO8DYgFr/mP8Ifya/QAALAIrA6sCDgEr/+L9sP2H/uD/DgGQAUwBiQC8/0b/Sf+c//X/GQA=';
@@ -315,7 +319,12 @@ export default function GameScreen({ route, navigation }: Props) {
   }, [applyOnlineRoomSnapshot, isOnline, roomCode, token]);
 
   const handleOnlineActionError = useCallback((title: string, error: unknown) => {
-    Alert.alert(title, error instanceof Error ? error.message : 'Try again.');
+    const message = error instanceof Error ? error.message : 'Try again.';
+    if (QUIET_ONLINE_ACTION_ERRORS.has(message)) {
+      resyncOnlineRoom({ quiet: true });
+      return;
+    }
+    Alert.alert(title, message);
     resyncOnlineRoom({ quiet: true });
   }, [resyncOnlineRoom]);
 
@@ -1045,6 +1054,11 @@ export default function GameScreen({ route, navigation }: Props) {
   const onPressGrid = (r: number, c: number) => {
     if (state.phase === 'peek') {
       if (!isHumanPeek || !isActiveGridVisible) return;
+      const peekPlayerIndex = isOnline && onlineViewerIndex >= 0
+        ? onlineViewerIndex
+        : (state.peekTurnIndex ?? bottomIndex);
+      const peekCard = state.players[peekPlayerIndex]?.grid?.[r]?.[c];
+      if (!peekCard || peekCard.faceUp) return;
       if (isOnline && token && roomCode) {
         sendGameIntent(token, roomCode, 'peek', { r, c }).catch(error => handleOnlineActionError('Move rejected', error));
         return;

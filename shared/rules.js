@@ -1,7 +1,7 @@
 export const ROWS = 3;
 export const COLS = 3;
-export const TURN_DURATION = 25_000;
-export const PEEK_DURATION = 15_000;
+export const TURN_DURATION = 45_000;
+export const PEEK_DURATION = 30_000;
 export const ROUND_REVEAL_DURATION = 4_500;
 export const ROUND_SUMMARY_DURATION = 20_000;
 export const MAX_PLAYERS = 4;

@@ -310,7 +310,7 @@ export default function OnlineRoomScreen({ route, navigation }: Props) {
       <View style={styles.actionsStack}>
         <View style={styles.rankedNotice}>
           <Text style={styles.rankedNoticeText}>
-            {room.countdownEndsAt ? 'The table is full. Starting automatically.' : 'The game starts automatically when every seat is filled.'}
+            {room.countdownEndsAt ? 'The table is full. You can still leave before the countdown ends.' : 'The game starts automatically when every seat is filled.'}
           </Text>
         </View>
 

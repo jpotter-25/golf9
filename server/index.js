@@ -171,7 +171,7 @@ const EXTRA_LISTEN_PORTS = [...new Set(
 )];
 const CLIENT_ORIGINS = (process.env.CLIENT_ORIGINS || '*').split(',');
 const MAX_PROCESSED_ACTION_IDS = 500;
-const ROOM_COUNTDOWN_MS = Number(process.env.ROOM_COUNTDOWN_MS || 7000);
+const ROOM_COUNTDOWN_MS = Number(process.env.ROOM_COUNTDOWN_MS || 10000);
 const CHAT_HISTORY_LIMIT = 80;
 const CHAT_MESSAGE_MAX_LENGTH = 160;
 const CHAT_RATE_LIMIT_MS = 800;

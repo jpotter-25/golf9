@@ -1208,6 +1208,52 @@ test('quick play joins compatible rooms and starts a full-room countdown', async
   }, { ROOM_COUNTDOWN_MS: '50' });
 });
 
+test('full lobby countdown stops when a player leaves and restarts when filled again', async () => {
+  await withServer(async (baseUrl) => {
+    const one = await signup(baseUrl, `CountdownOne${Date.now()}`);
+    const two = await signup(baseUrl, `CountdownTwo${Date.now()}`);
+    const three = await signup(baseUrl, `CountdownThree${Date.now()}`);
+
+    const created = await json(await fetch(`${baseUrl}/rooms`, {
+      method: 'POST',
+      headers: authHeaders(one.token),
+      body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
+    }));
+    const code = created.room.code;
+
+    const joined = await json(await fetch(`${baseUrl}/rooms/${code}/join`, {
+      method: 'POST',
+      headers: authHeaders(two.token),
+    }));
+    assert.equal(joined.room.players.length, 2);
+    assert.equal(typeof joined.room.countdownEndsAt, 'number');
+
+    const socketOne = io(baseUrl, { transports: ['websocket'], auth: { token: one.token }, forceNew: true });
+    const socketTwo = io(baseUrl, { transports: ['websocket'], auth: { token: two.token }, forceNew: true });
+    await Promise.all([once(socketOne, 'connect'), once(socketTwo, 'connect')]);
+
+    try {
+      assert.equal((await emitAck(socketOne, 'room:join', { code })).room.countdownEndsAt != null, true);
+      assert.equal((await emitAck(socketTwo, 'room:join', { code })).room.countdownEndsAt != null, true);
+      assert.deepEqual(await emitAck(socketTwo, 'room:leave', { code }), { ok: true });
+
+      const afterLeave = await emitAck(socketOne, 'room:join', { code });
+      assert.equal(afterLeave.room.players.length, 1);
+      assert.equal(afterLeave.room.countdownEndsAt, null);
+
+      const refilled = await json(await fetch(`${baseUrl}/rooms/${code}/join`, {
+        method: 'POST',
+        headers: authHeaders(three.token),
+      }));
+      assert.equal(refilled.room.players.length, 2);
+      assert.equal(typeof refilled.room.countdownEndsAt, 'number');
+    } finally {
+      socketOne.disconnect();
+      socketTwo.disconnect();
+    }
+  }, { ROOM_COUNTDOWN_MS: '5000' });
+});
+
 test('ranked queue creates a human-only ranked room and starts automatically', async () => {
   await withServer(async (baseUrl) => {
     const one = await signup(baseUrl, `RankOne${Date.now()}`);

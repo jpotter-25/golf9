@@ -19,6 +19,8 @@ import {
   scoreGrid,
   startTurns,
   takeDiscard,
+  PEEK_DURATION,
+  TURN_DURATION,
 } from '../../shared/rules.js';
 
 function card(rank, extra = {}) {
@@ -68,6 +70,11 @@ test('deck count scales up for three and four player games', () => {
   assert.equal(twoPlayers.drawPile.length, 104 - (2 * 9) - 1);
   assert.equal(threePlayers.drawPile.length, 156 - (3 * 9) - 1);
   assert.equal(fourPlayers.drawPile.length, 156 - (4 * 9) - 1);
+});
+
+test('match timer defaults give players enough time to act', () => {
+  assert.equal(PEEK_DURATION, 30_000);
+  assert.equal(TURN_DURATION, 45_000);
 });
 
 test('peek validation enforces current peeker and two-card limit', () => {

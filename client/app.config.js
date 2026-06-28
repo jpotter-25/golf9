@@ -54,7 +54,7 @@ module.exports = {
     },
     android: {
       package: 'us.joinup.golf_9',
-      versionCode: 12,
+      versionCode: 13,
       permissions: [],
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
