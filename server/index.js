@@ -160,6 +160,7 @@ const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const EXPO_ACCESS_TOKEN = String(process.env.EXPO_ACCESS_TOKEN || '').trim();
 const PUSH_TEST_MODE = process.env.PUSH_TEST_MODE === '1';
 const PUSH_DAILY_SCAN_MS = Math.max(60_000, Number(process.env.PUSH_DAILY_SCAN_MS || 60_000));
+const pushTestOutbox = [];
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const ROOM_TTL_MS = 1000 * 60 * 60 * 2;
 const PORT = String(process.env.PORT || 3001);
@@ -217,6 +218,35 @@ const ROOM_INVITE_TTL_MS = 1000 * 60 * 30;
 const SOCIAL_RECENT_LIMIT = 20;
 const CLUB_CHAT_RATE_LIMIT_MS = 1000;
 const MAX_PUSH_TOKENS_PER_USER = 12;
+const PUSH_TEMPLATE_KEYS = ['turn', 'dailyBonus', 'roomInvite', 'friendRequest'];
+const DEFAULT_NOTIFICATION_CONFIG = {
+  enabled: true,
+  types: {
+    turn: {
+      enabled: true,
+      title: 'Your turn in Golf 9',
+      body: 'Room {roomCode} is waiting on you.',
+    },
+    dailyBonus: {
+      enabled: true,
+      title: 'Daily bonus ready',
+      body: 'Claim {reward} free coins in Golf 9.',
+    },
+    roomInvite: {
+      enabled: true,
+      title: 'Game invite',
+      body: '{fromDisplayName} invited you to room {roomCode}.',
+    },
+    friendRequest: {
+      enabled: true,
+      title: 'New friend request',
+      body: '{fromDisplayName} wants to connect on Golf 9.',
+    },
+  },
+  custom: {
+    enabled: true,
+  },
+};
 
 function normalizePublicUrl(value) {
   const fallback = 'https://games.joinup.us';
@@ -453,6 +483,39 @@ function normalizePushPlatform(value) {
   return platform === 'ios' || platform === 'android' || platform === 'web' ? platform : 'unknown';
 }
 
+function cleanPushText(value, maxLength = 120) {
+  return String(value || '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+}
+
+function normalizeNotificationConfig(input = {}) {
+  const source = input && typeof input === 'object' ? input : {};
+  const next = structuredClone(DEFAULT_NOTIFICATION_CONFIG);
+  next.enabled = source.enabled !== false;
+  for (const key of PUSH_TEMPLATE_KEYS) {
+    const patch = source.types?.[key] || {};
+    next.types[key] = {
+      enabled: patch.enabled !== false,
+      title: cleanPushText(patch.title || next.types[key].title, 80) || next.types[key].title,
+      body: cleanPushText(patch.body || next.types[key].body, 180) || next.types[key].body,
+    };
+  }
+  next.custom = { enabled: source.custom?.enabled !== false };
+  return next;
+}
+
+function notificationConfig() {
+  adminStore.notificationConfig = normalizeNotificationConfig(adminStore.notificationConfig);
+  return adminStore.notificationConfig;
+}
+
+function renderPushTemplate(template, data = {}) {
+  return cleanPushText(template, 220).replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, key) => cleanPushText(data[key], 80));
+}
+
 function normalizePushNotifications(user) {
   const existing = user.pushNotifications && typeof user.pushNotifications === 'object' ? user.pushNotifications : {};
   const sourceTokens = Array.isArray(existing.tokens)
@@ -522,7 +585,10 @@ function utcDayKey(now = Date.now()) {
 
 async function sendExpoPushMessages(messages) {
   if (!messages.length) return [];
-  if (PUSH_TEST_MODE) return messages.map(() => ({ status: 'ok' }));
+  if (PUSH_TEST_MODE) {
+    pushTestOutbox.push(...messages.map(message => ({ ...message, sentAt: Date.now() })));
+    return messages.map(() => ({ status: 'ok' }));
+  }
   const headers = {
     Accept: 'application/json',
     'Content-Type': 'application/json',
@@ -580,6 +646,40 @@ function queuePushToUser(userId, payload) {
   return true;
 }
 
+function queueConfiguredPushToUser(userId, type, payload = {}) {
+  const config = notificationConfig();
+  if (!config.enabled) return false;
+  const typeConfig = config.types[type];
+  if (!typeConfig?.enabled) return false;
+  return queuePushToUser(userId, {
+    ...payload,
+    type,
+    title: renderPushTemplate(typeConfig.title, payload.templateData),
+    body: renderPushTemplate(typeConfig.body, payload.templateData),
+  });
+}
+
+function queueAdminCustomPush({ title, body, targetUserId = null, data = {} } = {}) {
+  const config = notificationConfig();
+  if (!config.enabled || !config.custom.enabled) return { queued: 0, targetedUsers: 0 };
+  const safeTitle = cleanPushText(title, 80);
+  const safeBody = cleanPushText(body, 180);
+  if (!safeTitle || !safeBody) return { error: 'Title and message are required.' };
+  const targets = targetUserId ? [users.get(targetUserId)].filter(Boolean) : [...users.values()];
+  let queued = 0;
+  for (const user of targets) {
+    if (queuePushToUser(user.userId, {
+      type: 'custom',
+      keyName: 'custom',
+      dedupeKey: `custom:${Date.now()}:${crypto.randomUUID()}:${user.userId}`,
+      title: safeTitle,
+      body: safeBody,
+      data: { type: 'custom', ...data },
+    })) queued += 1;
+  }
+  return { queued, targetedUsers: targets.length };
+}
+
 function normalizeUserRecord(user, now = Date.now()) {
   normalizeUserProgression(user, now, rankedSeason, rankedConfig());
   normalizeSocial(user);
@@ -631,6 +731,7 @@ function applyStoreState(parsed = {}) {
     supportTickets: parsed.supportTickets || [],
     bans: parsed.bans || [],
     inviteCodes: parsed.inviteCodes || [],
+    notificationConfig: parsed.notificationConfig || {},
   }));
   normalizeCompetitiveConfigStore(Object.assign(competitiveStore, parsed.competitiveConfig || {}));
   rankedSeason = normalizeRankedSeason(parsed.rankedSeason, Date.now(), rankedConfig());
@@ -681,6 +782,7 @@ function storeSnapshot() {
     supportTickets: adminStore.supportTickets,
     bans: adminStore.bans,
     inviteCodes: adminStore.inviteCodes,
+    notificationConfig: notificationConfig(),
   };
 }
 
@@ -1581,14 +1683,18 @@ function maybeSendTurnPush(room) {
   if (!game || game.completed || game.phase !== 'turn') return;
   const activePlayer = game.players?.[game.currentPlayerIndex];
   if (!activePlayer?.userId) return;
+  const foreground = room.foreground?.get(activePlayer.userId);
+  const connected = room.connected?.get(activePlayer.userId) || false;
+  if (foreground || (foreground == null && connected)) return;
   const key = `${room.code}:${game.round}:${game.turnSerial || 0}:${activePlayer.userId}`;
   const roomPlayer = room.players.find(player => player.userId === activePlayer.userId);
-  queuePushToUser(activePlayer.userId, {
-    type: 'turn',
+  queueConfiguredPushToUser(activePlayer.userId, 'turn', {
     keyName: 'turn',
     dedupeKey: key,
-    title: 'Your turn in Golf 9',
-    body: `Room ${room.code} is waiting on you.`,
+    templateData: {
+      roomCode: room.code,
+      displayName: roomPlayer?.displayName || activePlayer.displayName || '',
+    },
     data: {
       type: 'turn',
       roomCode: room.code,
@@ -1606,12 +1712,12 @@ function queueDailyBonusPushes(now = Date.now()) {
     if (!push.tokens.length) continue;
     const bonus = publicDailyBonus(user, now);
     if (!bonus.canClaim) continue;
-    const didQueue = queuePushToUser(user.userId, {
-      type: 'dailyBonus',
+    const didQueue = queueConfiguredPushToUser(user.userId, 'dailyBonus', {
       keyName: 'dailyBonus',
       dedupeKey: dayKey,
-      title: 'Daily bonus ready',
-      body: `Claim ${bonus.reward} free coins in Golf 9.`,
+      templateData: {
+        reward: String(bonus.reward),
+      },
       data: {
         type: 'dailyBonus',
         reward: String(bonus.reward),
@@ -1854,6 +1960,7 @@ function addUserToRoom(room, user) {
   room.players.push(player);
   room.ready.set(player.userId, true);
   room.connected.set(player.userId, false);
+  room.foreground?.set(player.userId, false);
 }
 
 function makeRoom(hostUser, { maxPlayers = 4, rounds = 9, matchType = 'casual', ranked = null, buyIn = 0, isPublic = false } = {}) {
@@ -1878,6 +1985,7 @@ function makeRoom(hostUser, { maxPlayers = 4, rounds = 9, matchType = 'casual', 
     players: [host],
     ready: new Map([[host.userId, true]]),
     connected: new Map([[host.userId, false]]),
+    foreground: new Map([[host.userId, false]]),
     game: null,
     processedActionIds: new Set(),
     held: new Map(),
@@ -3062,6 +3170,56 @@ app.get('/admin/api/metrics', requireAdmin(adminStore, 'metrics:read'), (_req, r
   },
 }));
 
+app.get('/admin/api/notifications', requireAdmin(adminStore, 'notifications:read'), (_req, res) => {
+  const registeredUsers = [...users.values()].filter(user => normalizePushNotifications(user).tokens.length).length;
+  const registeredTokens = [...users.values()].reduce((sum, user) => sum + normalizePushNotifications(user).tokens.length, 0);
+  return res.json({
+    config: notificationConfig(),
+    stats: { registeredUsers, registeredTokens },
+  });
+});
+
+app.patch('/admin/api/notifications', requireAdmin(adminStore, 'notifications:write'), (req, res) => {
+  const reason = cleanAdminReason(req.body?.reason);
+  if (!reason) return res.status(400).json({ error: 'Audit reason is required.' });
+  const before = notificationConfig();
+  const next = normalizeNotificationConfig(req.body?.config || req.body || {});
+  adminStore.notificationConfig = next;
+  writeAudit(adminStore, req, req.admin.admin, 'admin.notifications.config.update', {}, { reason, before, after: next });
+  saveStore();
+  return res.json({ config: notificationConfig() });
+});
+
+app.post('/admin/api/notifications/send', requireAdmin(adminStore, 'notifications:write'), (req, res) => {
+  const reason = cleanAdminReason(req.body?.reason);
+  if (!reason) return res.status(400).json({ error: 'Audit reason is required.' });
+  const targetInput = cleanPushText(req.body?.targetUserId || req.body?.target || '', 80);
+  const target = targetInput ? findUserByIdentifier(targetInput) : null;
+  if (targetInput && !target) return res.status(404).json({ error: 'Target user not found.' });
+  const result = queueAdminCustomPush({
+    title: req.body?.title,
+    body: req.body?.body,
+    targetUserId: target?.userId || null,
+    data: {
+      campaignId: cleanPushText(req.body?.campaignId || '', 60),
+    },
+  });
+  if (result.error) return res.status(400).json({ error: result.error });
+  writeAudit(adminStore, req, req.admin.admin, 'admin.notifications.custom.send', { userId: target?.userId || null }, {
+    reason,
+    title: cleanPushText(req.body?.title, 80),
+    targetedUsers: result.targetedUsers,
+    queued: result.queued,
+  });
+  saveStore();
+  return res.json(result);
+});
+
+app.get('/admin/api/notifications/test-outbox', requireAdmin(adminStore, 'notifications:read'), (_req, res) => {
+  if (!PUSH_TEST_MODE) return res.status(404).json({ error: 'Push test outbox is disabled.' });
+  return res.json({ messages: pushTestOutbox.slice(-100) });
+});
+
 app.get('/admin/api/invites', requireAdmin(adminStore, 'invites:read'), (_req, res) => {
   res.json({
     inviteRequired: signupInvitesRequired(),
@@ -3577,12 +3735,12 @@ app.post('/friends/requests', requireAuth, (req, res) => {
   saveStore();
   emitSocialUpdate(req.auth.user.userId);
   emitSocialUpdate(target.userId);
-  queuePushToUser(target.userId, {
-    type: 'friendRequest',
+  queueConfiguredPushToUser(target.userId, 'friendRequest', {
     keyName: 'friendRequest',
     dedupeKey: outgoingRequest?.id || `friend:${req.auth.user.userId}:${target.userId}`,
-    title: 'New friend request',
-    body: `${req.auth.user.displayName} wants to connect on Golf 9.`,
+    templateData: {
+      fromDisplayName: req.auth.user.displayName,
+    },
     data: {
       type: 'friendRequest',
       fromUserId: req.auth.user.userId,
@@ -3925,12 +4083,13 @@ app.post('/rooms/:code/invites', requireAuth, (req, res) => {
   target.social.roomInvites.push(invite);
   saveStore();
   emitSocialUpdate(target.userId);
-  queuePushToUser(target.userId, {
-    type: 'roomInvite',
+  queueConfiguredPushToUser(target.userId, 'roomInvite', {
     keyName: 'roomInvite',
     dedupeKey: invite.id,
-    title: 'Game invite',
-    body: `${req.auth.user.displayName} invited you to room ${room.code}.`,
+    templateData: {
+      fromDisplayName: req.auth.user.displayName,
+      roomCode: room.code,
+    },
     data: {
       type: 'roomInvite',
       inviteId: invite.id,
@@ -4017,6 +4176,8 @@ io.on('connection', (socket) => {
     socket.join(`${room.code}:${userId}`);
     sockets.set(socket.id, { roomCode: room.code, userId });
     room.connected.set(userId, true);
+    room.foreground ||= new Map();
+    room.foreground.set(userId, true);
     const gameChanged = resolveRoomExpiredTimers(room);
     if (gameChanged) recordCompletedGame(room);
     room.updatedAt = Date.now();
@@ -4063,6 +4224,7 @@ io.on('connection', (socket) => {
     room.players = room.players.filter(player => player.userId !== userId);
     room.ready.delete(userId);
     room.connected.delete(userId);
+    room.foreground?.delete(userId);
     if (room.hostUserId === userId && room.players.length) room.hostUserId = room.players[0].userId;
     cancelRoomCountdown(room);
     if (!room.players.length) rooms.delete(room.code);
@@ -4070,6 +4232,18 @@ io.on('connection', (socket) => {
     room.chatRate?.delete(userId);
     socket.leave(room.code);
     socket.leave(`${room.code}:${userId}`);
+    return cb({ ok: true });
+  });
+
+  socket.on('presence:state', ({ code, foreground }, cb = () => {}) => {
+    const room = rooms.get(String(code || '').toUpperCase());
+    const userId = socket.auth.user.userId;
+    if (!room || !room.players.some(player => player.userId === userId)) return cb({ error: 'Room not found.' });
+    room.foreground ||= new Map();
+    room.connected.set(userId, true);
+    room.foreground.set(userId, foreground !== false);
+    room.updatedAt = Date.now();
+    maybeSendTurnPush(room);
     return cb({ ok: true });
   });
 
@@ -4252,6 +4426,7 @@ io.on('connection', (socket) => {
     if (!room) return;
     const stillConnected = [...sockets.values()].some(item => item.roomCode === link.roomCode && item.userId === link.userId);
     room.connected.set(link.userId, stillConnected);
+    if (!stillConnected) room.foreground?.set(link.userId, false);
     room.updatedAt = Date.now();
     broadcastRoom(room);
   });

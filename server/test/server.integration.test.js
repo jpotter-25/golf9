@@ -240,6 +240,121 @@ test('push notification tokens can register, rotate, and unregister', async () =
   }, { PUSH_TEST_MODE: '1' });
 });
 
+test('admin notifications can configure templates and send custom pushes', async () => {
+  await withServer(async (baseUrl) => {
+    const admin = await adminLogin(baseUrl);
+    const player = await signup(baseUrl, `NotifyCustom${Date.now()}`);
+    await json(await fetch(`${baseUrl}/push/register`, {
+      method: 'POST',
+      headers: authHeaders(player.token),
+      body: JSON.stringify({
+        expoPushToken: 'ExponentPushToken[custom-token-one]',
+        deviceId: 'custom-device',
+        platform: 'android',
+      }),
+    }));
+
+    const overview = await json(await fetch(`${baseUrl}/admin/api/notifications`, { headers: adminHeaders(admin) }));
+    assert.equal(overview.stats.registeredUsers, 1);
+    assert.equal(overview.stats.registeredTokens, 1);
+    assert.equal(overview.config.types.turn.enabled, true);
+
+    const saved = await json(await fetch(`${baseUrl}/admin/api/notifications`, {
+      method: 'PATCH',
+      headers: adminHeaders(admin),
+      body: JSON.stringify({
+        reason: 'Integration test notification templates',
+        config: {
+          enabled: true,
+          custom: { enabled: true },
+          types: {
+            ...overview.config.types,
+            turn: { enabled: true, title: 'Golf 9 turn', body: 'Room {roomCode} needs you.' },
+          },
+        },
+      }),
+    }));
+    assert.equal(saved.config.types.turn.title, 'Golf 9 turn');
+
+    const sent = await json(await fetch(`${baseUrl}/admin/api/notifications/send`, {
+      method: 'POST',
+      headers: adminHeaders(admin),
+      body: JSON.stringify({
+        target: player.user.userId,
+        title: 'Test broadcast',
+        body: 'This is a custom admin notification.',
+        reason: 'Integration test custom push',
+      }),
+    }));
+    assert.equal(sent.queued, 1);
+    assert.equal(sent.targetedUsers, 1);
+
+    const outbox = await json(await fetch(`${baseUrl}/admin/api/notifications/test-outbox`, { headers: adminHeaders(admin) }));
+    assert.ok(outbox.messages.some(message => message.title === 'Test broadcast' && message.to === 'ExponentPushToken[custom-token-one]'));
+  }, { PUSH_TEST_MODE: '1', SEED_ADMIN_ACCOUNT: '1' });
+});
+
+test('turn push waits until the active player backgrounds or disconnects', async () => {
+  await withServer(async (baseUrl) => {
+    const admin = await adminLogin(baseUrl);
+    const one = await signup(baseUrl, `TurnPushOne${Date.now()}`);
+    const two = await signup(baseUrl, `TurnPushTwo${Date.now()}`);
+
+    await json(await fetch(`${baseUrl}/push/register`, {
+      method: 'POST',
+      headers: authHeaders(one.token),
+      body: JSON.stringify({ expoPushToken: 'ExponentPushToken[turn-token-one]', deviceId: 'turn-one', platform: 'android' }),
+    }));
+    await json(await fetch(`${baseUrl}/push/register`, {
+      method: 'POST',
+      headers: authHeaders(two.token),
+      body: JSON.stringify({ expoPushToken: 'ExponentPushToken[turn-token-two]', deviceId: 'turn-two', platform: 'android' }),
+    }));
+
+    const created = await json(await fetch(`${baseUrl}/rooms`, {
+      method: 'POST',
+      headers: authHeaders(one.token),
+      body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
+    }));
+    const code = created.room.code;
+    await json(await fetch(`${baseUrl}/rooms/${code}/join`, { method: 'POST', headers: authHeaders(two.token) }));
+
+    const socketOne = io(baseUrl, { transports: ['websocket'], auth: { token: one.token }, forceNew: true });
+    const socketTwo = io(baseUrl, { transports: ['websocket'], auth: { token: two.token }, forceNew: true });
+    await Promise.all([once(socketOne, 'connect'), once(socketTwo, 'connect')]);
+
+    try {
+      assert.equal((await emitAck(socketOne, 'room:join', { code })).room.code, code);
+      assert.equal((await emitAck(socketTwo, 'room:join', { code })).room.code, code);
+      assert.deepEqual(await emitAck(socketOne, 'room:start', { code }), { ok: true });
+
+      assert.equal((await emitAck(socketOne, 'game:intent', { code, actionId: 'peek-one-a1', type: 'peek', payload: { r: 0, c: 0 } })).ok, true);
+      assert.equal((await emitAck(socketTwo, 'game:intent', { code, actionId: 'peek-two-a1', type: 'peek', payload: { r: 0, c: 0 } })).ok, true);
+      assert.equal((await emitAck(socketOne, 'game:intent', { code, actionId: 'peek-one-b1', type: 'peek', payload: { r: 0, c: 1 } })).ok, true);
+      assert.equal((await emitAck(socketTwo, 'game:intent', { code, actionId: 'peek-two-b1', type: 'peek', payload: { r: 0, c: 1 } })).ok, true);
+
+      await new Promise(resolve => setTimeout(resolve, 30));
+      let outbox = await json(await fetch(`${baseUrl}/admin/api/notifications/test-outbox`, { headers: adminHeaders(admin) }));
+      assert.equal(outbox.messages.some(message => message.data?.type === 'turn'), false);
+
+      const game = (await emitAck(socketOne, 'room:join', { code })).game;
+      const activeUserId = game.players[game.currentPlayerIndex].userId;
+      const activeSocket = activeUserId === one.user.userId ? socketOne : socketTwo;
+      assert.deepEqual(await emitAck(activeSocket, 'presence:state', { code, foreground: false }), { ok: true });
+
+      await new Promise(resolve => setTimeout(resolve, 30));
+      outbox = await json(await fetch(`${baseUrl}/admin/api/notifications/test-outbox`, { headers: adminHeaders(admin) }));
+      const turnMessages = outbox.messages.filter(message => message.data?.type === 'turn');
+      assert.equal(turnMessages.length, 1);
+      assert.equal(turnMessages[0].data.roomCode, code);
+      assert.equal(turnMessages[0].data.displayName, game.players[game.currentPlayerIndex].name);
+    } finally {
+      socketOne.disconnect();
+      socketTwo.disconnect();
+    }
+  }, { PUSH_TEST_MODE: '1', SEED_ADMIN_ACCOUNT: '1' });
+});
+
 test('dev test accounts can be seeded for local playtesting', async () => {
   await withServer(async (baseUrl) => {
     const one = await json(await fetch(`${baseUrl}/auth/login`, {

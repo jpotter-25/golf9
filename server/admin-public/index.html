@@ -35,6 +35,7 @@
           <button data-tab="invites">Invites</button>
           <button data-tab="support">Support</button>
           <button data-tab="economy">Economy</button>
+          <button data-tab="notifications">Notifications</button>
           <button data-tab="competitive">Competitive</button>
           <button data-tab="catalog">Catalog</button>
           <button data-tab="clubs">Clubs</button>
@@ -175,6 +176,34 @@
               <button type="submit">Apply Competitive Adjustment</button>
             </form>
           </div>
+        </section>
+        <section id="notifications" class="tab">
+          <div class="panel">
+            <div class="split-header">
+              <div>
+                <h2>Notifications</h2>
+                <p class="muted">Configure push notification templates and send operational messages to registered devices.</p>
+              </div>
+              <button id="loadNotifications">Refresh Notifications</button>
+            </div>
+            <div id="notificationStats" class="statline"></div>
+            <form id="notificationConfigEditor" class="editor">
+              <label class="checkline"><input name="enabled" type="checkbox" /> Enable push notifications</label>
+              <div id="notificationTemplateRows" class="list"></div>
+              <label class="checkline"><input name="customEnabled" type="checkbox" /> Enable custom admin pushes</label>
+              <label>Reason <input name="reason" placeholder="Required audit reason" /></label>
+              <button type="submit">Save Notification Settings</button>
+            </form>
+          </div>
+          <form id="customNotificationForm" class="panel compact">
+            <h3>Send Custom Push</h3>
+            <input name="target" placeholder="Optional user id or display name; leave blank for all registered devices" />
+            <input name="title" placeholder="Notification title" required />
+            <textarea name="body" rows="3" placeholder="Notification message" required></textarea>
+            <input name="campaignId" placeholder="Optional campaign id" />
+            <input name="reason" placeholder="Required audit reason" required />
+            <button type="submit">Send Push</button>
+          </form>
         </section>
         <section id="catalog" class="tab">
           <div class="panel">

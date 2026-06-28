@@ -26,7 +26,7 @@ import { PlayerAvatar } from '../components/PlayerAvatar';
 import { useBoardMetrics } from '../utils/scaling';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
-import { connect, joinRoomSocket, onChatHistory, onChatMessage, onGameCelebration, onGameUpdate, onRoomUpdate, onSocketConnect, sendChatMessage, sendGameIntent, type ChatMessage, type ChatMessageType } from '../services/network';
+import { connect, joinRoomSocket, onChatHistory, onChatMessage, onGameCelebration, onGameUpdate, onRoomUpdate, onSocketConnect, sendChatMessage, sendGameIntent, updateRoomPresence, type ChatMessage, type ChatMessageType } from '../services/network';
 import { getGameplayPreferences, setGameplayPreferences, subscribeGameplayPreferences, type GameplayPreferences } from '../services/preferences';
 import { getTableThemeVisual, type EquippedCosmetics } from '../theme/cosmetics';
 import { actionCopy, layerZ, ui, type GameActionModel, type GameLayerState, type GameNotice } from '../ui';
@@ -389,21 +389,28 @@ export default function GameScreen({ route, navigation }: Props) {
   useEffect(() => {
     if (!isOnline) return;
     let previousState = AppState.currentState;
+    updateRoomPresence(token, roomCode, previousState === 'active').catch(() => {});
     const sub = AppState.addEventListener('change', nextState => {
       const becameActive = nextState === 'active' && previousState !== 'active';
       previousState = nextState;
-      if (!becameActive) return;
-      setNowTime(Date.now());
-      resyncOnlineRoom({ quiet: true });
+      updateRoomPresence(token, roomCode, nextState === 'active').catch(() => {});
+      if (becameActive) {
+        setNowTime(Date.now());
+        resyncOnlineRoom({ quiet: true });
+      }
     });
-    return () => sub.remove();
-  }, [isOnline, resyncOnlineRoom]);
+    return () => {
+      updateRoomPresence(token, roomCode, false).catch(() => {});
+      sub.remove();
+    };
+  }, [isOnline, resyncOnlineRoom, roomCode, token]);
 
   useEffect(() => {
     if (!isOnline || !isFocused) return;
+    updateRoomPresence(token, roomCode, true).catch(() => {});
     setNowTime(Date.now());
     resyncOnlineRoom({ quiet: true });
-  }, [isFocused, isOnline, resyncOnlineRoom]);
+  }, [isFocused, isOnline, resyncOnlineRoom, roomCode, token]);
 
   useEffect(() => {
     if (isOnline) return;

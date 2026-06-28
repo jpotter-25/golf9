@@ -80,6 +80,16 @@ export function leaveOnlineRoom(token: string, code: string): Promise<void> {
   });
 }
 
+export function updateRoomPresence(token: string, code: string, foreground: boolean): Promise<void> {
+  const s = connect(token);
+  return new Promise((resolve, reject) => {
+    s.emit('presence:state', { code, foreground }, (res: { error?: string }) => {
+      if (res.error) reject(new Error(res.error));
+      else resolve();
+    });
+  });
+}
+
 export function onRoomUpdate(cb: (room: RoomSummary) => void) {
   socket?.on('room:update', cb);
   return () => { socket?.off('room:update', cb); };

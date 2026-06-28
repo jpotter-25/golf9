@@ -8,6 +8,14 @@ let catalogLive = [];
 let selectedClub = null;
 let competitiveConfig = null;
 let economyWagerTables = [];
+let notificationConfig = null;
+
+const NOTIFICATION_LABELS = {
+  turn: 'Your Turn',
+  dailyBonus: 'Daily Bonus',
+  roomInvite: 'Room Invite',
+  friendRequest: 'Friend Request',
+};
 
 async function api(path, options = {}) {
   const isForm = options.body instanceof FormData;
@@ -51,6 +59,7 @@ function bindTabs() {
       document.querySelector(`#${button.dataset.tab}`)?.classList.add('active');
       if (button.dataset.tab === 'invites') loadInvites();
       if (button.dataset.tab === 'economy') loadEconomy();
+      if (button.dataset.tab === 'notifications') loadNotifications();
       if (button.dataset.tab === 'competitive') loadCompetitive();
     });
   });
@@ -71,6 +80,9 @@ function bindConsoleActions() {
   document.querySelector('#loadEconomy').addEventListener('click', loadEconomy);
   document.querySelector('#addWagerTable').addEventListener('click', addWagerTable);
   document.querySelector('#economyConfigEditor').addEventListener('submit', saveEconomyConfig);
+  document.querySelector('#loadNotifications').addEventListener('click', loadNotifications);
+  document.querySelector('#notificationConfigEditor').addEventListener('submit', saveNotificationConfig);
+  document.querySelector('#customNotificationForm').addEventListener('submit', sendCustomNotification);
   document.querySelector('#loadCompetitive').addEventListener('click', loadCompetitive);
   document.querySelector('#publishCompetitive').addEventListener('click', publishCompetitive);
   document.querySelector('#rollbackCompetitive').addEventListener('click', rollbackCompetitive);
@@ -397,6 +409,101 @@ function addWagerTable() {
     },
   ];
   renderWagerTables();
+}
+
+async function loadNotifications() {
+  const data = await api('/notifications');
+  notificationConfig = data.config;
+  renderNotifications(data.config, data.stats);
+}
+
+function renderNotifications(config, stats = {}) {
+  const form = document.querySelector('#notificationConfigEditor');
+  form.enabled.checked = config?.enabled !== false;
+  form.customEnabled.checked = config?.custom?.enabled !== false;
+  document.querySelector('#notificationStats').innerHTML = `
+    <span class="chip">${Number(stats.registeredUsers || 0)} registered players</span>
+    <span class="chip">${Number(stats.registeredTokens || 0)} device tokens</span>
+  `;
+  const rows = Object.entries(config?.types || {}).map(([type, item]) => {
+    const row = document.createElement('div');
+    row.className = 'card notification-row';
+    row.dataset.type = type;
+    row.innerHTML = `
+      <label class="checkline"><input data-field="enabled" type="checkbox" ${item.enabled !== false ? 'checked' : ''} /> ${escapeHtml(NOTIFICATION_LABELS[type] || type)}</label>
+      <label>Title
+        <input data-field="title" value="${escapeHtml(item.title || '')}" />
+      </label>
+      <label>Message
+        <textarea data-field="body" rows="2">${escapeHtml(item.body || '')}</textarea>
+      </label>
+      <p class="muted">Template variables: {roomCode}, {displayName}, {reward}, {fromDisplayName}</p>
+    `;
+    return row;
+  });
+  document.querySelector('#notificationTemplateRows').replaceChildren(...rows);
+}
+
+function collectNotificationConfig() {
+  const rows = [...document.querySelectorAll('#notificationTemplateRows .notification-row')];
+  const types = {};
+  for (const row of rows) {
+    const type = row.dataset.type;
+    types[type] = {
+      enabled: row.querySelector('[data-field="enabled"]').checked,
+      title: row.querySelector('[data-field="title"]').value.trim(),
+      body: row.querySelector('[data-field="body"]').value.trim(),
+    };
+  }
+  const form = document.querySelector('#notificationConfigEditor');
+  return {
+    enabled: form.enabled.checked,
+    custom: { enabled: form.customEnabled.checked },
+    types,
+  };
+}
+
+async function saveNotificationConfig(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const reason = form.reason.value.trim();
+  if (!reason) {
+    alert('Reason is required.');
+    return;
+  }
+  await api('/notifications', {
+    method: 'PATCH',
+    body: JSON.stringify({ reason, config: collectNotificationConfig() }),
+  });
+  form.reason.value = '';
+  status('Notification settings saved.', 'ok');
+  await loadNotifications();
+}
+
+async function sendCustomNotification(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = {
+    target: form.target.value.trim(),
+    title: form.title.value.trim(),
+    body: form.body.value.trim(),
+    campaignId: form.campaignId.value.trim(),
+    reason: form.reason.value.trim(),
+  };
+  if (!payload.reason) {
+    alert('Reason is required.');
+    return;
+  }
+  const result = await api('/notifications/send', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  form.title.value = '';
+  form.body.value = '';
+  form.campaignId.value = '';
+  form.reason.value = '';
+  status(`Push queued for ${result.queued}/${result.targetedUsers} registered players.`, 'ok');
+  await loadNotifications();
 }
 
 async function loadCompetitive() {

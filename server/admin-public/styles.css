@@ -70,6 +70,17 @@ label {
   font-weight: 800;
 }
 
+.checkline {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--text);
+}
+
+.checkline input {
+  width: auto;
+}
+
 pre {
   white-space: pre-wrap;
   word-break: break-word;

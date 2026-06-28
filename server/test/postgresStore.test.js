@@ -19,6 +19,7 @@ test('postgres store loads and saves economy config metadata', async () => {
             { key: 'rankedSeason', value: { id: 'season-one' } },
             { key: 'competitiveConfig', value: { live: { placementMatchesRequired: 5 } } },
             { key: 'economyConfig', value: { wagerTables: [{ id: 'wager-50000', buyIn: 50000 }] } },
+            { key: 'notificationConfig', value: { enabled: true, types: { turn: { title: 'Turn ready' } } } },
           ],
         };
       }
@@ -30,14 +31,19 @@ test('postgres store loads and saves economy config metadata', async () => {
 
   const loaded = await store.load();
   assert.equal(loaded.economyConfig.wagerTables[0].buyIn, 50000);
+  assert.equal(loaded.notificationConfig.types.turn.title, 'Turn ready');
 
   await store.save({
     rankedSeason: { id: 'season-two' },
     competitiveConfig: { live: { placementMatchesRequired: 7 } },
     economyConfig: { wagerTables: [{ id: 'wager-25000', buyIn: 25000 }] },
+    notificationConfig: { enabled: false },
   });
 
   const economySave = savedQueries.find(query => query.params[0] === 'economyConfig');
   assert.ok(economySave);
   assert.equal(JSON.parse(economySave.params[1]).wagerTables[0].buyIn, 25000);
+  const notificationSave = savedQueries.find(query => query.params[0] === 'notificationConfig');
+  assert.ok(notificationSave);
+  assert.equal(JSON.parse(notificationSave.params[1]).enabled, false);
 });

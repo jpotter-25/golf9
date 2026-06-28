@@ -25,6 +25,8 @@ const ROLE_PERMISSIONS = {
     'clubs:write',
     'competitive:read',
     'competitive:write',
+    'notifications:read',
+    'notifications:write',
     'metrics:read',
   ],
   support: ['users:read', 'invites:read', 'support:read', 'support:write', 'catalog:read', 'metrics:read'],
