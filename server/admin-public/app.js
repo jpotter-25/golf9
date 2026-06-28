@@ -146,7 +146,7 @@ function renderUserDetail(user) {
     </div>
     <div class="card">
       <strong>Equipped</strong>
-      <p class="muted">Card: ${escapeHtml(equipped.cardBack || 'default')} - Icon: ${escapeHtml(equipped.avatarIcon || 'default')} - Frame: ${escapeHtml(equipped.avatarFrame || 'default')} - Title: ${escapeHtml(equipped.title || 'default')} - Table: ${escapeHtml(equipped.tableTheme || 'default')}</p>
+      <p class="muted">Card: ${escapeHtml(equipped.cardBack || 'default')} - Icon: ${escapeHtml(equipped.avatarIcon || 'default')} - Frame: ${escapeHtml(equipped.avatarFrame || 'default')} - Accessory: ${escapeHtml(equipped.avatarAccessory || 'none')} - Title: ${escapeHtml(equipped.title || 'default')} - Table: ${escapeHtml(equipped.tableTheme || 'default')}</p>
     </div>
     <div class="card">
       <strong>Devices</strong>

@@ -9,7 +9,7 @@ import { Check, ChevronDown, ChevronLeft, ChevronRight, Coins, Gift, Lock, Shopp
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
-import { getAvatarFrameVisual, getCardBackVisual, getTableThemeVisual } from '../theme/cosmetics';
+import { getAvatarAccessoryVisual, getAvatarFrameVisual, getCardBackVisual, getTableThemeVisual } from '../theme/cosmetics';
 import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Shop'>;
@@ -277,7 +277,7 @@ function ShopItemTile({ item, busy, onPress }: { item: api.CosmeticItem; busy: b
 }
 
 function cosmeticBadge(item: api.CosmeticItem) {
-  const label = item.type === 'cardBack' ? 'CB' : item.type === 'avatarIcon' ? 'AI' : item.type === 'avatarFrame' ? 'AF' : item.type === 'tableTheme' ? 'TB' : 'T';
+  const label = item.type === 'cardBack' ? 'CB' : item.type === 'avatarIcon' ? 'AI' : item.type === 'avatarFrame' ? 'AF' : item.type === 'avatarAccessory' ? 'AX' : item.type === 'tableTheme' ? 'TB' : 'T';
   if (item.type === 'cardBack') {
     const visual = getCardBackVisual(item.id);
     return { label, style: { backgroundColor: visual.backgroundColor, borderColor: visual.borderColor } };
@@ -288,6 +288,10 @@ function cosmeticBadge(item: api.CosmeticItem) {
   }
   if (item.type === 'avatarIcon') {
     return { label, style: { backgroundColor: '#123B32', borderColor: '#52E5A7' } };
+  }
+  if (item.type === 'avatarAccessory') {
+    const visual = getAvatarAccessoryVisual(item.id);
+    return { label: visual.label || label, style: { backgroundColor: visual.backgroundColor, borderColor: visual.borderColor } };
   }
   if (item.type === 'tableTheme') {
     const visual = getTableThemeVisual(item.id);
@@ -324,6 +328,12 @@ function groupCosmeticsByType(items: api.CosmeticItem[]) {
       title: 'Avatar Frames',
       subtitle: 'The border around your player avatar.',
       items: items.filter(item => item.type === 'avatarFrame'),
+    },
+    {
+      key: 'avatarAccessory',
+      title: 'Avatar Accessories',
+      subtitle: 'Jewelry, watches, and seasonal flex items beside your avatar.',
+      items: items.filter(item => item.type === 'avatarAccessory'),
     },
     {
       key: 'title',

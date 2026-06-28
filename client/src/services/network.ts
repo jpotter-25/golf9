@@ -12,8 +12,11 @@ export type ChatMessage = {
   userId: string;
   displayName: string;
   avatarInitial?: string;
-  type: 'text' | 'preset' | 'emoji' | 'sticker';
+  type: 'text' | 'preset' | 'emoji' | 'sticker' | 'gift';
   text: string;
+  giftId?: string;
+  targetUserId?: string;
+  targetDisplayName?: string;
   createdAt: number;
 };
 
@@ -147,10 +150,10 @@ export function sendClubChatMessage(token: string, clubId: string, type: ChatMes
   });
 }
 
-export function sendChatMessage(token: string, code: string, type: ChatMessageType, text: string): Promise<{ message: ChatMessage }> {
+export function sendChatMessage(token: string, code: string, type: ChatMessageType, text: string, targetUserId?: string): Promise<{ message: ChatMessage }> {
   const s = connect(token);
   return new Promise((resolve, reject) => {
-    s.emit('chat:send', { code, type, text }, (res: { error?: string; message?: ChatMessage }) => {
+    s.emit('chat:send', { code, type, text, targetUserId }, (res: { error?: string; message?: ChatMessage }) => {
       if (res.error) reject(new Error(res.error));
       else resolve({ message: res.message! });
     });

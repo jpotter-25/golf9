@@ -238,9 +238,10 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
             <CollectionItem label="Title" value={user?.inventory.equipped.title ?? 'rookie-title'} />
             <CollectionItem label="Avatar Icon" value={user?.inventory.equipped.avatarIcon ?? 'classic-avatar-icon'} />
             <CollectionItem label="Avatar Frame" value={user?.inventory.equipped.avatarFrame ?? 'rookie-avatar-frame'} />
+            <CollectionItem label="Accessory" value={user?.inventory.equipped.avatarAccessory ?? 'no-avatar-accessory'} />
             <CollectionItem label="Table" value={user?.inventory.equipped.tableTheme ?? 'classic-table-theme'} />
           </View>
-          <Text style={styles.emptyText}>Hats and avatar accessories can fit here in a future cosmetics update.</Text>
+          <Text style={styles.emptyText}>Seasonal accessories show beside your avatar at online tables.</Text>
           <ActionButton label="Edit Cosmetics" Icon={Pencil} onPress={() => setTab('cosmetics')} />
         </PremiumPanel>
       ) : null}
@@ -430,6 +431,7 @@ function groupCosmeticsByType(items: api.CosmeticItem[]) {
     { key: 'cardBack', title: 'Card Backs', items: items.filter(item => item.type === 'cardBack') },
     { key: 'avatarIcon', title: 'Avatar Icons', items: items.filter(item => item.type === 'avatarIcon') },
     { key: 'avatarFrame', title: 'Avatar Frames', items: items.filter(item => item.type === 'avatarFrame') },
+    { key: 'avatarAccessory', title: 'Avatar Accessories', items: items.filter(item => item.type === 'avatarAccessory') },
     { key: 'title', title: 'Titles', items: items.filter(item => item.type === 'title') },
     { key: 'tableTheme', title: 'Table Themes', items: items.filter(item => item.type === 'tableTheme') },
   ];
@@ -442,6 +444,7 @@ function cosmeticTypeLabel(type: string) {
   if (type === 'cardBack') return 'Card';
   if (type === 'avatarIcon') return 'Icon';
   if (type === 'avatarFrame') return 'Frame';
+  if (type === 'avatarAccessory') return 'Accessory';
   if (type === 'tableTheme') return 'Table';
   return 'Title';
 }

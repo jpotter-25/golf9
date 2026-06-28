@@ -48,6 +48,9 @@ export type RoomPlayer = {
   userId: string;
   displayName: string;
   avatarInitial: string;
+  level?: number;
+  progression?: ProgressionState | null;
+  competitive?: Pick<CompetitiveState, 'league' | 'placementComplete' | 'placementsRemaining' | 'rankedGames' | 'wins' | 'losses' | 'seasonBestLeague'> | null;
   cosmetics?: PlayerInventory['equipped'] | null;
   ready: boolean;
   connected: boolean;
@@ -234,7 +237,7 @@ export type DailyBonus = {
 
 export type PlayerInventory = {
   cosmetics: string[];
-  equipped: { cardBack: string; avatarFrame: string; avatarIcon: string; title: string; tableTheme: string };
+  equipped: { cardBack: string; avatarFrame: string; avatarIcon: string; avatarAccessory: string; title: string; tableTheme: string };
 };
 
 export type MatchProgressionSummary = {
@@ -271,7 +274,7 @@ export type ChallengeBuckets = {
   weekly: { periodStart: number; expiresAt: number; items: Challenge[] };
 };
 
-export type CosmeticType = 'cardBack' | 'avatarFrame' | 'avatarIcon' | 'title' | 'tableTheme';
+export type CosmeticType = 'cardBack' | 'avatarFrame' | 'avatarIcon' | 'avatarAccessory' | 'title' | 'tableTheme';
 
 export type MatchType = 'casual' | 'wager' | 'ranked';
 

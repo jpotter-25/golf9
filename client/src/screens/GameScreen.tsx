@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as NavigationBar from 'expo-navigation-bar';
 import { Audio } from 'expo-av';
-import { Bell, MessageCircle, Settings, ShoppingBag, X } from 'lucide-react-native';
+import { Bell, Gem, Gift, MessageCircle, Settings, ShoppingBag, Trophy, UserPlus, X } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import type { GameState, Card, Grid } from '../game/types';
@@ -21,7 +21,7 @@ import {
 import GridView from '../components/Grid';
 import Piles from '../components/Piles';
 import CardView from '../components/Card';
-import { PlayerAvatar } from '../components/PlayerAvatar';
+import { AvatarCluster, rankEmblemForLeague } from '../components/AvatarDecorations';
 import { useBoardMetrics } from '../utils/scaling';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
@@ -48,6 +48,7 @@ type AiDifficulty = 'easy' | 'hard';
 type AiMove = { source: 'draw' | 'discard'; card: Card; target: GridSelection | null; discardDrawn: boolean };
 type SocialBurst = { id: string; text: string; type: ChatMessageType };
 type TurnNotice = GameNotice;
+type GiftOption = { id: string; label: string; accent: string };
 
 const QUICK_CHAT_PRESETS = [
   'Nice play!',
@@ -69,6 +70,13 @@ const QUICK_CHAT_STICKERS = [
   '\u{1F92F} No way',
   '\u{1F44F} Golf clap',
   '\u{1F3AF} Bullseye',
+];
+const TABLE_GIFTS: GiftOption[] = [
+  { id: 'gift-good-luck', label: 'Good Luck', accent: '#52E5A7' },
+  { id: 'gift-cheer', label: 'Cheer', accent: '#4DA3FF' },
+  { id: 'gift-clover', label: 'Clover', accent: '#65D48A' },
+  { id: 'gift-gem', label: 'Gem', accent: '#BDEBFF' },
+  { id: 'gift-crown', label: 'Crown', accent: '#FFCC66' },
 ];
 const SOLO_AI_SOURCE_PAUSE_MS = 1300;
 const SOLO_AI_TARGET_PAUSE_MS = 1900;
@@ -127,6 +135,10 @@ export default function GameScreen({ route, navigation }: Props) {
   const [shopOpen, setShopOpen] = useState(false);
   const [roomPlayers, setRoomPlayers] = useState<api.RoomPlayer[]>([]);
   const [socialBursts, setSocialBursts] = useState<Record<string, SocialBurst>>({});
+  const [avatarHubUserId, setAvatarHubUserId] = useState<string | null>(null);
+  const [avatarHubProfile, setAvatarHubProfile] = useState<api.PublicPlayerProfile | null>(null);
+  const [avatarHubLoading, setAvatarHubLoading] = useState(false);
+  const [avatarHubBusy, setAvatarHubBusy] = useState<string | null>(null);
   const [turnNotice, setTurnNotice] = useState<TurnNotice | null>(null);
   const [gameplayPrefs, setGameplayPrefs] = useState<GameplayPreferences>(getGameplayPreferences());
   const [matchProgression, setMatchProgression] = useState<api.MatchProgressionSummary | null>(null);
@@ -186,8 +198,9 @@ export default function GameScreen({ route, navigation }: Props) {
 
   const showSocialBurst = useCallback((message: ChatMessage) => {
     if (message.type === 'text') return;
-    const key = message.userId;
-    const burst = { id: message.id, text: message.text, type: message.type };
+    const key = message.type === 'gift' && message.targetUserId ? message.targetUserId : message.userId;
+    const giftPrefix = message.type === 'gift' ? `${message.displayName} sent ` : '';
+    const burst = { id: message.id, text: `${giftPrefix}${message.text}`, type: message.type };
     setSocialBursts(prev => ({ ...prev, [key]: burst }));
     if (socialBurstTimers.current[key]) clearTimeout(socialBurstTimers.current[key]);
     socialBurstTimers.current[key] = setTimeout(() => {
@@ -201,14 +214,21 @@ export default function GameScreen({ route, navigation }: Props) {
     }, 2400);
   }, []);
 
-  const openPlayerProfile = useCallback((userId?: string) => {
+  const openAvatarHub = useCallback((userId?: string) => {
     if (!isOnline || !userId) return;
+    setAvatarHubUserId(userId);
+    setAvatarHubProfile(null);
+    setAvatarHubLoading(false);
     if (userId === user?.userId) {
-      navigation.navigate('Profile');
       return;
     }
-    navigation.navigate('PlayerProfile', { userId });
-  }, [isOnline, navigation, user?.userId]);
+    if (!token) return;
+    setAvatarHubLoading(true);
+    api.publicProfile(token, userId)
+      .then(response => setAvatarHubProfile(response.profile))
+      .catch(() => setAvatarHubProfile(null))
+      .finally(() => setAvatarHubLoading(false));
+  }, [isOnline, token, user?.userId]);
 
   const showGameplayNotice = useCallback((
     notice: TurnNotice,
@@ -1264,9 +1284,94 @@ export default function GameScreen({ route, navigation }: Props) {
     }
   };
 
+  const reloadAvatarHubProfile = useCallback(async (userId: string) => {
+    if (!token || userId === user?.userId) return;
+    setAvatarHubLoading(true);
+    try {
+      const response = await api.publicProfile(token, userId);
+      setAvatarHubProfile(response.profile);
+    } catch {
+      setAvatarHubProfile(null);
+    } finally {
+      setAvatarHubLoading(false);
+    }
+  }, [token, user?.userId]);
+
+  const sendGiftToPlayer = useCallback(async (targetUserId: string, giftId: string) => {
+    if (!isOnline || !token || !roomCode || avatarHubBusy) return;
+    setAvatarHubBusy(giftId);
+    try {
+      await sendChatMessage(token, roomCode, 'gift', giftId, targetUserId);
+    } catch (error) {
+      Alert.alert('Gift not sent', error instanceof Error ? error.message : 'Try again.');
+    } finally {
+      setAvatarHubBusy(null);
+    }
+  }, [avatarHubBusy, isOnline, roomCode, token]);
+
+  const runAvatarHubFriendAction = useCallback(async () => {
+    if (!token || !avatarHubProfile || avatarHubBusy) return;
+    setAvatarHubBusy('friend');
+    try {
+      if (avatarHubProfile.relationship === 'none') {
+        await api.sendFriendRequest(token, avatarHubProfile.userId);
+      } else if (avatarHubProfile.relationship === 'friend') {
+        await api.removeFriend(token, avatarHubProfile.userId);
+      } else if (avatarHubProfile.relationship === 'incoming') {
+        const social = await api.socialMe(token);
+        const request = social.social.incomingRequests.find(item => item.player.userId === avatarHubProfile.userId);
+        if (!request) throw new Error('Friend request not found.');
+        await api.acceptFriendRequest(token, request.id);
+      }
+      await reloadAvatarHubProfile(avatarHubProfile.userId);
+    } catch (error) {
+      Alert.alert('Social action failed', error instanceof Error ? error.message : 'Try again.');
+    } finally {
+      setAvatarHubBusy(null);
+    }
+  }, [avatarHubBusy, avatarHubProfile, reloadAvatarHubProfile, token]);
+
+  const inviteAvatarHubPlayer = useCallback(async () => {
+    if (!token || !roomCode || !avatarHubProfile || avatarHubBusy) return;
+    setAvatarHubBusy('invite');
+    try {
+      await api.inviteFriendToRoom(token, roomCode, avatarHubProfile.userId);
+      Alert.alert('Invite sent', `${avatarHubProfile.displayName} can join from Social.`);
+    } catch (error) {
+      Alert.alert('Invite failed', error instanceof Error ? error.message : 'Try again.');
+    } finally {
+      setAvatarHubBusy(null);
+    }
+  }, [avatarHubBusy, avatarHubProfile, roomCode, token]);
+
   // ===== Render =====
   const bottomRoomPlayer = roomPlayersById.get(bottomPlayer.userId);
   const bottomConnected = !isOnline || (bottomRoomPlayer?.connected ?? bottomPlayer.connected ?? true);
+  const selfClaimableCount =
+    (user?.currency.dailyBonus.canClaim ? 1 : 0)
+    + (user?.challenges.daily.items.filter(item => item.canClaim).length ?? 0)
+    + (user?.challenges.weekly.items.filter(item => item.canClaim).length ?? 0)
+    + (user?.competitive.season.rewards.filter(item => item.earned && !item.claimed).length ?? 0);
+  const avatarHubPlayer = avatarHubUserId
+    ? state.players.find(player => player.userId === avatarHubUserId)
+    : undefined;
+  const avatarHubRoomPlayer = avatarHubUserId ? roomPlayersById.get(avatarHubUserId) : undefined;
+  const avatarHubIsSelf = !!avatarHubUserId && avatarHubUserId === user?.userId;
+  const avatarHubCosmetics = avatarHubIsSelf
+    ? user?.inventory.equipped
+    : avatarHubProfile?.cosmetics ?? avatarHubRoomPlayer?.cosmetics ?? avatarHubPlayer?.cosmetics ?? null;
+  const avatarHubName = avatarHubIsSelf
+    ? user?.displayName ?? 'You'
+    : avatarHubProfile?.displayName ?? avatarHubRoomPlayer?.displayName ?? avatarHubPlayer?.name ?? 'Player';
+  const avatarHubInitial = avatarHubIsSelf
+    ? user?.avatarInitial ?? avatarHubName
+    : avatarHubProfile?.avatarInitial ?? avatarHubRoomPlayer?.avatarInitial ?? avatarHubPlayer?.avatarInitial ?? avatarHubName;
+  const avatarHubLeague = avatarHubIsSelf
+    ? user?.competitive.league
+    : avatarHubProfile?.competitive.league ?? avatarHubRoomPlayer?.competitive?.league;
+  const avatarHubProgress = avatarHubIsSelf
+    ? user?.progression
+    : avatarHubProfile?.progression ?? avatarHubRoomPlayer?.progression ?? null;
   const timerLabel = `${secsLeft}s`;
   return (
     <LinearGradient colors={[tableTheme.backgroundColor, ui.palette.ink, ui.surface.base]} style={styles.container}>
@@ -1341,11 +1446,15 @@ export default function GameScreen({ route, navigation }: Props) {
               >
                 <SocialBurstBubble burst={socialBursts[p.userId]} compact />
                 <View style={styles.playerGridHeader}>
-                  <PlayerAvatar
+                  <AvatarCluster
                     cosmetics={playerCosmetics(p, i)}
                     fallbackInitial={p.avatarInitial ?? p.name}
-                    size={28}
-                    onPress={() => openPlayerProfile(p.userId)}
+                    size={32}
+                    mode="opponent"
+                    league={roomPlayer?.competitive?.league}
+                    showGift={isOnline && p.userId !== user?.userId}
+                    onPress={() => openAvatarHub(p.userId)}
+                    onGiftPress={() => openAvatarHub(p.userId)}
                     disabled={!isOnline}
                   />
                   <View style={[styles.gridStatePill, active && styles.gridStatePillActive, !connected && styles.gridStatePillOffline]}>
@@ -1403,11 +1512,14 @@ export default function GameScreen({ route, navigation }: Props) {
         <SocialBurstBubble burst={socialBursts[bottomPlayer.userId]} />
         <View style={styles.localTitleRow}>
           <View style={styles.localIdentity}>
-            <PlayerAvatar
+            <AvatarCluster
               cosmetics={playerCosmetics(bottomPlayer, bottomIndex)}
               fallbackInitial={bottomPlayer.avatarInitial ?? bottomPlayer.name}
-              size={38}
-              onPress={() => openPlayerProfile(bottomPlayer.userId)}
+              size={42}
+              mode="self"
+              league={user?.competitive.league ?? bottomRoomPlayer?.competitive?.league}
+              showClaim={selfClaimableCount > 0}
+              onPress={() => openAvatarHub(bottomPlayer.userId)}
               disabled={!isOnline}
             />
             <View style={styles.localTitlePressable}>
@@ -1417,6 +1529,11 @@ export default function GameScreen({ route, navigation }: Props) {
               <Text style={styles.playerGridMeta}>
                 {bottomIsActive && !isRoundReveal && !isRoundSummary ? (state.phase === 'peek' ? 'PEEK' : 'TURN') : bottomConnected ? 'ONLINE' : 'OFFLINE'}
               </Text>
+              {user?.progression ? (
+                <View style={styles.selfXpTrack}>
+                  <View style={[styles.selfXpFill, { width: `${Math.round((user.progression.levelProgress || 0) * 100)}%` }]} />
+                </View>
+              ) : null}
             </View>
           </View>
           <View style={styles.localScoreBox}>
@@ -1503,6 +1620,156 @@ export default function GameScreen({ route, navigation }: Props) {
             <ScrollView contentContainerStyle={styles.shopScrollContent} keyboardShouldPersistTaps="handled">
               {shopOpen ? <ShopContent embedded backLabel="Back to Match" onBack={() => setShopOpen(false)} /> : null}
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        transparent
+        visible={isFocused && !!avatarHubUserId}
+        animationType="fade"
+        onRequestClose={() => setAvatarHubUserId(null)}
+      >
+        <View style={styles.avatarHubScrim}>
+          <Pressable style={styles.avatarHubDismissArea} onPress={() => setAvatarHubUserId(null)} />
+          <View style={[styles.avatarHubSheet, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }]}>
+            <View style={styles.avatarHubHeader}>
+              <View style={styles.avatarHubHero}>
+                <AvatarCluster
+                  cosmetics={avatarHubCosmetics}
+                  fallbackInitial={avatarHubInitial}
+                  size={avatarHubIsSelf ? 74 : 68}
+                  mode={avatarHubIsSelf ? 'self' : 'opponent'}
+                  league={avatarHubLeague}
+                  showGift={!avatarHubIsSelf && !!avatarHubUserId}
+                  showClaim={avatarHubIsSelf && selfClaimableCount > 0}
+                  onGiftPress={() => avatarHubUserId ? sendGiftToPlayer(avatarHubUserId, TABLE_GIFTS[0].id) : undefined}
+                />
+                <View style={styles.avatarHubCopy}>
+                  <Text style={styles.avatarHubName} numberOfLines={1}>
+                    {avatarHubIsSelf ? 'Your Avatar' : avatarHubName}
+                  </Text>
+                  <Text style={styles.avatarHubMeta} numberOfLines={1}>
+                    {avatarHubLoading
+                      ? 'Loading...'
+                      : avatarHubIsSelf
+                        ? `Level ${user?.progression.level ?? 1} - ${user?.competitive.league.name ?? 'Rookie'}`
+                        : `${avatarHubLeague?.name ?? 'Rookie'} - ${(avatarHubRoomPlayer?.connected ?? avatarHubProfile?.status.online) ? 'Online' : 'Offline'}`}
+                  </Text>
+                </View>
+                <Pressable style={styles.avatarHubCloseButton} onPress={() => setAvatarHubUserId(null)}>
+                  <X size={22} color={ui.text.primary} strokeWidth={3} />
+                </Pressable>
+              </View>
+              {avatarHubProgress ? (
+                <View style={styles.avatarHubXpTrack}>
+                  <View style={[styles.avatarHubXpFill, { width: `${Math.round((avatarHubProgress.levelProgress || 0) * 100)}%` }]} />
+                </View>
+              ) : null}
+            </View>
+
+            {avatarHubIsSelf ? (
+              <View style={styles.avatarHubBody}>
+                <View style={styles.avatarHubStatRow}>
+                  <HubStat label="Level" value={String(user?.progression.level ?? 1)} />
+                  <HubStat label="Rank" value={rankEmblemForLeague(user?.competitive.league).label} />
+                  <HubStat label="Ready" value={String(selfClaimableCount)} />
+                </View>
+                <View style={styles.avatarHubActionGrid}>
+                  <Pressable
+                    style={styles.avatarHubAction}
+                    onPress={() => {
+                      setAvatarHubUserId(null);
+                      navigation.navigate('Profile');
+                    }}
+                  >
+                    <Trophy size={20} color="#52E5A7" strokeWidth={2.8} />
+                    <Text style={styles.avatarHubActionText}>Profile</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.avatarHubAction}
+                    onPress={() => {
+                      setAvatarHubUserId(null);
+                      navigation.navigate('Profile');
+                    }}
+                  >
+                    <Gem size={20} color="#BDEBFF" strokeWidth={2.8} />
+                    <Text style={styles.avatarHubActionText}>Cosmetics</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.avatarHubAction}
+                    onPress={() => {
+                      setAvatarHubUserId(null);
+                      setShopOpen(true);
+                    }}
+                  >
+                    <ShoppingBag size={20} color="#FFCC66" strokeWidth={2.8} />
+                    <Text style={styles.avatarHubActionText}>Shop</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.avatarHubAction}
+                    onPress={() => {
+                      setAvatarHubUserId(null);
+                      navigation.navigate('Profile');
+                    }}
+                  >
+                    <Bell size={20} color="#FF6B6B" strokeWidth={2.8} />
+                    <Text style={styles.avatarHubActionText}>Rewards</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.avatarHubBody}>
+                <View style={styles.avatarHubStatRow}>
+                  <HubStat label="Games" value={String(avatarHubProfile?.statistics.gamesPlayed ?? avatarHubProfile?.stats.gamesPlayed ?? '--')} />
+                  <HubStat label="Wins" value={String(avatarHubProfile?.statistics.wins ?? avatarHubProfile?.stats.wins ?? '--')} />
+                  <HubStat label="Rank" value={rankEmblemForLeague(avatarHubLeague).label} />
+                </View>
+                <View style={styles.avatarHubActionGrid}>
+                  <Pressable
+                    style={styles.avatarHubAction}
+                    onPress={() => {
+                      if (!avatarHubUserId) return;
+                      setAvatarHubUserId(null);
+                      navigation.navigate('PlayerProfile', { userId: avatarHubUserId });
+                    }}
+                  >
+                    <Trophy size={20} color="#52E5A7" strokeWidth={2.8} />
+                    <Text style={styles.avatarHubActionText}>Full Profile</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.avatarHubAction, (!avatarHubProfile || avatarHubProfile.relationship === 'outgoing') && styles.avatarHubActionDisabled]}
+                    disabled={!avatarHubProfile || avatarHubProfile.relationship === 'outgoing' || avatarHubBusy === 'friend'}
+                    onPress={runAvatarHubFriendAction}
+                  >
+                    <UserPlus size={20} color="#BDEBFF" strokeWidth={2.8} />
+                    <Text style={styles.avatarHubActionText}>{friendActionLabel(avatarHubProfile?.relationship)}</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.avatarHubAction, avatarHubProfile?.relationship !== 'friend' && styles.avatarHubActionDisabled]}
+                    disabled={avatarHubProfile?.relationship !== 'friend' || avatarHubBusy === 'invite'}
+                    onPress={inviteAvatarHubPlayer}
+                  >
+                    <MessageCircle size={20} color="#FFCC66" strokeWidth={2.8} />
+                    <Text style={styles.avatarHubActionText}>Invite</Text>
+                  </Pressable>
+                </View>
+                <Text style={styles.avatarHubSectionTitle}>Send Gift</Text>
+                <View style={styles.giftGrid}>
+                  {TABLE_GIFTS.map(gift => (
+                    <Pressable
+                      key={gift.id}
+                      style={[styles.giftChip, { borderColor: gift.accent }, avatarHubBusy === gift.id && styles.avatarHubActionDisabled]}
+                      disabled={!avatarHubUserId || !!avatarHubBusy}
+                      onPress={() => avatarHubUserId ? sendGiftToPlayer(avatarHubUserId, gift.id) : undefined}
+                    >
+                      <Gift size={16} color={gift.accent} strokeWidth={3} />
+                      <Text style={styles.giftChipText} numberOfLines={1}>{gift.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            )}
           </View>
         </View>
       </Modal>
@@ -1677,8 +1944,11 @@ export default function GameScreen({ route, navigation }: Props) {
                       styles.chatMessageText,
                       message.type === 'emoji' && styles.chatEmojiText,
                       message.type === 'sticker' && styles.chatStickerText,
+                      message.type === 'gift' && styles.chatGiftText,
                     ]}>
-                      {message.text}
+                      {message.type === 'gift' && message.targetDisplayName
+                        ? `${message.text} to ${message.targetDisplayName}`
+                        : message.text}
                     </Text>
                   </View>
                 );
@@ -1802,14 +2072,31 @@ function RewardSummary({ progression }: { progression: api.MatchProgressionSumma
   );
 }
 
+function HubStat({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.avatarHubStat}>
+      <Text style={styles.avatarHubStatValue} numberOfLines={1}>{value}</Text>
+      <Text style={styles.avatarHubStatLabel} numberOfLines={1}>{label}</Text>
+    </View>
+  );
+}
+
+function friendActionLabel(relationship?: api.SocialRelationship) {
+  if (relationship === 'friend') return 'Remove';
+  if (relationship === 'incoming') return 'Accept';
+  if (relationship === 'outgoing') return 'Sent';
+  return 'Add Friend';
+}
+
 function SocialBurstBubble({ burst, compact = false }: { burst?: SocialBurst; compact?: boolean }) {
   if (!burst) return null;
   return (
-    <View pointerEvents="none" style={[styles.socialBurst, compact && styles.socialBurstCompact, burst.type === 'sticker' && styles.socialBurstSticker]}>
+    <View pointerEvents="none" style={[styles.socialBurst, compact && styles.socialBurstCompact, burst.type === 'sticker' && styles.socialBurstSticker, burst.type === 'gift' && styles.socialBurstGift]}>
       <Text
         style={[
           styles.socialBurstText,
           burst.type === 'emoji' && styles.socialBurstEmoji,
+          burst.type === 'gift' && styles.socialBurstGiftText,
           compact && styles.socialBurstTextCompact,
         ]}
         numberOfLines={compact ? 2 : 1}
@@ -2202,6 +2489,110 @@ const styles = StyleSheet.create({
     padding: 14,
     paddingBottom: 24,
   },
+  avatarHubScrim: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.58)',
+    justifyContent: 'flex-end',
+  },
+  avatarHubDismissArea: { flex: 1 },
+  avatarHubSheet: {
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.36,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: -5 },
+    elevation: 12,
+  },
+  avatarHubHeader: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A2F57',
+    paddingBottom: 12,
+  },
+  avatarHubHero: {
+    minHeight: 84,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  avatarHubCopy: { flex: 1, minWidth: 0 },
+  avatarHubName: { color: '#E8ECF1', fontSize: 22, fontWeight: '900' },
+  avatarHubMeta: { color: '#9BA3C7', fontSize: 13, fontWeight: '800', marginTop: 3 },
+  avatarHubCloseButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: '#2A2F57',
+    backgroundColor: '#121737',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarHubXpTrack: {
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#0B1023',
+    borderWidth: 1,
+    borderColor: '#2A2F57',
+    overflow: 'hidden',
+    marginTop: 8,
+  },
+  avatarHubXpFill: {
+    height: '100%',
+    borderRadius: 4,
+    backgroundColor: '#52E5A7',
+  },
+  avatarHubBody: { paddingTop: 14 },
+  avatarHubStatRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  avatarHubStat: {
+    flex: 1,
+    minHeight: 54,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2A2F57',
+    backgroundColor: '#121737',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 7,
+  },
+  avatarHubStatValue: { color: '#E8ECF1', fontSize: 14, fontWeight: '900' },
+  avatarHubStatLabel: { color: '#9BA3C7', fontSize: 10, fontWeight: '900', marginTop: 2, textTransform: 'uppercase' },
+  avatarHubActionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  avatarHubAction: {
+    flexGrow: 1,
+    flexBasis: '31%',
+    minHeight: 54,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2A2F57',
+    backgroundColor: '#121737',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+  },
+  avatarHubActionDisabled: { opacity: 0.48 },
+  avatarHubActionText: { color: '#E8ECF1', fontSize: 11, fontWeight: '900', textAlign: 'center' },
+  avatarHubSectionTitle: { color: '#9BA3C7', fontSize: 11, fontWeight: '900', textTransform: 'uppercase', marginTop: 14, marginBottom: 8 },
+  giftGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  giftChip: {
+    flexGrow: 1,
+    flexBasis: '31%',
+    minHeight: 42,
+    borderRadius: 8,
+    borderWidth: 1,
+    backgroundColor: '#121737',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+  },
+  giftChipText: { color: '#E8ECF1', fontSize: 11, fontWeight: '900' },
   noticeScrim: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.68)',
@@ -2432,6 +2823,19 @@ const styles = StyleSheet.create({
   localScoreBox: { alignItems: 'flex-end', marginLeft: 8 },
   meTitle: { color: '#E8ECF1', fontSize: 15, fontWeight: '900' },
   activeName: { color: '#E8ECF1' },
+  selfXpTrack: {
+    width: 82,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#0B1023',
+    overflow: 'hidden',
+    marginTop: 4,
+  },
+  selfXpFill: {
+    height: '100%',
+    borderRadius: 3,
+    backgroundColor: '#52E5A7',
+  },
   turnBadge: {
     color: '#0B1023',
     backgroundColor: '#52E5A7',
@@ -2483,9 +2887,14 @@ const styles = StyleSheet.create({
     borderColor: '#4DA3FF',
     backgroundColor: '#102448',
   },
+  socialBurstGift: {
+    borderColor: '#BDEBFF',
+    backgroundColor: '#102838',
+  },
   socialBurstText: { color: '#E8ECF1', fontSize: 13, fontWeight: '900', textAlign: 'center' },
   socialBurstTextCompact: { fontSize: 10 },
   socialBurstEmoji: { fontSize: 22, lineHeight: 26 },
+  socialBurstGiftText: { color: '#EAF8FF' },
 
   footer: {
     minHeight: 58,
@@ -2644,6 +3053,7 @@ const styles = StyleSheet.create({
   chatMessageText: { color: '#E8ECF1', fontSize: 14, fontWeight: '700' },
   chatEmojiText: { fontSize: 24, lineHeight: 30 },
   chatStickerText: { color: '#BFD9FF', fontWeight: '900' },
+  chatGiftText: { color: '#FFE6A3', fontWeight: '900' },
   chatEmpty: { color: '#9BA3C7', textAlign: 'center', paddingVertical: 22, fontWeight: '800' },
   chatSectionLabel: {
     color: '#9BA3C7',

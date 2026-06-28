@@ -3,7 +3,7 @@ import { publicDailyBonus } from './economy.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SEASON_REWARD_GRACE_MS = 30 * DAY_MS;
-const STARTER_COSMETICS = ['classic-card-back', 'rookie-avatar-frame', 'classic-avatar-icon', 'rookie-title', 'classic-table-theme'];
+const STARTER_COSMETICS = ['classic-card-back', 'rookie-avatar-frame', 'classic-avatar-icon', 'no-avatar-accessory', 'rookie-title', 'classic-table-theme'];
 
 export const COSMETIC_CATALOG = [
   { id: 'classic-card-back', type: 'cardBack', name: 'Classic', description: 'The original Golf 9 card back.', rarity: 'starter', price: 0, shopCategory: 'starter' },
@@ -30,6 +30,11 @@ export const COSMETIC_CATALOG = [
   { id: 'shield-avatar-icon', type: 'avatarIcon', name: 'Shield', description: 'A clean competitive avatar icon.', rarity: 'rare', price: 700, shopCategory: 'coin' },
   { id: 'trophy-avatar-icon', type: 'avatarIcon', name: 'Trophy', description: 'A winner-circle avatar icon.', rarity: 'epic', price: 1200, shopCategory: 'coin' },
   { id: 's1-diamond-avatar-icon', type: 'avatarIcon', name: 'Season 1 Diamond Icon', description: 'Reach Diamond this season, then buy this ranked avatar icon.', rarity: 'epic', price: 8000, shopCategory: 'ranked', unlockRequirement: 'rank', requiredMmr: 4000, requiredLeague: 'Diamond', seasonId: 'season-1' },
+  { id: 'no-avatar-accessory', type: 'avatarAccessory', name: 'No Accessory', description: 'Keep your avatar clean without a jewelry display.', rarity: 'starter', price: 0, shopCategory: 'starter' },
+  { id: 'season-watch-accessory', type: 'avatarAccessory', name: 'Season Watch', description: 'A ranked-season watch-style flex accessory.', rarity: 'rare', price: 1250, shopCategory: 'ranked', unlockRequirement: 'rank', requiredMmr: 1000, requiredLeague: 'Silver', seasonId: 'season-1' },
+  { id: 'emerald-gem-accessory', type: 'avatarAccessory', name: 'Emerald Gem', description: 'A polished table gem earned through steady play.', rarity: 'rare', price: 900, shopCategory: 'coin' },
+  { id: 'rocket-charm-accessory', type: 'avatarAccessory', name: 'Rocket Charm', description: 'A bold seasonal charm for fast climbers.', rarity: 'epic', price: 2500, shopCategory: 'event', unlockRequirement: 'season' },
+  { id: 'legend-crown-accessory', type: 'avatarAccessory', name: 'Legend Crown', description: 'A crown-style accessory for players who reach Legend.', rarity: 'epic', price: 18000, shopCategory: 'ranked', unlockRequirement: 'rank', requiredMmr: 6000, requiredLeague: 'Legend', seasonId: 'season-1' },
   { id: 'rookie-title', type: 'title', name: 'Rookie', description: 'Your first Golf 9 title.', rarity: 'starter', price: 0, shopCategory: 'starter' },
   { id: 'column-cleaner-title', type: 'title', name: 'Column Cleaner', description: 'A title for players who love three-of-a-kind clears.', rarity: 'rare', price: 600, shopCategory: 'coin' },
   { id: 'table-shark-title', type: 'title', name: 'Table Shark', description: 'A confident title for the lobby.', rarity: 'epic', price: 1200, shopCategory: 'coin' },
@@ -362,6 +367,7 @@ function defaultInventory(user) {
       cardBack: user.inventory?.equipped?.cardBack || 'classic-card-back',
       avatarFrame: user.inventory?.equipped?.avatarFrame || 'rookie-avatar-frame',
       avatarIcon: user.inventory?.equipped?.avatarIcon || 'classic-avatar-icon',
+      avatarAccessory: user.inventory?.equipped?.avatarAccessory || 'no-avatar-accessory',
       title: user.inventory?.equipped?.title || 'rookie-title',
       tableTheme: user.inventory?.equipped?.tableTheme || 'classic-table-theme',
     },

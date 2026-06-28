@@ -2,6 +2,7 @@ export type EquippedCosmetics = {
   cardBack?: string;
   avatarFrame?: string;
   avatarIcon?: string;
+  avatarAccessory?: string;
   title?: string;
   tableTheme?: string;
 };
@@ -22,6 +23,14 @@ export type AvatarIconVisual = {
   icon: 'user' | 'sparkles' | 'shield' | 'trophy';
   color: string;
   backgroundColor: string;
+};
+
+export type AvatarAccessoryVisual = {
+  icon: 'none' | 'watch' | 'gem' | 'rocket' | 'crown';
+  label: string;
+  color: string;
+  backgroundColor: string;
+  borderColor: string;
 };
 
 export type TableThemeVisual = {
@@ -139,6 +148,44 @@ const AVATAR_ICONS: Record<string, AvatarIconVisual> = {
   },
 };
 
+const AVATAR_ACCESSORIES: Record<string, AvatarAccessoryVisual> = {
+  'no-avatar-accessory': {
+    icon: 'none',
+    label: '',
+    color: '#9BA3C7',
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
+  },
+  'season-watch-accessory': {
+    icon: 'watch',
+    label: 'S1',
+    color: '#BDEBFF',
+    backgroundColor: '#102838',
+    borderColor: '#9BE7FF',
+  },
+  'emerald-gem-accessory': {
+    icon: 'gem',
+    label: 'G',
+    color: '#CFFBE8',
+    backgroundColor: '#123B32',
+    borderColor: '#52E5A7',
+  },
+  'rocket-charm-accessory': {
+    icon: 'rocket',
+    label: 'R',
+    color: '#FFE6A3',
+    backgroundColor: '#2B2515',
+    borderColor: '#FFCC66',
+  },
+  'legend-crown-accessory': {
+    icon: 'crown',
+    label: 'L',
+    color: '#F0E3FF',
+    backgroundColor: '#21162C',
+    borderColor: '#D9B8FF',
+  },
+};
+
 const TABLE_THEMES: Record<string, TableThemeVisual> = {
   'classic-table-theme': {
     backgroundColor: '#0B1023',
@@ -192,6 +239,10 @@ export function getAvatarFrameVisual(avatarFrameId?: string | null): AvatarFrame
 
 export function getAvatarIconVisual(avatarIconId?: string | null): AvatarIconVisual {
   return AVATAR_ICONS[avatarIconId || ''] || AVATAR_ICONS['classic-avatar-icon'];
+}
+
+export function getAvatarAccessoryVisual(avatarAccessoryId?: string | null): AvatarAccessoryVisual {
+  return AVATAR_ACCESSORIES[avatarAccessoryId || ''] || AVATAR_ACCESSORIES['no-avatar-accessory'];
 }
 
 export function getTableThemeVisual(tableThemeId?: string | null): TableThemeVisual {

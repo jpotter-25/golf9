@@ -4,7 +4,7 @@ import path from 'path';
 import { COSMETIC_CATALOG } from './progression.js';
 
 const MAX_ASSET_BYTES = 2 * 1024 * 1024;
-const VALID_TYPES = new Set(['cardBack', 'avatarFrame', 'avatarIcon', 'title', 'tableTheme']);
+const VALID_TYPES = new Set(['cardBack', 'avatarFrame', 'avatarIcon', 'avatarAccessory', 'title', 'tableTheme']);
 const VALID_CATEGORIES = new Set(['starter', 'coin', 'ranked', 'club', 'event']);
 const VALID_RARITIES = new Set(['starter', 'common', 'rare', 'epic', 'legendary']);
 const VALID_UNLOCKS = new Set(['none', 'level', 'achievement', 'rank', 'club', 'event', 'season']);

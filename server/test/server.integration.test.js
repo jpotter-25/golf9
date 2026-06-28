@@ -908,6 +908,11 @@ test('room chat supports presets, stickers, and blocks filtered custom messages'
       const blocked = await emitAck(socketOne, 'chat:send', { code, type: 'text', text: 'f u c k this' });
       assert.equal(blocked.error, 'Message blocked by chat filter.');
 
+      const unknownGift = await emitAck(socketOne, 'chat:send', { code, type: 'gift', text: 'gift-missing', targetUserId: two.user.userId });
+      assert.equal(unknownGift.error, 'Unknown gift.');
+      const missingGiftTarget = await emitAck(socketOne, 'chat:send', { code, type: 'gift', text: 'gift-good-luck', targetUserId: 'missing-user' });
+      assert.equal(missingGiftTarget.error, 'Gift target not found.');
+
       const received = once(socketTwo, 'chat:message');
       const sent = await emitAck(socketOne, 'chat:send', { code, type: 'preset', text: 'Nice play!' });
       assert.equal(sent.ok, true);
@@ -923,10 +928,22 @@ test('room chat supports presets, stickers, and blocks filtered custom messages'
       assert.equal(sticker.message.type, 'sticker');
       assert.deepEqual((await stickerReceived)[0], sticker.message);
 
+      await new Promise(resolve => setTimeout(resolve, 850));
+      const giftReceived = once(socketTwo, 'chat:message');
+      const gift = await emitAck(socketOne, 'chat:send', { code, type: 'gift', text: 'gift-good-luck', targetUserId: two.user.userId });
+      assert.equal(gift.ok, true);
+      assert.equal(gift.message.type, 'gift');
+      assert.equal(gift.message.text, 'Good Luck');
+      assert.equal(gift.message.giftId, 'gift-good-luck');
+      assert.equal(gift.message.targetUserId, two.user.userId);
+      assert.equal(gift.message.targetDisplayName, two.user.displayName);
+      assert.deepEqual((await giftReceived)[0], gift.message);
+
       const rejoin = await emitAck(socketTwo, 'room:join', { code });
-      assert.equal(rejoin.chat.length, 2);
+      assert.equal(rejoin.chat.length, 3);
       assert.equal(rejoin.chat[0].text, 'Nice play!');
       assert.equal(rejoin.chat[1].type, 'sticker');
+      assert.equal(rejoin.chat[2].type, 'gift');
     } finally {
       socketOne.disconnect();
       socketTwo.disconnect();

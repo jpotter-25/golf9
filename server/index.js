@@ -196,6 +196,13 @@ const CHAT_STICKERS = [
   '\u{1F44F} Golf clap',
   '\u{1F3AF} Bullseye',
 ];
+const CHAT_GIFTS = [
+  { id: 'gift-good-luck', label: 'Good Luck' },
+  { id: 'gift-cheer', label: 'Table Cheer' },
+  { id: 'gift-clover', label: 'Lucky Clover' },
+  { id: 'gift-gem', label: 'Gem Spark' },
+  { id: 'gift-crown', label: 'Crown Toss' },
+];
 const CHAT_BLOCKED_TERMS = new Set([
   'fuck', 'fucks', 'fucker', 'fuckers', 'fucking', 'shit', 'shits', 'shitty', 'bitch', 'bitches',
   'cunt', 'cunts', 'asshole', 'assholes', 'dick', 'dicks', 'cock', 'cocks', 'pussy', 'pussies',
@@ -1325,7 +1332,7 @@ function cleanChatText(raw) {
 }
 
 function cleanChatPayload(type, rawText) {
-  const kind = type === 'emoji' ? 'emoji' : type === 'preset' ? 'preset' : type === 'sticker' ? 'sticker' : 'text';
+  const kind = type === 'emoji' ? 'emoji' : type === 'preset' ? 'preset' : type === 'sticker' ? 'sticker' : type === 'gift' ? 'gift' : 'text';
   let cleaned;
   if (kind === 'emoji') {
     const text = String(rawText || '').trim();
@@ -1335,6 +1342,10 @@ function cleanChatPayload(type, rawText) {
     const text = String(rawText || '').trim();
     if (!CHAT_STICKERS.includes(text)) return { error: 'Unknown sticker.' };
     cleaned = { text };
+  } else if (kind === 'gift') {
+    const gift = CHAT_GIFTS.find(item => item.id === String(rawText || '').trim());
+    if (!gift) return { error: 'Unknown gift.' };
+    cleaned = { text: gift.label, giftId: gift.id };
   } else if (kind === 'preset') {
     const text = String(rawText || '').trim();
     if (!CHAT_PRESETS.includes(text)) return { error: 'Unknown quick chat.' };
@@ -1343,14 +1354,20 @@ function cleanChatPayload(type, rawText) {
     cleaned = cleanChatText(rawText);
   }
   if (cleaned.error) return { error: cleaned.error };
-  return { kind, text: cleaned.text };
+  return { kind, text: cleaned.text, giftId: cleaned.giftId || null };
 }
 
-function makeChatMessage(room, userId, type, rawText) {
+function makeChatMessage(room, userId, type, rawText, targetUserId = null) {
   const player = room.players.find(item => item.userId === userId);
   if (!player) return { error: 'You are not a member of this room.' };
   const cleaned = cleanChatPayload(type, rawText);
   if (cleaned.error) return { error: cleaned.error };
+  let target = null;
+  if (cleaned.kind === 'gift') {
+    target = room.players.find(item => item.userId === String(targetUserId || ''));
+    if (!target) return { error: 'Gift target not found.' };
+    if (target.userId === userId) return { error: 'Choose another player for gifts.' };
+  }
   return {
     message: {
       id: crypto.randomUUID(),
@@ -1359,6 +1376,9 @@ function makeChatMessage(room, userId, type, rawText) {
       avatarInitial: player.avatarInitial,
       type: cleaned.kind,
       text: cleaned.text,
+      giftId: cleaned.giftId || undefined,
+      targetUserId: target?.userId,
+      targetDisplayName: target?.displayName,
       createdAt: Date.now(),
     },
   };
@@ -1368,6 +1388,7 @@ function makeClubChatMessage(club, user, type, rawText) {
   if (!findClubMember(club, user.userId)) return { error: 'You are not a member of this club.' };
   const cleaned = cleanChatPayload(type, rawText);
   if (cleaned.error) return { error: cleaned.error };
+  if (cleaned.kind === 'gift') return { error: 'Gifts are only available at tables.' };
   return {
     message: {
       id: crypto.randomUUID(),
@@ -1466,15 +1487,22 @@ function roomSummary(room) {
       playerCount: room.ranked?.playerCount || room.maxPlayers,
       buyIn: room.economy?.buyIn || 0,
     } : null,
-    players: room.players.map(player => ({
-      userId: player.userId,
-      displayName: player.displayName,
-      avatarInitial: player.avatarInitial,
-      cosmetics: player.inventory?.equipped || player.cosmetics || null,
-      ready: true,
-      connected: room.connected.get(player.userId) || false,
-      isHost: player.userId === room.hostUserId,
-    })),
+    players: room.players.map(player => {
+      const account = users.get(player.userId);
+      const safeAccount = account ? safeUser(account) : null;
+      return {
+        userId: player.userId,
+        displayName: player.displayName,
+        avatarInitial: player.avatarInitial,
+        level: safeAccount?.progression?.level ?? 1,
+        progression: safeAccount?.progression ?? null,
+        competitive: safeAccount ? publicCompetitiveRankOnly(safeAccount.competitive) : null,
+        cosmetics: safeAccount?.inventory?.equipped || player.inventory?.equipped || player.cosmetics || null,
+        ready: true,
+        connected: room.connected.get(player.userId) || false,
+        isHost: player.userId === room.hostUserId,
+      };
+    }),
   };
 }
 
@@ -3972,7 +4000,7 @@ io.on('connection', (socket) => {
     return cb({ ok: true });
   });
 
-  socket.on('chat:send', ({ code, type = 'text', text }, cb = () => {}) => {
+  socket.on('chat:send', ({ code, type = 'text', text, targetUserId = null }, cb = () => {}) => {
     const room = rooms.get(String(code || '').toUpperCase());
     const userId = socket.auth.user.userId;
     if (!room || !room.players.some(player => player.userId === userId)) return cb({ error: 'Room not found.' });
@@ -3981,7 +4009,7 @@ io.on('connection', (socket) => {
     const now = Date.now();
     const lastSentAt = room.chatRate.get(userId) || 0;
     if (now - lastSentAt < CHAT_RATE_LIMIT_MS) return cb({ error: 'Slow down before sending another chat.' });
-    const result = makeChatMessage(room, userId, type, text);
+    const result = makeChatMessage(room, userId, type, text, targetUserId);
     if (result.error) return cb({ error: result.error });
     room.chatRate.set(userId, now);
     addChatMessage(room, result.message);
