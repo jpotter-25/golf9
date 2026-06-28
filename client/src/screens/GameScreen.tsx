@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as NavigationBar from 'expo-navigation-bar';
 import { Audio } from 'expo-av';
-import { Bell, Gem, Gift, MessageCircle, Settings, ShoppingBag, Trophy, UserPlus, X } from 'lucide-react-native';
+import { Bell, Gem, MessageCircle, Settings, ShoppingBag, Trophy, UserPlus, X } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import type { GameState, Card, Grid } from '../game/types';
@@ -22,6 +22,7 @@ import GridView from '../components/Grid';
 import Piles from '../components/Piles';
 import CardView from '../components/Card';
 import { AvatarCluster, rankEmblemForLeague } from '../components/AvatarDecorations';
+import { PlayerAvatar } from '../components/PlayerAvatar';
 import { useBoardMetrics } from '../utils/scaling';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
@@ -46,9 +47,9 @@ type GridSelection = { playerIndex: number; r: number; c: number };
 type DiscardFlash = { key: string; count: number };
 type AiDifficulty = 'easy' | 'hard';
 type AiMove = { source: 'draw' | 'discard'; card: Card; target: GridSelection | null; discardDrawn: boolean };
-type SocialBurst = { id: string; text: string; type: ChatMessageType };
+type SocialBurst = { id: string; text: string; type: ChatMessageType; giftIcon?: string; giftPrice?: number };
 type TurnNotice = GameNotice;
-type GiftOption = { id: string; label: string; accent: string };
+type GiftOption = { id: string; label: string; accent: string; icon: string; price: number };
 
 const QUICK_CHAT_PRESETS = [
   'Nice play!',
@@ -72,11 +73,14 @@ const QUICK_CHAT_STICKERS = [
   '\u{1F3AF} Bullseye',
 ];
 const TABLE_GIFTS: GiftOption[] = [
-  { id: 'gift-good-luck', label: 'Good Luck', accent: '#52E5A7' },
-  { id: 'gift-cheer', label: 'Cheer', accent: '#4DA3FF' },
-  { id: 'gift-clover', label: 'Clover', accent: '#65D48A' },
-  { id: 'gift-gem', label: 'Gem', accent: '#BDEBFF' },
-  { id: 'gift-crown', label: 'Crown', accent: '#FFCC66' },
+  { id: 'gift-good-luck', label: 'Good Luck', accent: '#52E5A7', icon: '\u{1F340}', price: 5 },
+  { id: 'gift-cheer', label: 'Cheer', accent: '#4DA3FF', icon: '\u{1F389}', price: 10 },
+  { id: 'gift-tissues', label: 'Tissues', accent: '#BFD9FF', icon: '\u{1F9FB}', price: 15 },
+  { id: 'gift-coffee', label: 'Coffee', accent: '#C58B5A', icon: '\u{2615}', price: 25 },
+  { id: 'gift-wine', label: 'Wine', accent: '#D9B8FF', icon: '\u{1F377}', price: 40 },
+  { id: 'gift-golf', label: 'Golf Flag', accent: '#65D48A', icon: '\u{26F3}', price: 75 },
+  { id: 'gift-gem', label: 'Gem', accent: '#BDEBFF', icon: '\u{1F48E}', price: 250 },
+  { id: 'gift-crown', label: 'Crown', accent: '#FFCC66', icon: '\u{1F451}', price: 500 },
 ];
 const SOLO_AI_SOURCE_PAUSE_MS = 1300;
 const SOLO_AI_TARGET_PAUSE_MS = 1900;
@@ -200,7 +204,13 @@ export default function GameScreen({ route, navigation }: Props) {
     if (message.type === 'text') return;
     const key = message.type === 'gift' && message.targetUserId ? message.targetUserId : message.userId;
     const giftPrefix = message.type === 'gift' ? `${message.displayName} sent ` : '';
-    const burst = { id: message.id, text: `${giftPrefix}${message.text}`, type: message.type };
+    const burst = {
+      id: message.id,
+      text: `${giftPrefix}${message.text}`,
+      type: message.type,
+      giftIcon: message.giftIcon,
+      giftPrice: message.giftPrice,
+    };
     setSocialBursts(prev => ({ ...prev, [key]: burst }));
     if (socialBurstTimers.current[key]) clearTimeout(socialBurstTimers.current[key]);
     socialBurstTimers.current[key] = setTimeout(() => {
@@ -1302,12 +1312,13 @@ export default function GameScreen({ route, navigation }: Props) {
     setAvatarHubBusy(giftId);
     try {
       await sendChatMessage(token, roomCode, 'gift', giftId, targetUserId);
+      refreshProfile().catch(() => {});
     } catch (error) {
       Alert.alert('Gift not sent', error instanceof Error ? error.message : 'Try again.');
     } finally {
       setAvatarHubBusy(null);
     }
-  }, [avatarHubBusy, isOnline, roomCode, token]);
+  }, [avatarHubBusy, isOnline, refreshProfile, roomCode, token]);
 
   const runAvatarHubFriendAction = useCallback(async () => {
     if (!token || !avatarHubProfile || avatarHubBusy) return;
@@ -1635,16 +1646,22 @@ export default function GameScreen({ route, navigation }: Props) {
           <View style={[styles.avatarHubSheet, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }]}>
             <View style={styles.avatarHubHeader}>
               <View style={styles.avatarHubHero}>
-                <AvatarCluster
-                  cosmetics={avatarHubCosmetics}
-                  fallbackInitial={avatarHubInitial}
-                  size={avatarHubIsSelf ? 74 : 68}
-                  mode={avatarHubIsSelf ? 'self' : 'opponent'}
-                  league={avatarHubLeague}
-                  showGift={!avatarHubIsSelf && !!avatarHubUserId}
-                  showClaim={avatarHubIsSelf && selfClaimableCount > 0}
-                  onGiftPress={() => avatarHubUserId ? sendGiftToPlayer(avatarHubUserId, TABLE_GIFTS[0].id) : undefined}
-                />
+                {avatarHubIsSelf ? (
+                  <AvatarCluster
+                    cosmetics={avatarHubCosmetics}
+                    fallbackInitial={avatarHubInitial}
+                    size={74}
+                    mode="self"
+                    league={avatarHubLeague}
+                    showClaim={selfClaimableCount > 0}
+                  />
+                ) : (
+                  <PlayerAvatar
+                    cosmetics={avatarHubCosmetics}
+                    fallbackInitial={avatarHubInitial}
+                    size={68}
+                  />
+                )}
                 <View style={styles.avatarHubCopy}>
                   <Text style={styles.avatarHubName} numberOfLines={1}>
                     {avatarHubIsSelf ? 'Your Avatar' : avatarHubName}
@@ -1759,12 +1776,19 @@ export default function GameScreen({ route, navigation }: Props) {
                   {TABLE_GIFTS.map(gift => (
                     <Pressable
                       key={gift.id}
-                      style={[styles.giftChip, { borderColor: gift.accent }, avatarHubBusy === gift.id && styles.avatarHubActionDisabled]}
-                      disabled={!avatarHubUserId || !!avatarHubBusy}
+                      style={[
+                        styles.giftChip,
+                        { borderColor: gift.accent },
+                        (avatarHubBusy === gift.id || (user?.currency.coins ?? 0) < gift.price) && styles.avatarHubActionDisabled,
+                      ]}
+                      disabled={!avatarHubUserId || !!avatarHubBusy || (user?.currency.coins ?? 0) < gift.price}
                       onPress={() => avatarHubUserId ? sendGiftToPlayer(avatarHubUserId, gift.id) : undefined}
                     >
-                      <Gift size={16} color={gift.accent} strokeWidth={3} />
-                      <Text style={styles.giftChipText} numberOfLines={1}>{gift.label}</Text>
+                      <Text style={styles.giftIcon}>{gift.icon}</Text>
+                      <View style={styles.giftCopy}>
+                        <Text style={styles.giftChipText} numberOfLines={1}>{gift.label}</Text>
+                        <Text style={[styles.giftPrice, { color: gift.accent }]} numberOfLines={1}>{gift.price} coins</Text>
+                      </View>
                     </Pressable>
                   ))}
                 </View>
@@ -1947,7 +1971,7 @@ export default function GameScreen({ route, navigation }: Props) {
                       message.type === 'gift' && styles.chatGiftText,
                     ]}>
                       {message.type === 'gift' && message.targetDisplayName
-                        ? `${message.text} to ${message.targetDisplayName}`
+                        ? `${message.giftIcon || '\u{1F381}'} ${message.text} to ${message.targetDisplayName}`
                         : message.text}
                     </Text>
                   </View>
@@ -2090,13 +2114,22 @@ function friendActionLabel(relationship?: api.SocialRelationship) {
 
 function SocialBurstBubble({ burst, compact = false }: { burst?: SocialBurst; compact?: boolean }) {
   if (!burst) return null;
+  if (burst.type === 'gift') {
+    return (
+      <View pointerEvents="none" style={[styles.socialBurst, compact && styles.socialBurstCompact, styles.socialBurstGift]}>
+        <Text style={styles.socialBurstGiftIcon}>{burst.giftIcon || '\u{1F381}'}</Text>
+        <Text style={[styles.socialBurstText, styles.socialBurstGiftText, compact && styles.socialBurstTextCompact]} numberOfLines={compact ? 2 : 1}>
+          {burst.text}
+        </Text>
+      </View>
+    );
+  }
   return (
-    <View pointerEvents="none" style={[styles.socialBurst, compact && styles.socialBurstCompact, burst.type === 'sticker' && styles.socialBurstSticker, burst.type === 'gift' && styles.socialBurstGift]}>
+    <View pointerEvents="none" style={[styles.socialBurst, compact && styles.socialBurstCompact, burst.type === 'sticker' && styles.socialBurstSticker]}>
       <Text
         style={[
           styles.socialBurstText,
           burst.type === 'emoji' && styles.socialBurstEmoji,
-          burst.type === 'gift' && styles.socialBurstGiftText,
           compact && styles.socialBurstTextCompact,
         ]}
         numberOfLines={compact ? 2 : 1}
@@ -2581,18 +2614,21 @@ const styles = StyleSheet.create({
   giftGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   giftChip: {
     flexGrow: 1,
-    flexBasis: '31%',
-    minHeight: 42,
+    flexBasis: '47%',
+    minHeight: 54,
     borderRadius: 8,
     borderWidth: 1,
     backgroundColor: '#121737',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
+    justifyContent: 'flex-start',
+    gap: 8,
+    paddingHorizontal: 10,
   },
+  giftIcon: { fontSize: 21, lineHeight: 24 },
+  giftCopy: { flex: 1, minWidth: 0 },
   giftChipText: { color: '#E8ECF1', fontSize: 11, fontWeight: '900' },
+  giftPrice: { fontSize: 9, fontWeight: '900', marginTop: 2 },
   noticeScrim: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.68)',
@@ -2890,10 +2926,13 @@ const styles = StyleSheet.create({
   socialBurstGift: {
     borderColor: '#BDEBFF',
     backgroundColor: '#102838',
+    alignItems: 'center',
+    minWidth: 118,
   },
   socialBurstText: { color: '#E8ECF1', fontSize: 13, fontWeight: '900', textAlign: 'center' },
   socialBurstTextCompact: { fontSize: 10 },
   socialBurstEmoji: { fontSize: 22, lineHeight: 26 },
+  socialBurstGiftIcon: { fontSize: 30, lineHeight: 34, marginBottom: 2 },
   socialBurstGiftText: { color: '#EAF8FF' },
 
   footer: {

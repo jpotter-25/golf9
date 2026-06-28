@@ -15,6 +15,8 @@ export type ChatMessage = {
   type: 'text' | 'preset' | 'emoji' | 'sticker' | 'gift';
   text: string;
   giftId?: string;
+  giftIcon?: string;
+  giftPrice?: number;
   targetUserId?: string;
   targetDisplayName?: string;
   createdAt: number;

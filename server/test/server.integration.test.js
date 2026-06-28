@@ -887,6 +887,7 @@ test('room chat supports presets, stickers, and blocks filtered custom messages'
   await withServer(async (baseUrl) => {
     const one = await signup(baseUrl, `ChatOne${Date.now()}`);
     const two = await signup(baseUrl, `ChatTwo${Date.now()}`);
+    await json(await fetch(`${baseUrl}/economy/daily-bonus/claim`, { method: 'POST', headers: authHeaders(one.token) }));
 
     const created = await json(await fetch(`${baseUrl}/rooms`, {
       method: 'POST',
@@ -929,15 +930,20 @@ test('room chat supports presets, stickers, and blocks filtered custom messages'
       assert.deepEqual((await stickerReceived)[0], sticker.message);
 
       await new Promise(resolve => setTimeout(resolve, 850));
+      const beforeGiftProfile = await json(await fetch(`${baseUrl}/profile/me`, { headers: authHeaders(one.token) }));
       const giftReceived = once(socketTwo, 'chat:message');
       const gift = await emitAck(socketOne, 'chat:send', { code, type: 'gift', text: 'gift-good-luck', targetUserId: two.user.userId });
       assert.equal(gift.ok, true);
       assert.equal(gift.message.type, 'gift');
       assert.equal(gift.message.text, 'Good Luck');
       assert.equal(gift.message.giftId, 'gift-good-luck');
+      assert.equal(gift.message.giftIcon, '\u{1F340}');
+      assert.equal(gift.message.giftPrice, 5);
       assert.equal(gift.message.targetUserId, two.user.userId);
       assert.equal(gift.message.targetDisplayName, two.user.displayName);
       assert.deepEqual((await giftReceived)[0], gift.message);
+      const afterGiftProfile = await json(await fetch(`${baseUrl}/profile/me`, { headers: authHeaders(one.token) }));
+      assert.equal(afterGiftProfile.user.currency.coins, beforeGiftProfile.user.currency.coins - 5);
 
       const rejoin = await emitAck(socketTwo, 'room:join', { code });
       assert.equal(rejoin.chat.length, 3);

@@ -197,11 +197,14 @@ const CHAT_STICKERS = [
   '\u{1F3AF} Bullseye',
 ];
 const CHAT_GIFTS = [
-  { id: 'gift-good-luck', label: 'Good Luck' },
-  { id: 'gift-cheer', label: 'Table Cheer' },
-  { id: 'gift-clover', label: 'Lucky Clover' },
-  { id: 'gift-gem', label: 'Gem Spark' },
-  { id: 'gift-crown', label: 'Crown Toss' },
+  { id: 'gift-good-luck', label: 'Good Luck', icon: '\u{1F340}', price: 5 },
+  { id: 'gift-cheer', label: 'Cheer', icon: '\u{1F389}', price: 10 },
+  { id: 'gift-tissues', label: 'Tissues', icon: '\u{1F9FB}', price: 15 },
+  { id: 'gift-coffee', label: 'Coffee', icon: '\u{2615}', price: 25 },
+  { id: 'gift-wine', label: 'Wine', icon: '\u{1F377}', price: 40 },
+  { id: 'gift-golf', label: 'Golf Flag', icon: '\u{26F3}', price: 75 },
+  { id: 'gift-gem', label: 'Gem Spark', icon: '\u{1F48E}', price: 250 },
+  { id: 'gift-crown', label: 'Crown Toss', icon: '\u{1F451}', price: 500 },
 ];
 const CHAT_BLOCKED_TERMS = new Set([
   'fuck', 'fucks', 'fucker', 'fuckers', 'fucking', 'shit', 'shits', 'shitty', 'bitch', 'bitches',
@@ -1345,7 +1348,7 @@ function cleanChatPayload(type, rawText) {
   } else if (kind === 'gift') {
     const gift = CHAT_GIFTS.find(item => item.id === String(rawText || '').trim());
     if (!gift) return { error: 'Unknown gift.' };
-    cleaned = { text: gift.label, giftId: gift.id };
+    cleaned = { text: gift.label, giftId: gift.id, giftIcon: gift.icon, giftPrice: gift.price };
   } else if (kind === 'preset') {
     const text = String(rawText || '').trim();
     if (!CHAT_PRESETS.includes(text)) return { error: 'Unknown quick chat.' };
@@ -1354,7 +1357,7 @@ function cleanChatPayload(type, rawText) {
     cleaned = cleanChatText(rawText);
   }
   if (cleaned.error) return { error: cleaned.error };
-  return { kind, text: cleaned.text, giftId: cleaned.giftId || null };
+  return { kind, text: cleaned.text, giftId: cleaned.giftId || null, giftIcon: cleaned.giftIcon || null, giftPrice: Number(cleaned.giftPrice || 0) };
 }
 
 function makeChatMessage(room, userId, type, rawText, targetUserId = null) {
@@ -1367,6 +1370,11 @@ function makeChatMessage(room, userId, type, rawText, targetUserId = null) {
     target = room.players.find(item => item.userId === String(targetUserId || ''));
     if (!target) return { error: 'Gift target not found.' };
     if (target.userId === userId) return { error: 'Choose another player for gifts.' };
+    const sender = users.get(userId);
+    if (!sender) return { error: 'Gift sender not found.' };
+    normalizeUserProgression(sender, Date.now(), rankedSeason, rankedConfig());
+    if (sender.currency.coins < cleaned.giftPrice) return { error: `You need ${cleaned.giftPrice} coins to send this gift.` };
+    sender.currency.coins -= cleaned.giftPrice;
   }
   return {
     message: {
@@ -1377,6 +1385,8 @@ function makeChatMessage(room, userId, type, rawText, targetUserId = null) {
       type: cleaned.kind,
       text: cleaned.text,
       giftId: cleaned.giftId || undefined,
+      giftIcon: cleaned.giftIcon || undefined,
+      giftPrice: cleaned.giftPrice || undefined,
       targetUserId: target?.userId,
       targetDisplayName: target?.displayName,
       createdAt: Date.now(),

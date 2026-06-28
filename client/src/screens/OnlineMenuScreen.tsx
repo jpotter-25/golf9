@@ -353,15 +353,17 @@ function MatchPreferenceModal({
   return (
     <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
       <View style={styles.modalBackdrop}>
-        <View style={styles.modalCard}>
+        <View style={[styles.modalCard, styles.modalCardContained]}>
           <Pressable style={styles.modalClose} onPress={onClose}><X size={24} color={ui.text.primary} strokeWidth={3} /></Pressable>
-          <Text style={styles.modalTitle}>{title}</Text>
-          <Text style={styles.modalText}>{text}</Text>
-          <Text style={styles.modalLabel}>Players</Text>
-          <Segmented values={PLAYER_OPTIONS} selected={players} onSelect={onPlayers} suffix="P" />
-          <Text style={styles.modalLabel}>Rounds</Text>
-          <Segmented values={ROUND_OPTIONS} selected={rounds} onSelect={onRounds} suffix="R" />
-          <ActionButton label={actionLabel} Icon={Search} onPress={onAction} style={styles.modalAction} />
+          <ScrollView contentContainerStyle={styles.modalScrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <Text style={styles.modalTitle}>{title}</Text>
+            <Text style={styles.modalText}>{text}</Text>
+            <Text style={styles.modalLabel}>Players</Text>
+            <Segmented values={PLAYER_OPTIONS} selected={players} onSelect={onPlayers} suffix="P" />
+            <Text style={styles.modalLabel}>Rounds</Text>
+            <Segmented values={ROUND_OPTIONS} selected={rounds} onSelect={onRounds} suffix="R" />
+            <ActionButton label={actionLabel} Icon={Search} onPress={onAction} style={styles.modalAction} />
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -472,15 +474,17 @@ function CreateRoomModal({
   return (
     <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
       <View style={styles.modalBackdrop}>
-        <View style={styles.modalCard}>
+        <View style={[styles.modalCard, styles.modalCardContained]}>
           <Pressable style={styles.modalClose} onPress={onClose}><X size={24} color={ui.text.primary} strokeWidth={3} /></Pressable>
-          <Text style={styles.modalTitle}>Create Room</Text>
-          <Text style={styles.modalText}>Choose the table setup. The room gets a code and also appears in the open casual pool.</Text>
-          <Text style={styles.modalLabel}>Players</Text>
-          <Segmented values={PLAYER_OPTIONS} selected={players} onSelect={onPlayers} suffix="P" />
-          <Text style={styles.modalLabel}>Rounds</Text>
-          <Segmented values={ROUND_OPTIONS} selected={rounds} onSelect={onRounds} suffix="R" />
-          <ActionButton label="Create Room" Icon={DoorOpen} onPress={onCreate} style={styles.modalAction} />
+          <ScrollView contentContainerStyle={styles.modalScrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <Text style={styles.modalTitle}>Create Room</Text>
+            <Text style={styles.modalText}>Choose the table setup. The room gets a code and also appears in the open casual pool.</Text>
+            <Text style={styles.modalLabel}>Players</Text>
+            <Segmented values={PLAYER_OPTIONS} selected={players} onSelect={onPlayers} suffix="P" />
+            <Text style={styles.modalLabel}>Rounds</Text>
+            <Segmented values={ROUND_OPTIONS} selected={rounds} onSelect={onRounds} suffix="R" />
+            <ActionButton label="Create Room" Icon={DoorOpen} onPress={onCreate} style={styles.modalAction} />
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -703,6 +707,15 @@ const styles = StyleSheet.create({
     borderColor: ui.border.strong,
     backgroundColor: ui.surface.raised,
     padding: 18,
+  },
+  modalCardContained: {
+    maxHeight: '86%',
+    overflow: 'hidden',
+    padding: 0,
+  },
+  modalScrollContent: {
+    padding: 18,
+    paddingBottom: 20,
   },
   modalClose: {
     position: 'absolute',
