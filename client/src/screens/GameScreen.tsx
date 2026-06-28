@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as NavigationBar from 'expo-navigation-bar';
 import { Audio } from 'expo-av';
-import { Bell, MessageCircle, MoreHorizontal, ShoppingBag } from 'lucide-react-native';
+import { Bell, MessageCircle, Settings, ShoppingBag, X } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import type { GameState, Card, Grid } from '../game/types';
@@ -29,6 +29,7 @@ import { connect, joinRoomSocket, onChatHistory, onChatMessage, onGameCelebratio
 import { getGameplayPreferences, setGameplayPreferences, subscribeGameplayPreferences, type GameplayPreferences } from '../services/preferences';
 import { getTableThemeVisual, type EquippedCosmetics } from '../theme/cosmetics';
 import { actionCopy, layerZ, ui, type GameActionModel, type GameLayerState, type GameNotice } from '../ui';
+import { ShopContent } from './ShopScreen';
 import {
   cardValue,
   continueAfterRoundSummary,
@@ -123,6 +124,7 @@ export default function GameScreen({ route, navigation }: Props) {
   const [chatSending, setChatSending] = useState(false);
   const [chatUnread, setChatUnread] = useState(0);
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
+  const [shopOpen, setShopOpen] = useState(false);
   const [roomPlayers, setRoomPlayers] = useState<api.RoomPlayer[]>([]);
   const [socialBursts, setSocialBursts] = useState<Record<string, SocialBurst>>({});
   const [turnNotice, setTurnNotice] = useState<TurnNotice | null>(null);
@@ -1297,7 +1299,7 @@ export default function GameScreen({ route, navigation }: Props) {
         ) : null}
         <Pressable
           style={[styles.chatButton, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }]}
-          onPress={() => navigation.navigate('Shop')}
+          onPress={() => setShopOpen(true)}
         >
           <ShoppingBag size={22} color={ui.palette.gold} strokeWidth={2.5} />
         </Pressable>
@@ -1305,7 +1307,7 @@ export default function GameScreen({ route, navigation }: Props) {
           style={[styles.chatButton, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }]}
           onPress={() => setAlertSettingsOpen(true)}
         >
-          <MoreHorizontal size={23} color={ui.text.primary} strokeWidth={2.7} />
+          <Settings size={22} color={ui.text.primary} strokeWidth={2.7} />
         </Pressable>
         {gameLayerState.hud.showTimer ? (
           <View style={[styles.timerChip, secsLeft <= 5 && !isRoundReveal && !isRoundSummary && styles.timerDanger]}>
@@ -1342,13 +1344,15 @@ export default function GameScreen({ route, navigation }: Props) {
                   <PlayerAvatar
                     cosmetics={playerCosmetics(p, i)}
                     fallbackInitial={p.avatarInitial ?? p.name}
-                    size={30}
+                    size={28}
                     onPress={() => openPlayerProfile(p.userId)}
                     disabled={!isOnline}
                   />
-                  <View style={styles.playerGridNameBlock}>
-                    <Text style={[styles.subtle, styles.oppName, i === activeIndex && styles.activeName]} numberOfLines={1}>{p.name}</Text>
-                    <Text style={styles.playerGridMeta}>{active ? 'TURN' : connected ? 'ONLINE' : 'OFFLINE'}</Text>
+                  <View style={[styles.gridStatePill, active && styles.gridStatePillActive, !connected && styles.gridStatePillOffline]}>
+                    <View style={[styles.gridStateDot, active || connected ? styles.gridStateDotOnline : styles.gridStateDotOffline]} />
+                    <Text style={[styles.gridStateText, active && styles.gridStateTextActive]} numberOfLines={1}>
+                      {active ? 'TURN' : connected ? 'ON' : 'OFF'}
+                    </Text>
                   </View>
                   <View style={styles.inlineScores}>
                     <Text style={styles.scoreNow}>Now {visibleRoundScores[i] ?? 0}</Text>
@@ -1478,6 +1482,31 @@ export default function GameScreen({ route, navigation }: Props) {
       </View>
 
       {/* Feedback Layer */}
+      <Modal
+        transparent
+        visible={isFocused && shopOpen}
+        animationType="slide"
+        onRequestClose={() => setShopOpen(false)}
+      >
+        <View style={styles.shopOverlay}>
+          <Pressable style={styles.shopDismissArea} onPress={() => setShopOpen(false)} accessibilityRole="button" accessibilityLabel="Return to match" />
+          <View style={[styles.shopSheet, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }]}>
+            <View style={styles.shopSheetHeader}>
+              <View>
+                <Text style={styles.shopSheetEyebrow}>In Match</Text>
+                <Text style={styles.shopSheetTitle}>Storefront</Text>
+              </View>
+              <Pressable style={styles.shopCloseButton} onPress={() => setShopOpen(false)} accessibilityRole="button" accessibilityLabel="Close shop and return to match">
+                <X size={24} color={ui.text.primary} strokeWidth={3} />
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.shopScrollContent} keyboardShouldPersistTaps="handled">
+              {shopOpen ? <ShopContent embedded backLabel="Back to Match" onBack={() => setShopOpen(false)} /> : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       <Modal
         transparent
         visible={isFocused && !!turnNotice}
@@ -2129,6 +2158,50 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   chatBadgeText: { color: '#0B1023', fontSize: 10, fontWeight: '900' },
+  shopOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.58)',
+  },
+  shopDismissArea: { flex: 1 },
+  shopSheet: {
+    maxHeight: '88%',
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    borderWidth: 1,
+    paddingTop: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.36,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: -5 },
+    elevation: 12,
+  },
+  shopSheetHeader: {
+    minHeight: 50,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A2F57',
+  },
+  shopSheetEyebrow: { color: '#FFCC66', fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
+  shopSheetTitle: { color: '#E8ECF1', fontSize: 21, fontWeight: '900', marginTop: 1 },
+  shopCloseButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: '#2A2F57',
+    backgroundColor: '#121737',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shopScrollContent: {
+    padding: 14,
+    paddingBottom: 24,
+  },
   noticeScrim: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.68)',
@@ -2321,13 +2394,33 @@ const styles = StyleSheet.create({
   oppHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 2 },
   oppName: { flex: 1, minWidth: 0 },
   playerGridHeader: {
-    minHeight: 36,
+    minHeight: 30,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'space-between',
+    gap: 5,
     marginBottom: 5,
   },
-  playerGridNameBlock: { flex: 1, minWidth: 0 },
+  gridStatePill: {
+    minWidth: 36,
+    minHeight: 22,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: '#2A2F57',
+    backgroundColor: '#121737',
+    paddingHorizontal: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+  },
+  gridStatePillActive: { borderColor: '#52E5A7', backgroundColor: '#123B32' },
+  gridStatePillOffline: { borderColor: '#5C2A3A', backgroundColor: '#241420' },
+  gridStateDot: { width: 6, height: 6, borderRadius: 3 },
+  gridStateDotOnline: { backgroundColor: '#52E5A7' },
+  gridStateDotOffline: { backgroundColor: '#FF6B6B' },
+  gridStateText: { color: '#9BA3C7', fontSize: 8, fontWeight: '900' },
+  gridStateTextActive: { color: '#52E5A7' },
   playerGridMeta: { color: '#9BA3C7', fontSize: 8, fontWeight: '900', marginTop: 1 },
   inlineScores: { alignItems: 'flex-end', flexShrink: 0 },
 

@@ -34,11 +34,12 @@ export function computeMetrics(
 
   const gap = Math.max(6, Math.min(10, Math.round(width * 0.018)));
 
-  // Opponents are one row (3 in 4P). Make them smaller in 4P to guarantee fit.
+  // Opponents are one row (3 in 4P). Keep the local grid compact so the
+  // remote boards remain readable in portrait play.
   const OPP_SCALE =
-    playerCount === 2 ? 0.58 :
-    playerCount === 3 ? 0.50 :
-    0.38; // for 4-player mode
+    playerCount === 2 ? 0.64 :
+    playerCount === 3 ? 0.46 :
+    0.32; // for 4-player mode
 
   const widthBound = Math.floor((usableW - 2 * gap) / 3);
 
@@ -67,9 +68,9 @@ export function computeMetrics(
     }
   }
 
-  const cardW_me = Math.floor(best * 0.82);
+  const cardW_me = Math.floor(best * 0.74);
   const cardH_me = Math.round(cardW_me * CARD_ASPECT);
-  const cardW_opp = Math.floor(cardW_me * OPP_SCALE);
+  const cardW_opp = Math.floor(best * OPP_SCALE);
   const cardH_opp = Math.round(cardW_opp * CARD_ASPECT);
 
   return {

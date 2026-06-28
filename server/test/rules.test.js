@@ -8,6 +8,7 @@ import {
   createGameState,
   deckCountForPlayers,
   discardDrawn,
+  drawFromDeck,
   flipForPeek,
   publicGameState,
   revealGridCardForDecision,
@@ -115,6 +116,83 @@ test('simultaneous peek lets players flip independently and auto-completes every
   const completed = autoCompleteCurrentPeek(state);
   assert.equal(completed.phase, 'turn');
   assert.equal(completed.players.every(player => player.peekFlips === 2), true);
+});
+
+test('mid-turn actions preserve the original turn deadline', () => {
+  const deadline = 987654321;
+
+  let state = startTurns(createGameState([
+    { userId: 'u1', displayName: 'One' },
+    { userId: 'u2', displayName: 'Two' },
+  ]));
+  state.currentPlayerIndex = 0;
+  state.turnEndsAt = deadline;
+  const draw = drawFromDeck(state);
+  assert.equal(draw.error, undefined);
+  assert.equal(draw.state.turnEndsAt, deadline);
+
+  state = startTurns(createGameState([
+    { userId: 'u1', displayName: 'One' },
+    { userId: 'u2', displayName: 'Two' },
+  ]));
+  state.currentPlayerIndex = 0;
+  state.turnEndsAt = deadline;
+  const discard = takeDiscard(state);
+  assert.equal(discard.error, undefined);
+  assert.equal(discard.state.turnEndsAt, deadline);
+
+  state = startTurns(createGameState([
+    { userId: 'u1', displayName: 'One' },
+    { userId: 'u2', displayName: 'Two' },
+  ]));
+  state.currentPlayerIndex = 0;
+  state.turnEndsAt = deadline;
+  state.players[0].grid[0][0].faceUp = false;
+  const reveal = revealGridCardForDecision(state, 0, 0, 0);
+  assert.equal(reveal.error, undefined);
+  assert.equal(reveal.state.turnEndsAt, deadline);
+});
+
+test('turn-ending actions start a fresh deadline for the next turn', () => {
+  const deadline = 987654321;
+
+  let state = startTurns(createGameState([
+    { userId: 'u1', displayName: 'One' },
+    { userId: 'u2', displayName: 'Two' },
+  ]));
+  state.currentPlayerIndex = 0;
+  state.turnEndsAt = deadline;
+  let result = replaceGridCard(state, 0, 0, 0, card('3'));
+  assert.equal(result.error, undefined);
+  assert.equal(result.state.currentPlayerIndex, 1);
+  assert.equal(typeof result.state.turnEndsAt, 'number');
+  assert.notEqual(result.state.turnEndsAt, deadline);
+
+  state = startTurns(createGameState([
+    { userId: 'u1', displayName: 'One' },
+    { userId: 'u2', displayName: 'Two' },
+  ]));
+  state.currentPlayerIndex = 0;
+  state.turnEndsAt = deadline;
+  result = discardDrawn(state, 0, card('4'));
+  assert.equal(result.error, undefined);
+  assert.equal(result.state.currentPlayerIndex, 1);
+  assert.equal(typeof result.state.turnEndsAt, 'number');
+  assert.notEqual(result.state.turnEndsAt, deadline);
+
+  state = startTurns(createGameState([
+    { userId: 'u1', displayName: 'One' },
+    { userId: 'u2', displayName: 'Two' },
+  ]));
+  state.currentPlayerIndex = 0;
+  state.turnEndsAt = deadline;
+  state.players[0].grid[0][0].faceUp = false;
+  const reveal = revealGridCardForDecision(state, 0, 0, 0);
+  result = resolvePendingGridDecision(reveal.state, 0, card('5'), 'drawn');
+  assert.equal(result.error, undefined);
+  assert.equal(result.state.currentPlayerIndex, 1);
+  assert.equal(typeof result.state.turnEndsAt, 'number');
+  assert.notEqual(result.state.turnEndsAt, deadline);
 });
 
 test('replaceGridCard clears a completed three-of-a-kind column to discard', () => {

@@ -15,6 +15,22 @@ import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui 
 type Props = NativeStackScreenProps<RootStackParamList, 'Shop'>;
 
 export default function ShopScreen({ navigation }: Props) {
+  return (
+    <ScreenShell scroll>
+      <ShopContent onBack={() => navigation.goBack()} />
+    </ScreenShell>
+  );
+}
+
+export function ShopContent({
+  embedded = false,
+  backLabel = 'Back to Lobby',
+  onBack,
+}: {
+  embedded?: boolean;
+  backLabel?: string;
+  onBack: () => void;
+}) {
   const { token, user, refreshProfile } = useAuth();
   const [cosmetics, setCosmetics] = useState<api.CosmeticItem[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -107,7 +123,7 @@ export default function ShopScreen({ navigation }: Props) {
   const grouped = groupCosmeticsByType(sortCosmetics(cosmetics));
 
   return (
-    <ScreenShell scroll>
+    <View style={embedded ? styles.embeddedContent : undefined}>
       <ScreenHeader
         eyebrow="Storefront"
         title="Shop"
@@ -181,8 +197,8 @@ export default function ShopScreen({ navigation }: Props) {
         <Text style={styles.emptyText}>Shop items will load once the server is reachable.</Text>
       ) : null}
 
-      <ActionButton label="Back to Lobby" Icon={ChevronLeft} tone="ghost" onPress={() => navigation.goBack()} style={styles.backButton} />
-    </ScreenShell>
+      <ActionButton label={backLabel} Icon={ChevronLeft} tone="ghost" onPress={onBack} style={styles.backButton} />
+    </View>
   );
 }
 
@@ -350,6 +366,7 @@ function categoryLabel(category: string) {
 }
 
 const styles = StyleSheet.create({
+  embeddedContent: { paddingBottom: 8 },
   earnPanel: { gap: 14 },
   earnHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   earnIcon: {

@@ -1,8 +1,8 @@
 // client/src/screens/OnlineMenuScreen.tsx
 // Purpose: Online table browser for casual auto-match, coded rooms, wagers, and ranked.
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Coins, DoorOpen, Gift, Search, Sparkles, Trophy, Users, X } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
@@ -267,10 +267,23 @@ function WagerSlider({
   balance: number;
   waitingByBuyIn: Map<number, api.RoomSummary[]>;
 }) {
+  const scrollRef = useRef<ScrollView | null>(null);
+  const itemWidth = 78;
   const selected = tables[selectedIndex];
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ x: Math.max(0, selectedIndex * itemWidth - itemWidth), animated: true });
+  }, [selectedIndex, itemWidth]);
+
   if (!selected) return <Text style={styles.emptyText}>Wager tables are not configured yet.</Text>;
   const waiting = waitingByBuyIn.get(selected.buyIn)?.length ?? 0;
   const canAfford = balance >= selected.buyIn;
+
+  const onScrollEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const index = Math.max(0, Math.min(tables.length - 1, Math.round(event.nativeEvent.contentOffset.x / itemWidth)));
+    if (index !== selectedIndex) onSelect(index);
+  };
+
   return (
     <View style={styles.wagerSliderBlock}>
       <View style={styles.wagerSelectedRow}>
@@ -280,20 +293,36 @@ function WagerSlider({
         </View>
         <StatusBadge label={waiting ? `${waiting} waiting` : canAfford ? 'Ready' : 'Need coins'} tone={canAfford ? 'gold' : 'danger'} />
       </View>
-      <View style={styles.wagerTrack}>
+      <ScrollView
+        ref={scrollRef}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        snapToInterval={itemWidth}
+        decelerationRate="fast"
+        onMomentumScrollEnd={onScrollEnd}
+        onScrollEndDrag={onScrollEnd}
+        style={styles.wagerTrack}
+        contentContainerStyle={styles.wagerTrackContent}
+        keyboardShouldPersistTaps="handled"
+      >
         {tables.map((table, index) => {
           const active = index === selectedIndex;
           const affordable = balance >= table.buyIn;
           return (
-            <Pressable key={table.id} style={styles.wagerStepTouch} onPress={() => onSelect(index)}>
-              <View style={[styles.wagerStep, active && styles.wagerStepActive, !affordable && styles.wagerStepLocked]} />
+            <Pressable
+              key={table.id}
+              style={[styles.wagerStepTouch, { width: itemWidth }, active && styles.wagerStepTouchActive, !affordable && styles.wagerStepLocked]}
+              onPress={() => onSelect(index)}
+            >
               <Text style={[styles.wagerStepText, active && styles.wagerStepTextActive]} numberOfLines={1}>
                 {table.buyIn >= 1000 ? `${table.buyIn / 1000}k` : table.buyIn}
               </Text>
+              <Text style={[styles.wagerStepLabel, active && styles.wagerStepTextActive]} numberOfLines={1}>coins</Text>
             </Pressable>
           );
         })}
-      </View>
+      </ScrollView>
+      <Text style={styles.wagerSwipeHint}>Swipe to choose a buy-in.</Text>
     </View>
   );
 }
@@ -588,34 +617,35 @@ const styles = StyleSheet.create({
   wagerSelectedLabel: { color: ui.text.muted, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
   wagerSelectedValue: { color: ui.palette.gold, fontSize: 24, fontWeight: '900', marginTop: 2 },
   wagerTrack: {
-    minHeight: 58,
+    maxHeight: 74,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: ui.border.soft,
     backgroundColor: ui.surface.glass,
+  },
+  wagerTrackContent: {
+    minHeight: 70,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
+    gap: 8,
+    paddingHorizontal: 10,
   },
-  wagerStepTouch: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 54 },
-  wagerStep: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: ui.border.strong,
+  wagerStepTouch: {
+    minHeight: 50,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: ui.border.soft,
+    backgroundColor: ui.surface.base,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
   },
-  wagerStepActive: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: ui.palette.gold,
-    borderColor: ui.palette.gold,
-  },
+  wagerStepTouchActive: { borderColor: ui.palette.gold, backgroundColor: 'rgba(255, 204, 102, 0.16)' },
   wagerStepLocked: { opacity: 0.35 },
-  wagerStepText: { color: ui.text.muted, fontSize: 9, fontWeight: '900', marginTop: 4 },
+  wagerStepText: { color: ui.text.muted, fontSize: 13, fontWeight: '900' },
+  wagerStepLabel: { color: ui.text.muted, fontSize: 9, fontWeight: '900', marginTop: 2 },
   wagerStepTextActive: { color: ui.palette.gold },
+  wagerSwipeHint: { color: ui.text.muted, fontSize: 11, fontWeight: '800', textAlign: 'center', marginTop: -4 },
   wagerAction: { marginTop: 12 },
   wagerGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   wagerButton: {

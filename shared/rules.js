@@ -265,7 +265,6 @@ export function drawFromDeck(state) {
   if (!card) return { state: next, drawn: null, error: 'No cards available.' };
   card.faceUp = true;
   if (next.mustDrawOnlyForPlayerIndex === next.currentPlayerIndex) next.mustDrawOnlyForPlayerIndex = undefined;
-  next.turnEndsAt = Date.now() + TURN_DURATION;
   next.revision = (next.revision || 0) + 1;
   return { state: next, drawn: card };
 }
@@ -282,7 +281,6 @@ export function takeDiscard(state) {
   if (!top) return { state: next, drawn: null, error: 'Discard pile is empty.' };
   top.faceUp = true;
   next.topDiscard = next.discardPile[next.discardPile.length - 1] || null;
-  next.turnEndsAt = Date.now() + TURN_DURATION;
   next.revision = (next.revision || 0) + 1;
   return { state: next, drawn: top };
 }
@@ -443,7 +441,6 @@ export function revealGridCardForDecision(state, playerIndex, r, c) {
   if (card.faceUp) return { state: next, error: 'Card is already face-up.' };
   card.faceUp = true;
   next.pendingDecision = { playerIndex, r, c, cardId: card.id };
-  next.turnEndsAt = Date.now() + TURN_DURATION;
   next.revision = (next.revision || 0) + 1;
   return { state: next };
 }
