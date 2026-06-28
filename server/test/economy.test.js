@@ -65,10 +65,11 @@ test('configured wager steps feed the public economy catalog and buy-in validati
       { id: 'wager-50', buyIn: 50, label: '50' },
       { id: 'wager-1000', buyIn: 1000, label: '1k' },
       { id: 'wager-50000', buyIn: 50000, label: '50k' },
+      { id: 'wager-100000', buyIn: 100000, label: '100k' },
     ],
   });
   const catalog = publicEconomyCatalog(null, config);
-  assert.deepEqual(catalog.wagerTables.map(table => table.buyIn), [0, 50, 1000, 50000]);
-  assert.equal(normalizeBuyIn(50000, config), 50000);
+  assert.deepEqual(catalog.wagerTables.map(table => table.buyIn), [0, 50, 1000, 50000, 100000]);
+  assert.equal(normalizeBuyIn(100000, config), 100000);
   assert.equal(normalizeBuyIn(750, config), 0);
 });

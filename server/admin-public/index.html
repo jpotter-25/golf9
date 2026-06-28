@@ -85,14 +85,22 @@
         </section>
         <section id="economy" class="tab">
           <div class="panel">
-            <h2>Economy</h2>
-            <button id="loadEconomy">Refresh Economy</button>
+            <div class="split-header">
+              <div>
+                <h2>Economy</h2>
+                <p class="muted">Manage wager buy-in steps used by Auto-Match, Wager Tables, and the in-game economy catalog.</p>
+              </div>
+              <button id="loadEconomy">Refresh Economy</button>
+            </div>
             <form id="economyConfigEditor" class="editor">
-              <label>Wager tables JSON <textarea name="wagerTables" rows="8" placeholder='[{"id":"wager-50","label":"50","buyIn":50,"description":"Buy in for 50 coins."}]'></textarea></label>
+              <div class="toolbar">
+                <button id="addWagerTable" type="button" class="ghost">Add Wager Option</button>
+              </div>
+              <div id="wagerTableRows" class="list"></div>
               <label>Reason <input name="reason" placeholder="Required audit reason" /></label>
-              <button type="submit">Save Wager Config</button>
+              <button type="submit">Save Wager Options</button>
             </form>
-            <pre id="economyOutput"></pre>
+            <pre id="economyOutput" class="muted"></pre>
           </div>
         </section>
         <section id="competitive" class="tab">

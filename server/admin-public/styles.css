@@ -223,6 +223,13 @@ h2 {
   font-size: 1.08rem;
 }
 
+.wager-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(180px, 0.9fr) minmax(260px, 1.8fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
 .statline {
   display: flex;
   flex-wrap: wrap;
@@ -342,7 +349,7 @@ h2 {
 
 @media (max-width: 720px) {
   .row { grid-template-columns: 1fr; }
-  .row.two, .toolbar, .workspace { grid-template-columns: 1fr; }
+  .row.two, .toolbar, .workspace, .wager-row { grid-template-columns: 1fr; }
   .split-header { flex-direction: column; }
   .topbar { align-items: flex-start; flex-direction: column; }
 }

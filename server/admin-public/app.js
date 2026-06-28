@@ -7,6 +7,7 @@ let catalogDraft = [];
 let catalogLive = [];
 let selectedClub = null;
 let competitiveConfig = null;
+let economyWagerTables = [];
 
 async function api(path, options = {}) {
   const isForm = options.body instanceof FormData;
@@ -49,6 +50,7 @@ function bindTabs() {
       button.classList.add('active');
       document.querySelector(`#${button.dataset.tab}`)?.classList.add('active');
       if (button.dataset.tab === 'invites') loadInvites();
+      if (button.dataset.tab === 'economy') loadEconomy();
       if (button.dataset.tab === 'competitive') loadCompetitive();
     });
   });
@@ -67,6 +69,7 @@ function bindConsoleActions() {
   document.querySelector('#inviteEditor').addEventListener('submit', createInvite);
   document.querySelector('#loadTickets').addEventListener('click', loadTickets);
   document.querySelector('#loadEconomy').addEventListener('click', loadEconomy);
+  document.querySelector('#addWagerTable').addEventListener('click', addWagerTable);
   document.querySelector('#economyConfigEditor').addEventListener('submit', saveEconomyConfig);
   document.querySelector('#loadCompetitive').addEventListener('click', loadCompetitive);
   document.querySelector('#publishCompetitive').addEventListener('click', publishCompetitive);
@@ -289,23 +292,16 @@ async function loadTickets() {
 
 async function loadEconomy() {
   const data = await api('/economy');
-  document.querySelector('#economyOutput').textContent = JSON.stringify(data.economy, null, 2);
-  const form = document.querySelector('#economyConfigEditor');
-  if (form) {
-    form.wagerTables.value = JSON.stringify(data.config?.wagerTables || data.economy?.catalog?.wagerTables || [], null, 2);
-  }
+  economyWagerTables = [...(data.config?.wagerTables || data.economy?.catalog?.wagerTables || [])]
+    .sort((a, b) => Number(a.buyIn || 0) - Number(b.buyIn || 0));
+  renderWagerTables();
+  renderEconomyOutput(data.economy, data.config);
 }
 
 async function saveEconomyConfig(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  let wagerTables;
-  try {
-    wagerTables = JSON.parse(form.wagerTables.value || '[]');
-  } catch {
-    alert('Wager tables JSON is invalid.');
-    return;
-  }
+  const wagerTables = collectWagerTables();
   const reason = form.reason.value.trim();
   if (!reason) {
     alert('Reason is required.');
@@ -316,7 +312,91 @@ async function saveEconomyConfig(event) {
     body: JSON.stringify({ reason, config: { wagerTables } }),
   });
   form.reason.value = '';
-  document.querySelector('#economyOutput').textContent = JSON.stringify(data.economy, null, 2);
+  economyWagerTables = [...(data.config?.wagerTables || data.economy?.catalog?.wagerTables || [])]
+    .sort((a, b) => Number(a.buyIn || 0) - Number(b.buyIn || 0));
+  renderWagerTables();
+  renderEconomyOutput(data.economy, data.config);
+  status('Wager options saved.', 'ok');
+}
+
+function renderEconomyOutput(economy, config) {
+  document.querySelector('#economyOutput').textContent = JSON.stringify({
+    activeWagerBuyIns: (config?.wagerTables || economy?.catalog?.wagerTables || []).map(table => table.buyIn),
+    economy,
+  }, null, 2);
+}
+
+function renderWagerTables() {
+  const output = document.querySelector('#wagerTableRows');
+  output.replaceChildren(...economyWagerTables.map((table, index) => {
+    const row = document.createElement('div');
+    row.className = 'card wager-row';
+    row.dataset.index = String(index);
+    row.innerHTML = `
+      <label>Buy-in
+        <input data-field="buyIn" type="number" min="0" step="1" value="${Number(table.buyIn || 0)}" />
+      </label>
+      <label>Label
+        <input data-field="label" value="${escapeHtml(table.label || '')}" placeholder="50,000" />
+      </label>
+      <label>Description
+        <input data-field="description" value="${escapeHtml(table.description || '')}" placeholder="Buy in for coins." />
+      </label>
+      <button type="button" class="danger" data-remove-wager="${index}">Remove</button>
+    `;
+    row.querySelector('[data-remove-wager]').addEventListener('click', () => {
+      economyWagerTables.splice(index, 1);
+      renderWagerTables();
+    });
+    return row;
+  }));
+}
+
+function collectWagerTables() {
+  const rows = [...document.querySelectorAll('#wagerTableRows .wager-row')];
+  const byBuyIn = new Map();
+  for (const row of rows) {
+    const buyIn = Math.max(0, Math.floor(Number(row.querySelector('[data-field="buyIn"]').value || 0)));
+    const label = row.querySelector('[data-field="label"]').value.trim() || (buyIn ? buyIn.toLocaleString() : 'Free Play');
+    const description = row.querySelector('[data-field="description"]').value.trim() || (buyIn ? `Buy in for ${buyIn.toLocaleString()} coins.` : 'No entry fee. Earn coins slowly through match rewards.');
+    byBuyIn.set(buyIn, {
+      id: buyIn ? `wager-${buyIn}` : 'free',
+      label,
+      buyIn,
+      description,
+      enabled: true,
+      sortOrder: buyIn,
+    });
+  }
+  if (!byBuyIn.has(0)) {
+    byBuyIn.set(0, {
+      id: 'free',
+      label: 'Free Play',
+      buyIn: 0,
+      description: 'No entry fee. Earn coins slowly through match rewards.',
+      enabled: true,
+      sortOrder: 0,
+    });
+  }
+  return [...byBuyIn.values()].sort((a, b) => a.buyIn - b.buyIn);
+}
+
+function addWagerTable() {
+  const current = collectWagerTables();
+  const highest = current.reduce((max, table) => Math.max(max, Number(table.buyIn || 0)), 0);
+  const nextBuyIn = highest > 0 ? highest * 2 : 50;
+  economyWagerTables = [
+    ...current,
+    {
+      id: `wager-${nextBuyIn}`,
+      label: nextBuyIn.toLocaleString(),
+      buyIn: nextBuyIn,
+      description: `Buy in for ${nextBuyIn.toLocaleString()} coins.`,
+      enabled: true,
+      sortOrder: nextBuyIn,
+    },
+  ];
+  renderWagerTables();
 }
 
 async function loadCompetitive() {
