@@ -60,6 +60,7 @@ type AvatarClusterProps = {
   showGift?: boolean;
   giftIcon?: string | null;
   giftAccent?: string | null;
+  connectionState?: 'online' | 'offline';
   showClaim?: boolean;
   onPress?: () => void;
   onGiftPress?: () => void;
@@ -76,6 +77,7 @@ export function AvatarCluster({
   showGift = false,
   giftIcon = null,
   giftAccent = null,
+  connectionState,
   showClaim = false,
   onPress,
   onGiftPress,
@@ -103,6 +105,8 @@ export function AvatarCluster({
   ) : (
     <Gift color="rgba(232,236,241,0.46)" size={Math.max(10, giftSize * 0.52)} strokeWidth={2.4} />
   );
+  const connectionBorderColor =
+    connectionState === 'offline' ? '#FF6B6B' : connectionState === 'online' ? '#52E5A7' : null;
 
   return (
     <View style={[styles.cluster, { width: size + 12, height: size + 12 }]}>
@@ -111,6 +115,7 @@ export function AvatarCluster({
         fallbackInitial={fallbackInitial}
         size={size}
         onPress={onPress}
+        style={connectionBorderColor ? { borderColor: connectionBorderColor } : undefined}
         disabled={disabled}
       />
       <View

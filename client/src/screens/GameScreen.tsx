@@ -1475,16 +1475,11 @@ export default function GameScreen({ route, navigation }: Props) {
             showGift={isOnline && p.userId !== user?.userId}
             giftIcon={activeGift?.giftIcon ?? activeGiftOption?.icon ?? null}
             giftAccent={activeGiftOption?.accent ?? null}
+            connectionState={connected ? 'online' : 'offline'}
             onPress={() => openAvatarHub(p.userId)}
             onGiftPress={() => openAvatarHub(p.userId)}
             disabled={!isOnline}
           />
-          <View style={[styles.gridStatePill, active && styles.gridStatePillActive, !connected && styles.gridStatePillOffline]}>
-            <View style={[styles.gridStateDot, active || connected ? styles.gridStateDotOnline : styles.gridStateDotOffline]} />
-            <Text style={[styles.gridStateText, active && styles.gridStateTextActive]} numberOfLines={1}>
-              {active ? 'TURN' : connected ? 'ON' : 'OFF'}
-            </Text>
-          </View>
           <View style={styles.inlineScores}>
             <Text style={styles.scoreNow}>Now {visibleRoundScores[i] ?? 0}</Text>
             <Text style={styles.scoreValue}>Tot {totals[i] ?? 0}</Text>
@@ -1627,6 +1622,7 @@ export default function GameScreen({ route, navigation }: Props) {
               showGift={!!bottomActiveGift}
               giftIcon={bottomActiveGift?.giftIcon ?? bottomActiveGiftOption?.icon ?? null}
               giftAccent={bottomActiveGiftOption?.accent ?? null}
+              connectionState={bottomConnected ? 'online' : 'offline'}
               onPress={() => openAvatarHub(bottomPlayer.userId)}
               disabled={!isOnline}
             />
@@ -2942,29 +2938,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 5,
+    gap: 7,
     marginBottom: 5,
   },
-  gridStatePill: {
-    minWidth: 36,
-    minHeight: 22,
-    borderRadius: 7,
-    borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
-    paddingHorizontal: 5,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
-  },
-  gridStatePillActive: { borderColor: '#52E5A7', backgroundColor: '#123B32' },
-  gridStatePillOffline: { borderColor: '#5C2A3A', backgroundColor: '#241420' },
-  gridStateDot: { width: 6, height: 6, borderRadius: 3 },
-  gridStateDotOnline: { backgroundColor: '#52E5A7' },
-  gridStateDotOffline: { backgroundColor: '#FF6B6B' },
-  gridStateText: { color: '#9BA3C7', fontSize: 8, fontWeight: '900' },
-  gridStateTextActive: { color: '#52E5A7' },
   playerGridMeta: { color: '#9BA3C7', fontSize: 8, fontWeight: '900', marginTop: 1 },
   inlineScores: { alignItems: 'flex-end', flexShrink: 0 },
 
