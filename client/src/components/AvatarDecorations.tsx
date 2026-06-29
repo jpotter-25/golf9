@@ -58,6 +58,8 @@ type AvatarClusterProps = {
   league?: LeagueLike;
   showAccessory?: boolean;
   showGift?: boolean;
+  giftIcon?: string | null;
+  giftAccent?: string | null;
   showClaim?: boolean;
   onPress?: () => void;
   onGiftPress?: () => void;
@@ -72,6 +74,8 @@ export function AvatarCluster({
   league,
   showAccessory = true,
   showGift = false,
+  giftIcon = null,
+  giftAccent = null,
   showClaim = false,
   onPress,
   onGiftPress,
@@ -82,11 +86,26 @@ export function AvatarCluster({
   const hasAccessory = showAccessory && accessory.icon !== 'none';
   const accessoryIconSize = Math.max(9, Math.round(size * 0.26));
   const AccessoryIcon = ACCESSORY_ICONS[accessory.icon];
-  const badgeSize = Math.max(21, Math.round(size * 0.42));
-  const giftSize = Math.max(23, Math.round(size * 0.44));
+  const badgeSize = Math.max(14, Math.round(size * 0.3));
+  const giftSize = Math.max(15, Math.round(size * 0.32));
+  const hasGiftItem = !!giftIcon;
+  const giftStyle = {
+    width: giftSize,
+    height: giftSize,
+    borderRadius: giftSize / 2,
+    right: -1,
+    top: -1,
+    borderColor: hasGiftItem ? giftAccent || '#FFCC66' : 'rgba(232,236,241,0.26)',
+    backgroundColor: hasGiftItem ? 'rgba(18,23,55,0.96)' : 'rgba(232,236,241,0.06)',
+  };
+  const giftContent = hasGiftItem ? (
+    <Text style={[styles.giftItem, { fontSize: Math.max(12, giftSize * 0.7) }]}>{giftIcon}</Text>
+  ) : (
+    <Gift color="rgba(232,236,241,0.46)" size={Math.max(10, giftSize * 0.52)} strokeWidth={2.4} />
+  );
 
   return (
-    <View style={[styles.cluster, { width: size + 16, height: size + 14 }]}>
+    <View style={[styles.cluster, { width: size + 12, height: size + 12 }]}>
       <PlayerAvatar
         cosmetics={cosmetics}
         fallbackInitial={fallbackInitial}
@@ -102,8 +121,8 @@ export function AvatarCluster({
             width: badgeSize,
             height: badgeSize,
             borderRadius: badgeSize / 2,
-            left: -2,
-            bottom: mode === 'self' ? -3 : -5,
+            left: -1,
+            bottom: mode === 'self' ? -2 : -3,
             borderColor: emblem.borderColor,
             backgroundColor: emblem.backgroundColor,
           },
@@ -121,8 +140,8 @@ export function AvatarCluster({
               width: badgeSize,
               height: badgeSize,
               borderRadius: badgeSize / 2,
-              right: -2,
-              bottom: -5,
+              right: -1,
+              bottom: -3,
               borderColor: accessory.borderColor,
               backgroundColor: accessory.backgroundColor,
             },
@@ -132,24 +151,25 @@ export function AvatarCluster({
           {accessory.label ? <Text style={[styles.accessoryText, { color: accessory.color }]}>{accessory.label}</Text> : null}
         </View>
       ) : null}
-      {showGift && onGiftPress ? (
-        <Pressable
-          onPress={onGiftPress}
-          hitSlop={8}
-          style={({ pressed }) => [
-            styles.giftButton,
-            {
-              width: giftSize,
-              height: giftSize,
-              borderRadius: giftSize / 2,
-              right: -5,
-              top: -5,
-            },
-            pressed && styles.pressed,
-          ]}
-        >
-          <Gift color="#FFE6A3" size={Math.max(12, giftSize * 0.54)} strokeWidth={3} />
-        </Pressable>
+      {showGift || hasGiftItem ? (
+        onGiftPress ? (
+          <Pressable
+            onPress={onGiftPress}
+            hitSlop={8}
+            style={({ pressed }) => [
+              styles.giftButton,
+              hasGiftItem && styles.giftButtonFilled,
+              giftStyle,
+              pressed && styles.pressed,
+            ]}
+          >
+            {giftContent}
+          </Pressable>
+        ) : (
+          <View pointerEvents="none" style={[styles.giftButton, hasGiftItem && styles.giftButtonFilled, giftStyle]}>
+            {giftContent}
+          </View>
+        )
       ) : null}
       {showClaim ? (
         <View style={[styles.claimBadge, { right: mode === 'self' ? -1 : 3, top: 0 }]}>
@@ -202,16 +222,23 @@ const styles = StyleSheet.create({
   },
   giftButton: {
     position: 'absolute',
-    borderWidth: 2,
-    borderColor: '#FFCC66',
-    backgroundColor: '#2B2515',
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
-    shadowOpacity: 0.24,
-    shadowRadius: 5,
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 6,
+    elevation: 3,
+  },
+  giftButtonFilled: {
+    shadowOpacity: 0.3,
+    shadowRadius: 7,
+    elevation: 7,
+  },
+  giftItem: {
+    lineHeight: 22,
+    textAlign: 'center',
   },
   claimBadge: {
     position: 'absolute',

@@ -47,7 +47,7 @@ type GridSelection = { playerIndex: number; r: number; c: number };
 type DiscardFlash = { key: string; count: number };
 type AiDifficulty = 'easy' | 'hard';
 type AiMove = { source: 'draw' | 'discard'; card: Card; target: GridSelection | null; discardDrawn: boolean };
-type SocialBurst = { id: string; text: string; type: ChatMessageType; giftIcon?: string; giftPrice?: number };
+type SocialBurst = { id: string; text: string; type: ChatMessageType; giftId?: string; giftIcon?: string; giftPrice?: number };
 type TurnNotice = GameNotice;
 type GiftOption = { id: string; label: string; accent: string; icon: string; price: number };
 
@@ -82,6 +82,7 @@ const TABLE_GIFTS: GiftOption[] = [
   { id: 'gift-gem', label: 'Gem', accent: '#BDEBFF', icon: '\u{1F48E}', price: 250 },
   { id: 'gift-crown', label: 'Crown', accent: '#FFCC66', icon: '\u{1F451}', price: 500 },
 ];
+const TABLE_GIFTS_BY_ID = new Map(TABLE_GIFTS.map(gift => [gift.id, gift]));
 const QUIET_ONLINE_ACTION_ERRORS = new Set([
   'Timer expired. Board updated.',
   'Card cannot be peeked.',
@@ -143,6 +144,7 @@ export default function GameScreen({ route, navigation }: Props) {
   const [shopOpen, setShopOpen] = useState(false);
   const [roomPlayers, setRoomPlayers] = useState<api.RoomPlayer[]>([]);
   const [socialBursts, setSocialBursts] = useState<Record<string, SocialBurst>>({});
+  const [avatarGifts, setAvatarGifts] = useState<Record<string, SocialBurst>>({});
   const [avatarHubUserId, setAvatarHubUserId] = useState<string | null>(null);
   const [avatarHubProfile, setAvatarHubProfile] = useState<api.PublicPlayerProfile | null>(null);
   const [avatarHubLoading, setAvatarHubLoading] = useState(false);
@@ -212,9 +214,14 @@ export default function GameScreen({ route, navigation }: Props) {
       id: message.id,
       text: `${giftPrefix}${message.text}`,
       type: message.type,
+      giftId: message.giftId,
       giftIcon: message.giftIcon,
       giftPrice: message.giftPrice,
     };
+    if (message.type === 'gift') {
+      setAvatarGifts(prev => ({ ...prev, [key]: burst }));
+      return;
+    }
     setSocialBursts(prev => ({ ...prev, [key]: burst }));
     if (socialBurstTimers.current[key]) clearTimeout(socialBurstTimers.current[key]);
     socialBurstTimers.current[key] = setTimeout(() => {
@@ -1429,6 +1436,8 @@ export default function GameScreen({ route, navigation }: Props) {
   const avatarHubProgress = avatarHubIsSelf
     ? user?.progression
     : avatarHubProfile?.progression ?? avatarHubRoomPlayer?.progression ?? null;
+  const bottomActiveGift = avatarGifts[bottomPlayer.userId]?.type === 'gift' ? avatarGifts[bottomPlayer.userId] : null;
+  const bottomActiveGiftOption = bottomActiveGift?.giftId ? TABLE_GIFTS_BY_ID.get(bottomActiveGift.giftId) : null;
   const timerLabel = `${secsLeft}s`;
   const topOpponent = oppCount === 1 || oppCount >= 3 ? opponents[0] : null;
   const leftOpponent = oppCount === 2 ? opponents[0] : oppCount >= 3 ? opponents[1] : null;
@@ -1438,6 +1447,8 @@ export default function GameScreen({ route, navigation }: Props) {
     const roomPlayer = roomPlayersById.get(p.userId);
     const connected = !isOnline || (roomPlayer?.connected ?? p.connected ?? true);
     const active = i === activeIndex && !isRoundReveal && !isRoundSummary;
+    const activeGift = avatarGifts[p.userId]?.type === 'gift' ? avatarGifts[p.userId] : null;
+    const activeGiftOption = activeGift?.giftId ? TABLE_GIFTS_BY_ID.get(activeGift.giftId) : null;
     return (
       <View
         key={`${slot}:${p.id ?? p.userId ?? i}`}
@@ -1458,10 +1469,12 @@ export default function GameScreen({ route, navigation }: Props) {
           <AvatarCluster
             cosmetics={playerCosmetics(p, i)}
             fallbackInitial={p.avatarInitial ?? p.name}
-            size={30}
+            size={34}
             mode="opponent"
             league={roomPlayer?.competitive?.league}
             showGift={isOnline && p.userId !== user?.userId}
+            giftIcon={activeGift?.giftIcon ?? activeGiftOption?.icon ?? null}
+            giftAccent={activeGiftOption?.accent ?? null}
             onPress={() => openAvatarHub(p.userId)}
             onGiftPress={() => openAvatarHub(p.userId)}
             disabled={!isOnline}
@@ -1608,10 +1621,12 @@ export default function GameScreen({ route, navigation }: Props) {
             <AvatarCluster
               cosmetics={playerCosmetics(bottomPlayer, bottomIndex)}
               fallbackInitial={bottomPlayer.avatarInitial ?? bottomPlayer.name}
-              size={42}
+              size={48}
               mode="self"
               league={user?.competitive.league ?? bottomRoomPlayer?.competitive?.league}
-              showClaim={selfClaimableCount > 0}
+              showGift={!!bottomActiveGift}
+              giftIcon={bottomActiveGift?.giftIcon ?? bottomActiveGiftOption?.icon ?? null}
+              giftAccent={bottomActiveGiftOption?.accent ?? null}
               onPress={() => openAvatarHub(bottomPlayer.userId)}
               disabled={!isOnline}
             />
@@ -2196,16 +2211,7 @@ function friendActionLabel(relationship?: api.SocialRelationship) {
 
 function SocialBurstBubble({ burst, compact = false }: { burst?: SocialBurst; compact?: boolean }) {
   if (!burst) return null;
-  if (burst.type === 'gift') {
-    return (
-      <View pointerEvents="none" style={[styles.socialBurst, compact && styles.socialBurstCompact, styles.socialBurstGift]}>
-        <Text style={styles.socialBurstGiftIcon}>{burst.giftIcon || '\u{1F381}'}</Text>
-        <Text style={[styles.socialBurstText, styles.socialBurstGiftText, compact && styles.socialBurstTextCompact]} numberOfLines={compact ? 2 : 1}>
-          {burst.text}
-        </Text>
-      </View>
-    );
-  }
+  if (burst.type === 'gift') return null;
   return (
     <View pointerEvents="none" style={[styles.socialBurst, compact && styles.socialBurstCompact, burst.type === 'sticker' && styles.socialBurstSticker]}>
       <Text
@@ -3034,17 +3040,9 @@ const styles = StyleSheet.create({
     borderColor: '#4DA3FF',
     backgroundColor: '#102448',
   },
-  socialBurstGift: {
-    borderColor: '#BDEBFF',
-    backgroundColor: '#102838',
-    alignItems: 'center',
-    minWidth: 118,
-  },
   socialBurstText: { color: '#E8ECF1', fontSize: 13, fontWeight: '900', textAlign: 'center' },
   socialBurstTextCompact: { fontSize: 10 },
   socialBurstEmoji: { fontSize: 22, lineHeight: 26 },
-  socialBurstGiftIcon: { fontSize: 30, lineHeight: 34, marginBottom: 2 },
-  socialBurstGiftText: { color: '#EAF8FF' },
 
   footer: {
     minHeight: 58,
