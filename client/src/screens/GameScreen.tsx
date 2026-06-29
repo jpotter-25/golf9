@@ -478,18 +478,26 @@ export default function GameScreen({ route, navigation }: Props) {
     };
   }, []);
 
-  // ===== Opponent panel sizing =====
-  const OPP_INNER_PAD = 8;
-  const footprint = (cw: number, gap: number) => cw * 3 + gap * 2 + OPP_INNER_PAD * 2;
-  let oppPanelWidth = Math.ceil(footprint(metrics.opp.cardW, metrics.opp.gap)) + 2;
-
   const oppCount = Math.max(0, state.players.length - 1);
-  if (oppCount === 3) {
-    const SIDE_PAD = 8 * 2;
-    const GAPS = 8 * 2;
-    const maxEach = Math.floor((winW - SIDE_PAD - GAPS) / 3);
-    if (oppPanelWidth > maxEach) oppPanelWidth = maxEach;
-  }
+  const tableLayout = useMemo(() => {
+    const sidePad = 8;
+    const gap = Math.max(6, metrics.opp.gap);
+    const oppPadding = 6;
+    const oppGridWidth = metrics.opp.cardW * 3 + metrics.opp.gap * 2;
+    const oppPanelWidth = Math.ceil(oppGridWidth + oppPadding * 2 + 2);
+    const compactPileWidth = metrics.opp.cardW * 2 + metrics.opp.gap * 4 + 66;
+    const centerSlotWidth = oppCount >= 2
+      ? compactPileWidth
+      : Math.max(compactPileWidth, Math.min(150, winW - sidePad * 2));
+    const sideAvailable = Math.floor((winW - sidePad * 2 - centerSlotWidth - gap * 2) / 2);
+    return {
+      gap,
+      sidePad,
+      oppPadding,
+      oppPanelWidth: oppCount >= 2 ? Math.min(oppPanelWidth, Math.max(92, sideAvailable)) : oppPanelWidth,
+      centerSlotWidth,
+    };
+  }, [metrics.opp.cardW, metrics.opp.gap, oppCount, winW]);
 
   // ===== Solo vs AI flags =====
   const isOnlineTurn = isOnline ? state.players[state.currentPlayerIndex]?.userId === user?.userId : true;
@@ -1422,6 +1430,62 @@ export default function GameScreen({ route, navigation }: Props) {
     ? user?.progression
     : avatarHubProfile?.progression ?? avatarHubRoomPlayer?.progression ?? null;
   const timerLabel = `${secsLeft}s`;
+  const topOpponent = oppCount === 1 || oppCount >= 3 ? opponents[0] : null;
+  const leftOpponent = oppCount === 2 ? opponents[0] : oppCount >= 3 ? opponents[1] : null;
+  const rightOpponent = oppCount === 2 ? opponents[1] : oppCount >= 3 ? opponents[2] : null;
+  const renderOpponentCard = (opponent: (typeof opponents)[number], slot: 'top' | 'side') => {
+    const { p, i } = opponent;
+    const roomPlayer = roomPlayersById.get(p.userId);
+    const connected = !isOnline || (roomPlayer?.connected ?? p.connected ?? true);
+    const active = i === activeIndex && !isRoundReveal && !isRoundSummary;
+    return (
+      <View
+        key={`${slot}:${p.id ?? p.userId ?? i}`}
+        style={[
+          styles.oppCard,
+          slot === 'top' ? styles.oppCardTop : styles.oppCardSide,
+          { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor },
+          active && [styles.oppCardActive, { borderColor: tableTheme.accentColor, backgroundColor: tableTheme.activePanelColor }],
+          {
+            width: tableLayout.oppPanelWidth,
+            padding: tableLayout.oppPadding,
+            overflow: 'visible',
+          },
+        ]}
+      >
+        <SocialBurstBubble burst={socialBursts[p.userId]} compact />
+        <View style={styles.playerGridHeader}>
+          <AvatarCluster
+            cosmetics={playerCosmetics(p, i)}
+            fallbackInitial={p.avatarInitial ?? p.name}
+            size={30}
+            mode="opponent"
+            league={roomPlayer?.competitive?.league}
+            showGift={isOnline && p.userId !== user?.userId}
+            onPress={() => openAvatarHub(p.userId)}
+            onGiftPress={() => openAvatarHub(p.userId)}
+            disabled={!isOnline}
+          />
+          <View style={[styles.gridStatePill, active && styles.gridStatePillActive, !connected && styles.gridStatePillOffline]}>
+            <View style={[styles.gridStateDot, active || connected ? styles.gridStateDotOnline : styles.gridStateDotOffline]} />
+            <Text style={[styles.gridStateText, active && styles.gridStateTextActive]} numberOfLines={1}>
+              {active ? 'TURN' : connected ? 'ON' : 'OFF'}
+            </Text>
+          </View>
+          <View style={styles.inlineScores}>
+            <Text style={styles.scoreNow}>Now {visibleRoundScores[i] ?? 0}</Text>
+            <Text style={styles.scoreValue}>Tot {totals[i] ?? 0}</Text>
+          </View>
+        </View>
+        <GridView
+          grid={p.grid}
+          metrics={metrics.opp}
+          activeCell={pending?.playerIndex === i ? pending : null}
+          cardBackId={playerCosmetics(p, i)?.cardBack}
+        />
+      </View>
+    );
+  };
   return (
     <LinearGradient colors={[tableTheme.backgroundColor, ui.palette.ink, ui.surface.base]} style={styles.container}>
       {/* HUD Layer */}
@@ -1472,79 +1536,59 @@ export default function GameScreen({ route, navigation }: Props) {
       </View>
 
       {/* Table/Base Layer */}
-      <View style={{ paddingHorizontal: 8, paddingBottom: 6 }}>
-        <View style={[styles.oppRow, { justifyContent: oppCount === 3 ? 'space-between' : 'flex-start' }]}>
-          {opponents.map(({ p, i }, idx) => {
-            const roomPlayer = roomPlayersById.get(p.userId);
-            const connected = !isOnline || (roomPlayer?.connected ?? p.connected ?? true);
-            const active = i === activeIndex && !isRoundReveal && !isRoundSummary;
-            return (
-              <View
-                key={p.id ?? idx}
-                style={[
-                  styles.oppCard,
-                  { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor },
-                  i === activeIndex && [styles.oppCardActive, { borderColor: tableTheme.accentColor, backgroundColor: tableTheme.activePanelColor }],
-                  {
-                    width: oppPanelWidth,
-                    padding: OPP_INNER_PAD,
-                    overflow: 'visible',
-                    marginRight: oppCount === 3 ? 0 : 8,
-                  },
-                ]}
-              >
-                <SocialBurstBubble burst={socialBursts[p.userId]} compact />
-                <View style={styles.playerGridHeader}>
-                  <AvatarCluster
-                    cosmetics={playerCosmetics(p, i)}
-                    fallbackInitial={p.avatarInitial ?? p.name}
-                    size={32}
-                    mode="opponent"
-                    league={roomPlayer?.competitive?.league}
-                    showGift={isOnline && p.userId !== user?.userId}
-                    onPress={() => openAvatarHub(p.userId)}
-                    onGiftPress={() => openAvatarHub(p.userId)}
-                    disabled={!isOnline}
-                  />
-                  <View style={[styles.gridStatePill, active && styles.gridStatePillActive, !connected && styles.gridStatePillOffline]}>
-                    <View style={[styles.gridStateDot, active || connected ? styles.gridStateDotOnline : styles.gridStateDotOffline]} />
-                    <Text style={[styles.gridStateText, active && styles.gridStateTextActive]} numberOfLines={1}>
-                      {active ? 'TURN' : connected ? 'ON' : 'OFF'}
-                    </Text>
-                  </View>
-                  <View style={styles.inlineScores}>
-                    <Text style={styles.scoreNow}>Now {visibleRoundScores[i] ?? 0}</Text>
-                    <Text style={styles.scoreValue}>Tot {totals[i] ?? 0}</Text>
-                  </View>
-                </View>
-                <GridView
-                  grid={p.grid}
-                  metrics={metrics.opp}
-                  activeCell={pending?.playerIndex === i ? pending : null}
-                  cardBackId={playerCosmetics(p, i)?.cardBack}
-                />
-              </View>
-            );
-          })}
-        </View>
-      </View>
-
-      {/* Action Layer: pile choice */}
-      <View style={{ paddingVertical: 2 }}>
-        <Piles
-          drawCount={state.drawPile.length}
-          topDiscard={state.topDiscard}
-          held={held}
-          metrics={metrics.opp}
-          onDraw={onDraw}
-          onTakeDiscard={onTakeDiscard}
-          activeSource={activeSource}
-          cardBackId={bottomCardBackId}
-          disableDraw={!canUsePiles && !canSwitchDiscardToDraw}
-          disableTake={!canUsePiles || isDrawOnlyTurn || !!state.pendingDecision || !state.topDiscard}
-          discardFlashKey={discardFlash?.key ?? null}
-          discardFlashCount={discardFlash?.count ?? 0}
-        />
+      <View style={[styles.tableZone, { paddingHorizontal: tableLayout.sidePad, gap: tableLayout.gap }]}>
+        {topOpponent ? (
+          <View style={styles.tableTopSlot}>
+            {renderOpponentCard(topOpponent, 'top')}
+          </View>
+        ) : null}
+        {leftOpponent || rightOpponent ? (
+          <View style={[styles.tableCrossRow, { gap: tableLayout.gap }]}>
+            <View style={[styles.tableSideSlot, { width: tableLayout.oppPanelWidth }]}>
+              {leftOpponent ? renderOpponentCard(leftOpponent, 'side') : null}
+            </View>
+            <View style={[styles.tableCenterSlot, { width: tableLayout.centerSlotWidth }]}>
+              <Piles
+                drawCount={state.drawPile.length}
+                topDiscard={state.topDiscard}
+                held={held}
+                metrics={metrics.opp}
+                compact
+                onDraw={onDraw}
+                onTakeDiscard={onTakeDiscard}
+                activeSource={activeSource}
+                cardBackId={bottomCardBackId}
+                disableDraw={!canUsePiles && !canSwitchDiscardToDraw}
+                disableTake={!canUsePiles || isDrawOnlyTurn || !!state.pendingDecision || !state.topDiscard}
+                discardFlashKey={discardFlash?.key ?? null}
+                discardFlashCount={discardFlash?.count ?? 0}
+              />
+            </View>
+            <View style={[styles.tableSideSlot, { width: tableLayout.oppPanelWidth }]}>
+              {rightOpponent ? renderOpponentCard(rightOpponent, 'side') : null}
+            </View>
+          </View>
+        ) : (
+          <View style={styles.tablePilesOnlyRow}>
+            <View style={[styles.tableCenterSlot, { width: tableLayout.centerSlotWidth }]}>
+              <Piles
+                drawCount={state.drawPile.length}
+                topDiscard={state.topDiscard}
+                held={held}
+                metrics={metrics.opp}
+                compact
+                onDraw={onDraw}
+                onTakeDiscard={onTakeDiscard}
+                activeSource={activeSource}
+                cardBackId={bottomCardBackId}
+                disableDraw={!canUsePiles && !canSwitchDiscardToDraw}
+                disableTake={!canUsePiles || isDrawOnlyTurn || !!state.pendingDecision || !state.topDiscard}
+                discardFlashKey={discardFlash?.key ?? null}
+                discardFlashCount={discardFlash?.count ?? 0}
+              />
+            </View>
+          </View>
+        )}
       </View>
 
       {/* Action Layer: local grid */}
@@ -2853,8 +2897,37 @@ const styles = StyleSheet.create({
   scoreValues: { alignItems: 'flex-end', flexShrink: 0 },
   scoreNow: { color: '#52E5A7', fontSize: 10, fontWeight: '900' },
   scoreValue: { color: '#E8ECF1', fontSize: 10, fontWeight: '900', marginTop: 1 },
-  oppRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
+  tableZone: {
+    flexShrink: 1,
+    paddingTop: 8,
+    paddingBottom: 6,
+  },
+  tableTopSlot: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tableCrossRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tablePilesOnlyRow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tableSideSlot: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  tableCenterSlot: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
   oppCard: { position: 'relative', borderWidth: 1, borderColor: '#2A2F57', backgroundColor: '#121737', borderRadius: 8 },
+  oppCardTop: { alignSelf: 'center' },
+  oppCardSide: { alignSelf: 'center' },
   oppCardActive: { borderColor: '#4DA3FF', backgroundColor: '#17204A' },
   oppHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 2 },
   oppName: { flex: 1, minWidth: 0 },

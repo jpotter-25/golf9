@@ -33,6 +33,7 @@ export type PilesProps = {
   discardFlashKey?: string | null;
   discardFlashCount?: number;
   cardBackId?: string;
+  compact?: boolean;
   [key: string]: unknown;
 };
 
@@ -51,6 +52,7 @@ const Piles: React.FC<PilesProps> = ({
   discardFlashKey = null,
   discardFlashCount = 0,
   cardBackId,
+  compact = false,
 }) => {
   const discardFlash = useRef(new Animated.Value(0)).current;
 
@@ -84,7 +86,7 @@ const Piles: React.FC<PilesProps> = ({
   const flashScale = discardFlash.interpolate({ inputRange: [0, 1], outputRange: [0.75, 1] });
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, compact && styles.containerCompact]}>
       <Pressable onPress={onDraw} disabled={disableDraw} style={[styles.pile, disableDraw && activeSource !== 'draw' && styles.disabled]}>
         <Card
           card={drawCard}
@@ -140,6 +142,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     marginVertical: 7,
+  },
+  containerCompact: {
+    alignSelf: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    marginVertical: 2,
   },
   pile: {
     alignItems: 'center',
