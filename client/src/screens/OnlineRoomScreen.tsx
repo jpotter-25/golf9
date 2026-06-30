@@ -263,7 +263,7 @@ export default function OnlineRoomScreen({ route, navigation }: Props) {
               <Text style={styles.avatar}>{index + 1}</Text>
             )}
             <View style={styles.playerInfo}>
-              <Text style={styles.playerName}>
+              <Text style={styles.playerName} numberOfLines={1}>
                 {player?.displayName ?? 'Open seat'}
                 {player?.isHost ? '  HOST' : ''}
               </Text>
@@ -404,6 +404,7 @@ const styles = StyleSheet.create({
   playerRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
     backgroundColor: '#121737',
     borderColor: '#2A2F57',
     borderWidth: 1,

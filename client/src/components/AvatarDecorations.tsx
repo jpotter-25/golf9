@@ -1,6 +1,7 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Crown, Gem, Gift, Rocket, Trophy, Watch, type LucideIcon } from 'lucide-react-native';
+import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Path, Polygon, Stop } from 'react-native-svg';
+import { Crown, Gem, Gift, Rocket, Watch, type LucideIcon } from 'lucide-react-native';
 import { PlayerAvatar } from './PlayerAvatar';
 import { getAvatarAccessoryVisual, type EquippedCosmetics } from '../theme/cosmetics';
 
@@ -10,6 +11,12 @@ export type RankEmblemVisual = {
   borderColor: string;
   backgroundColor: string;
   textColor: string;
+  tier: 'rookie' | 'bronze' | 'silver' | 'gold' | 'platinum' | 'diamond' | 'master' | 'legend';
+  primary: string;
+  secondary: string;
+  shine: string;
+  glow: string;
+  pips: number;
 };
 
 type LeagueLike = { league?: string; division?: string | null; name?: string } | string | null | undefined;
@@ -21,33 +28,120 @@ const ACCESSORY_ICONS: Record<string, LucideIcon> = {
   crown: Crown,
 };
 
+function divisionPips(rawName: string, division?: string | null) {
+  const value = (division || rawName.match(/\b(III|II|I|3|2|1)\b/i)?.[1] || '').toUpperCase();
+  if (value === 'III' || value === '3') return 3;
+  if (value === 'II' || value === '2') return 2;
+  return 1;
+}
+
 export function rankEmblemForLeague(league: LeagueLike): RankEmblemVisual {
   const rawName = typeof league === 'string' ? league : league?.name || league?.league || 'Rookie';
   const rawLeague = typeof league === 'string' ? league : league?.league || rawName;
   const division = typeof league === 'string' ? null : league?.division;
   const key = rawLeague.toLowerCase();
+  const pips = divisionPips(rawName, division);
   if (key.includes('legend')) {
-    return { shortLabel: 'LG', label: rawName, borderColor: '#D9B8FF', backgroundColor: '#21162C', textColor: '#F0E3FF' };
+    return { shortLabel: 'LG', label: rawName, borderColor: '#F8D36A', backgroundColor: '#21162C', textColor: '#FFF0C2', tier: 'legend', primary: '#8B5CFF', secondary: '#FFCC66', shine: '#FFF0C2', glow: '#D9B8FF', pips };
   }
   if (key.includes('master')) {
-    return { shortLabel: 'M', label: rawName, borderColor: '#9BE7FF', backgroundColor: '#102838', textColor: '#D8F3FF' };
+    return { shortLabel: 'M', label: rawName, borderColor: '#9BE7FF', backgroundColor: '#102838', textColor: '#D8F3FF', tier: 'master', primary: '#3BE7FF', secondary: '#A56BFF', shine: '#EAF8FF', glow: '#9BE7FF', pips };
   }
   if (key.includes('diamond')) {
-    return { shortLabel: 'D', label: rawName, borderColor: '#BDEBFF', backgroundColor: '#102448', textColor: '#EAF8FF' };
+    return { shortLabel: 'D', label: rawName, borderColor: '#BDEBFF', backgroundColor: '#102448', textColor: '#EAF8FF', tier: 'diamond', primary: '#6FE7FF', secondary: '#4DA3FF', shine: '#FFFFFF', glow: '#BDEBFF', pips };
   }
   if (key.includes('platinum')) {
-    return { shortLabel: 'P', label: rawName, borderColor: '#BFD9FF', backgroundColor: '#182244', textColor: '#E8ECF1' };
+    return { shortLabel: 'P', label: rawName, borderColor: '#BFD9FF', backgroundColor: '#182244', textColor: '#E8ECF1', tier: 'platinum', primary: '#DCEAFF', secondary: '#78B8FF', shine: '#FFFFFF', glow: '#BFD9FF', pips };
   }
   if (key.includes('gold')) {
-    return { shortLabel: division ? `G${division}` : 'G', label: rawName, borderColor: '#FFCC66', backgroundColor: '#2B2515', textColor: '#FFE6A3' };
+    return { shortLabel: division ? `G${division}` : 'G', label: rawName, borderColor: '#FFCC66', backgroundColor: '#2B2515', textColor: '#FFE6A3', tier: 'gold', primary: '#FFCC66', secondary: '#B56A1D', shine: '#FFF0C2', glow: '#FFCC66', pips };
   }
   if (key.includes('silver')) {
-    return { shortLabel: division ? `S${division}` : 'S', label: rawName, borderColor: '#BFD9FF', backgroundColor: '#202742', textColor: '#E8ECF1' };
+    return { shortLabel: division ? `S${division}` : 'S', label: rawName, borderColor: '#BFD9FF', backgroundColor: '#202742', textColor: '#E8ECF1', tier: 'silver', primary: '#DDE8FF', secondary: '#6F84B8', shine: '#FFFFFF', glow: '#BFD9FF', pips };
   }
   if (key.includes('bronze')) {
-    return { shortLabel: division ? `B${division}` : 'B', label: rawName, borderColor: '#C58B5A', backgroundColor: '#2B1D17', textColor: '#FFD6B0' };
+    return { shortLabel: division ? `B${division}` : 'B', label: rawName, borderColor: '#C58B5A', backgroundColor: '#2B1D17', textColor: '#FFD6B0', tier: 'bronze', primary: '#C58B5A', secondary: '#6D3F26', shine: '#FFD6B0', glow: '#C58B5A', pips };
   }
-  return { shortLabel: 'R', label: rawName || 'Rookie', borderColor: '#52E5A7', backgroundColor: '#123B32', textColor: '#CFFBE8' };
+  return { shortLabel: 'R', label: rawName || 'Rookie', borderColor: '#52E5A7', backgroundColor: '#123B32', textColor: '#CFFBE8', tier: 'rookie', primary: '#52E5A7', secondary: '#177A63', shine: '#CFFBE8', glow: '#52E5A7', pips };
+}
+
+export function RankEmblem({
+  league,
+  size = 28,
+  style,
+  showPips = true,
+}: {
+  league?: LeagueLike;
+  size?: number;
+  style?: StyleProp<ViewStyle>;
+  showPips?: boolean;
+}) {
+  const emblem = rankEmblemForLeague(league);
+  const gradientId = `rank-${emblem.tier}-${size}`;
+  const shineId = `rank-shine-${emblem.tier}-${size}`;
+  const pipStart = 32 - (emblem.pips - 1) * 4;
+  const isElite = emblem.tier === 'diamond' || emblem.tier === 'master' || emblem.tier === 'legend';
+  const isLegend = emblem.tier === 'legend';
+  return (
+    <View style={[{ width: size, height: size }, style]}>
+      <Svg width={size} height={size} viewBox="0 0 64 64">
+        <Defs>
+          <SvgLinearGradient id={gradientId} x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+            <Stop offset="0" stopColor={emblem.shine} />
+            <Stop offset="0.42" stopColor={emblem.primary} />
+            <Stop offset="1" stopColor={emblem.secondary} />
+          </SvgLinearGradient>
+          <SvgLinearGradient id={shineId} x1="16" y1="10" x2="42" y2="48" gradientUnits="userSpaceOnUse">
+            <Stop offset="0" stopColor="#FFFFFF" stopOpacity="0.9" />
+            <Stop offset="1" stopColor="#FFFFFF" stopOpacity="0" />
+          </SvgLinearGradient>
+        </Defs>
+        <Circle cx="32" cy="32" r="29" fill={emblem.backgroundColor} opacity="0.92" />
+        <Path
+          d="M32 4 L53 13 L50 35 C48 47 40 56 32 61 C24 56 16 47 14 35 L11 13 Z"
+          fill={`url(#${gradientId})`}
+          stroke={emblem.borderColor}
+          strokeWidth="3"
+          strokeLinejoin="round"
+        />
+        <Path
+          d="M20 16 L32 10 L44 16 L41 35 C40 43 35 50 32 52 C29 50 24 43 23 35 Z"
+          fill={`url(#${shineId})`}
+          opacity="0.55"
+        />
+        {isLegend ? (
+          <>
+            <Polygon points="32,14 37,26 50,26 39,34 43,48 32,40 21,48 25,34 14,26 27,26" fill="#FFF0C2" opacity="0.96" />
+            <Circle cx="32" cy="32" r="8" fill={emblem.primary} stroke={emblem.secondary} strokeWidth="3" />
+          </>
+        ) : isElite ? (
+          <>
+            <Polygon points="32,12 47,28 32,51 17,28" fill={emblem.shine} opacity="0.88" />
+            <Polygon points="32,12 32,51 17,28" fill={emblem.primary} opacity="0.42" />
+            <Path d="M18 23 C12 22 9 18 8 14 C15 15 19 18 22 24 Z" fill={emblem.glow} opacity="0.72" />
+            <Path d="M46 24 C49 18 53 15 60 14 C59 18 56 22 50 23 Z" fill={emblem.glow} opacity="0.72" />
+          </>
+        ) : (
+          <>
+            <Path d="M19 28 L32 17 L45 28 L32 43 Z" fill={emblem.shine} opacity="0.78" />
+            <Path d="M22 39 H42 L32 50 Z" fill={emblem.secondary} opacity="0.7" />
+            <Path d="M22 26 H42" stroke={emblem.backgroundColor} strokeWidth="3" strokeLinecap="round" opacity="0.48" />
+          </>
+        )}
+        {showPips ? Array.from({ length: emblem.pips }).map((_, index) => (
+          <Circle
+            key={`pip-${index}`}
+            cx={pipStart + index * 8}
+            cy="54"
+            r="2.5"
+            fill={emblem.shine}
+            stroke={emblem.backgroundColor}
+            strokeWidth="1"
+          />
+        )) : null}
+      </Svg>
+    </View>
+  );
 }
 
 type AvatarClusterProps = {
@@ -83,13 +177,12 @@ export function AvatarCluster({
   onGiftPress,
   disabled,
 }: AvatarClusterProps) {
-  const emblem = rankEmblemForLeague(league);
   const accessory = getAvatarAccessoryVisual(cosmetics?.avatarAccessory);
   const hasAccessory = showAccessory && accessory.icon !== 'none';
   const accessoryIconSize = Math.max(9, Math.round(size * 0.26));
   const AccessoryIcon = ACCESSORY_ICONS[accessory.icon];
-  const badgeSize = Math.max(14, Math.round(size * 0.3));
-  const giftSize = Math.max(15, Math.round(size * 0.32));
+  const badgeSize = Math.max(20, Math.round(size * 0.42));
+  const giftSize = Math.max(20, Math.round(size * 0.42));
   const hasGiftItem = !!giftIcon;
   const giftStyle = {
     width: giftSize,
@@ -101,7 +194,7 @@ export function AvatarCluster({
     backgroundColor: hasGiftItem ? 'rgba(18,23,55,0.96)' : 'rgba(232,236,241,0.06)',
   };
   const giftContent = hasGiftItem ? (
-    <Text style={[styles.giftItem, { fontSize: Math.max(12, giftSize * 0.7) }]}>{giftIcon}</Text>
+    <Text style={[styles.giftItem, { fontSize: Math.max(12, giftSize * 0.6), lineHeight: giftSize }]}>{giftIcon}</Text>
   ) : (
     <Gift color="rgba(232,236,241,0.46)" size={Math.max(10, giftSize * 0.52)} strokeWidth={2.4} />
   );
@@ -128,13 +221,10 @@ export function AvatarCluster({
             borderRadius: badgeSize / 2,
             left: -1,
             bottom: mode === 'self' ? -2 : -3,
-            borderColor: emblem.borderColor,
-            backgroundColor: emblem.backgroundColor,
           },
         ]}
       >
-        <Trophy color={emblem.textColor} size={Math.max(9, badgeSize * 0.44)} strokeWidth={3} />
-        <Text style={[styles.rankText, { color: emblem.textColor }]} numberOfLines={1}>{emblem.shortLabel}</Text>
+        <RankEmblem league={league} size={badgeSize} />
       </View>
       {hasAccessory ? (
         <View
@@ -193,7 +283,6 @@ const styles = StyleSheet.create({
   },
   rankBadge: {
     position: 'absolute',
-    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
@@ -201,12 +290,6 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     shadowOffset: { width: 0, height: 2 },
     elevation: 5,
-  },
-  rankText: {
-    fontSize: 6,
-    fontWeight: '900',
-    lineHeight: 7,
-    marginTop: -1,
   },
   accessoryBadge: {
     position: 'absolute',
@@ -230,6 +313,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'visible',
     shadowColor: '#000',
     shadowOpacity: 0.12,
     shadowRadius: 4,
@@ -242,8 +326,9 @@ const styles = StyleSheet.create({
     elevation: 7,
   },
   giftItem: {
-    lineHeight: 22,
     textAlign: 'center',
+    textAlignVertical: 'center',
+    includeFontPadding: false,
   },
   claimBadge: {
     position: 'absolute',

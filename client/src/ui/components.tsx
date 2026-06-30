@@ -12,12 +12,13 @@ import {
   ViewStyle,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Bell, BookOpen, Coins, GraduationCap, Home, LogOut, Music2, Settings, Trophy, Volume2, X, Zap } from 'lucide-react-native';
+import { Bell, BookOpen, Coins, GraduationCap, Home, LogOut, Music2, Settings, Volume2, X, Zap } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { useNavigation, useRoute, type NavigationProp, type ParamListBase } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { getGameplayPreferences, setGameplayPreferences, subscribeGameplayPreferences } from '../services/preferences';
+import { RankEmblem } from '../components/AvatarDecorations';
 import { PlayerAvatar } from '../components/PlayerAvatar';
 import { gradients, ui } from './theme';
 
@@ -123,9 +124,13 @@ function GlobalTopBar() {
           <Text style={styles.currencyValue} numberOfLines={1}>{user?.currency.coins ?? 0}</Text>
         </Pressable>
 
-        <Pressable accessibilityRole="button" accessibilityLabel="Open ranked profile" style={styles.rankChip} onPress={() => navigation.navigate('Profile')}>
-          <Trophy size={15} color={ui.palette.sky} strokeWidth={2.8} />
-          <Text style={styles.rankValue} numberOfLines={1}>{ranked?.league.name ?? 'Silver III'}</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Open ranked profile, ${ranked?.league.name ?? 'Rookie'}`}
+          style={styles.rankChip}
+          onPress={() => navigation.navigate('Profile')}
+        >
+          <RankEmblem league={ranked?.league} size={32} />
         </Pressable>
 
         <Pressable accessibilityRole="button" accessibilityLabel="Open settings" style={styles.topIconButton} onPress={() => setSettingsOpen(true)}>
@@ -382,19 +387,16 @@ const styles = StyleSheet.create({
   },
   currencyValue: { color: ui.palette.gold, fontSize: 13, fontWeight: '900', maxWidth: 42 },
   rankChip: {
-    minWidth: 58,
+    width: 46,
     height: 40,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: ui.border.strong,
     backgroundColor: ui.surface.glass,
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-    paddingHorizontal: 6,
+    paddingHorizontal: 4,
   },
-  rankValue: { color: ui.text.primary, fontSize: 12, fontWeight: '900', maxWidth: 38 },
   topIconButton: {
     width: 40,
     height: 40,

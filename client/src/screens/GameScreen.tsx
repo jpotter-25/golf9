@@ -1449,6 +1449,7 @@ export default function GameScreen({ route, navigation }: Props) {
     const active = i === activeIndex && !isRoundReveal && !isRoundSummary;
     const activeGift = avatarGifts[p.userId]?.type === 'gift' ? avatarGifts[p.userId] : null;
     const activeGiftOption = activeGift?.giftId ? TABLE_GIFTS_BY_ID.get(activeGift.giftId) : null;
+    const opponentName = roomPlayer?.displayName ?? p.name ?? 'Player';
     return (
       <View
         key={`${slot}:${p.id ?? p.userId ?? i}`}
@@ -1485,6 +1486,14 @@ export default function GameScreen({ route, navigation }: Props) {
             <Text style={styles.scoreValue}>Tot {totals[i] ?? 0}</Text>
           </View>
         </View>
+        <Text
+          style={styles.oppGridName}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.66}
+        >
+          {opponentName}
+        </Text>
         <GridView
           grid={p.grid}
           metrics={metrics.opp}
@@ -1627,8 +1636,13 @@ export default function GameScreen({ route, navigation }: Props) {
               disabled={!isOnline}
             />
             <View style={styles.localTitlePressable}>
-              <Text style={[styles.meTitle, bottomIsActive && styles.activeName]} numberOfLines={1}>
-                {isOnline || isSolo ? 'Your Grid' : bottomPlayer.name}
+              <Text
+                style={[styles.meTitle, bottomIsActive && styles.activeName]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.7}
+              >
+                {isOnline ? (bottomRoomPlayer?.displayName ?? bottomPlayer.name ?? 'Your Grid') : isSolo ? bottomPlayer.name : bottomPlayer.name}
               </Text>
               <Text style={styles.playerGridMeta}>
                 {bottomIsActive && !isRoundReveal && !isRoundSummary ? (state.phase === 'peek' ? 'PEEK' : 'TURN') : bottomConnected ? 'ONLINE' : 'OFFLINE'}
@@ -2900,7 +2914,9 @@ const styles = StyleSheet.create({
   scoreNow: { color: '#52E5A7', fontSize: 10, fontWeight: '900' },
   scoreValue: { color: '#E8ECF1', fontSize: 10, fontWeight: '900', marginTop: 1 },
   tableZone: {
+    flexGrow: 1,
     flexShrink: 1,
+    justifyContent: 'center',
     paddingTop: 8,
     paddingBottom: 6,
   },
@@ -2939,12 +2955,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 7,
-    marginBottom: 5,
+    marginBottom: 2,
+  },
+  oppGridName: {
+    color: '#E8ECF1',
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginBottom: 4,
+    minWidth: 0,
   },
   playerGridMeta: { color: '#9BA3C7', fontSize: 8, fontWeight: '900', marginTop: 1 },
   inlineScores: { alignItems: 'flex-end', flexShrink: 0 },
 
-  localPanel: { position: 'relative', paddingHorizontal: 10, paddingTop: 8, paddingBottom: 6, borderTopWidth: 1, borderTopColor: 'transparent' },
+  localPanel: { position: 'relative', flexShrink: 0, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 6, borderTopWidth: 1, borderTopColor: 'transparent' },
   localPanelActive: { borderTopColor: '#4DA3FF', backgroundColor: '#0F1530' },
   localTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
   localIdentity: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 },

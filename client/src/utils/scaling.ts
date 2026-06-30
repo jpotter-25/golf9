@@ -45,7 +45,7 @@ export function computeMetrics(
     playerCount === 3 ? 0.44 :
     0.39;
   const PANEL_PAD = 6;
-  const OPP_HEADER_H = 28;
+  const OPP_HEADER_H = 46;
   const LOCAL_HEADER_H = 52;
 
   const widthBound = Math.floor((usableW - 2 * gap) / 3);
