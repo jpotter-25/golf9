@@ -1,6 +1,6 @@
 // src/utils/scaling.ts
 // Purpose: Percent-of-screen, no-scroll scaling that keeps the in-game
-// header, table cross, piles, player grid, and footer visible.
+// header, opponent row, piles, player grid, and footer visible.
 
 import { useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -34,23 +34,23 @@ export function computeMetrics(
 
   const gap = Math.max(6, Math.min(10, Math.round(width * 0.018)));
 
-  const hasTopOpponent = playerCount === 2 || playerCount >= 4;
-  const hasSideOpponents = playerCount >= 3;
+  const opponentCount = Math.max(0, playerCount - 1);
   const ME_SCALE =
-    playerCount === 2 ? 0.68 :
-    playerCount === 3 ? 0.64 :
-    0.61;
+    playerCount === 2 ? 0.66 :
+    playerCount === 3 ? 0.61 :
+    0.56;
   const OPP_SCALE =
-    playerCount === 2 ? 0.5 :
-    playerCount === 3 ? 0.44 :
-    0.39;
+    playerCount === 2 ? 0.55 :
+    playerCount === 3 ? 0.52 :
+    0.46;
+  const PILE_SCALE = 1.12;
   const PANEL_PAD = 6;
   const OPP_HEADER_H = 46;
   const LOCAL_HEADER_H = 52;
 
   const widthBound = Math.floor((usableW - 2 * gap) / 3);
 
-  // Find biggest base card width that fits the table-cross layout.
+  // Find biggest base card width that fits the top-opponents layout.
   let lo = 16, hi = widthBound, best = 16;
 
   function fits(baseCardW: number): boolean {
@@ -60,17 +60,17 @@ export function computeMetrics(
     const cardH_opp = Math.round(cardW_opp * CARD_ASPECT);
 
     const oppPanelW = 3 * cardW_opp + 2 * gap + PANEL_PAD * 2 + 2;
-    const pileClusterW = 2 * cardW_opp + gap * 4 + 66;
-    const widthFits = !hasSideOpponents || (oppPanelW * 2 + pileClusterW + gap * 2 <= usableW);
+    const opponentRowW = opponentCount > 0 ? oppPanelW * opponentCount + gap * Math.max(0, opponentCount - 1) : 0;
+    const widthFits = opponentRowW <= usableW;
     if (!widthFits) return false;
 
     const heightOpp = 3 * cardH_opp + 2 * gap + OPP_HEADER_H + PANEL_PAD * 2 + 2;
-    const heightPiles = cardH_opp + 42;
-    const heightCenter = Math.max(hasSideOpponents ? heightOpp : 0, heightPiles);
-    const heightTop = hasTopOpponent ? heightOpp + gap : 0;
+    const pileCardH = Math.round(cardH_opp * PILE_SCALE);
+    const heightPiles = pileCardH + 44;
+    const heightTop = opponentCount > 0 ? heightOpp + gap : 0;
     const heightMe = 3 * cardH_me + 2 * gap + LOCAL_HEADER_H + 14;
 
-    return heightTop + heightCenter + heightMe + gap * 2 <= usableH;
+    return heightTop + heightPiles + heightMe + gap * 2 <= usableH;
   }
 
   while (lo <= hi) {

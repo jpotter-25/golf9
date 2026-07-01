@@ -90,19 +90,46 @@ const QUIET_ONLINE_ACTION_ERRORS = new Set([
 const SOLO_AI_SOURCE_PAUSE_MS = 1300;
 const SOLO_AI_TARGET_PAUSE_MS = 1900;
 const TURN_CHIME_URI = 'data:audio/wav;base64,UklGRsQFAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YaAFAAAAAEkA4QAtAakAT/+7/eT8jP2//6ICxgTdBHsCcf6Q+tn4c/r9/pAEhQi/CL8EEv639830Bve8/QsGFAzIDHEHNP459czwUfP9+w8HZw/sEIgK2f4f8+PsW+/F+ZYHcxIfFf4NAABw8R7pMusY950HLxVVGckRqQEz8Ijl3ub88yEHjxeCHeEV0QNw7y3ibeJ28CEGixmZITwadwYr7xjf6t3M7H4EIBrFI/8c6gi+8JLfSd3v6kACiRiOI0MeEwvP8pjgzNwo6QAA2BY0I2gfMQ3t9L3hctx358D9ERW3Im4gQg8W9wHjO9zg5YL7NBMWIlIhRBFJ+WPkKdxj5En5RBFSIRYiNBOC++DlO9wB4xb3Qg9uILciERXA/Xfncty94e30MQ1oHzQj2BYAACjpzNyY4M/yEwtDHo4jiRhAAu/qSd2S377w6gj/HMUjIBp+BMzs6t2u3rzutwadG9cjnRu3Brzurt7q3czsfgQgGsUj/xzqCL7wkt9J3e/qQAKJGI4jQx4TC8/ymODM3CjpAADYFjQjaB8xDe30veFy3HfnwP0RFbcibiBCDxb3AeM73ODlgvs0ExYiUiFEEUn5Y+Qp3GPkSflEEVIhFiI0E4L74OU73AHjFvdCD24gtyIRFcD9d+dy3L3h7fQxDWgfNCPYFgAAKOnM3Jjgz/ITC0MejiOJGEAC7+pJ3ZLfvvDqCP8cxSMgGn4EzOzq3a7evO63Bp0b1yOdG7cGvO6u3urdzOx+BCAaxSP/HOoIvvCS30nd7+pAAokYjiNDHhMLz/KY4MzcKOkAANgWNCNoHzEN7fS94XLcd+fA/REVtyJuIEIPFvcB4zvc4OWC+zQTFiJSIUQRSflj5CncY+RJ+UQRUiEWIjQTgvvg5TvcAeMW90IPbiC3IhEVwP1353LcveHt9DENaB80I9gWAAAo6czcmODP8hMLQx6OI4kYQALv6kndkt++8OoI/xzFIyAafgTM7Ordrt687rcGnRvXI50btwa87q7e6t3M7H4EIBrFI/8c6gi+8JLfSd3v6kACiRiOI0MeEwvP8pjgzNwo6QAA2BY0I2gfMQ3t9L3hctx358D9ERW3Im4gQg8W9wHjO9zg5YL7NBMWIlIhRBFJ+WPkKdxj5En5RBFSIRYiNBOC++DlO9wB4xb3Qg9uILciERXA/Xfncty94e30MQ1oHzQj2BYAACjpzNyY4M/yEwtDHo4jiRhAAu/qSd2S377w6gj/HMUjIBp+BMzs6t2u3rzutwadG9cjnRu3Brzurt7q3czsfgQgGsUj/xzqCL7wkt9J3e/qQAKJGI4jQx4TC8/ymODM3CjpAADYFjQjaB8xDe30veFy3HfnwP0RFbcibiBCDxb3AeM73ODlgvs0ExYiKCEYEWP58OQP3TflhfmTENMfYSAmEsf7k+e83i7lzff2DYIdah/2Evz9KuqI4F/lT/Z6CysbRx6IEwAAsuxu4sflDfUjCdAY+hzfE9ABJu9n5GLmBfT0BngWixv8E2oDgPFw5i3nOfPwBCkU/BniE80EvvOC6CTop/IZA+URUxiSE/kF2vWZ6kPpT/J0AbQPlBYQE+wG0vev7IfqLvIAAJgNxRRfEqcHovnA7unrQ/LA/pYL6xKDESoIR/vH8GftjPK2/bMJCxF/EHYIvvy/8vruBfPh/PEHKQ9XD4wIBv6j9J/wrfNC/FUGTA0PDm0IHP9v9lDygPTZ++IEdwusDBwIAAAe+Aj0e/Wl+5kDrwkzC5sHsACu+cL1mfan+38C+QeoCewGKwEa+3v31vfb+5QBWgYQCBMGcgFg/Cv5L/lB/NoA1QRwBhMFhAF7/dD6n/rX/FQAbwPNBO8DYgFr/mP8Ifya/QAALAIrA6sCDgEr/+L9sP2H/uD/DgGQAUwBiQC8/0b/Sf+c//X/GQA=';
+let turnChimeSound: Audio.Sound | null = null;
+let turnChimeLoading: Promise<Audio.Sound | null> | null = null;
+let turnChimeAudioModeReady = false;
+
+async function ensureTurnChimeSound() {
+  if (turnChimeSound) return turnChimeSound;
+  if (turnChimeLoading) return turnChimeLoading;
+  turnChimeLoading = (async () => {
+    if (!turnChimeAudioModeReady) {
+      await Audio.setAudioModeAsync({
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: true,
+        staysActiveInBackground: false,
+        playThroughEarpieceAndroid: false,
+      });
+      turnChimeAudioModeReady = true;
+    }
+    const created = await Audio.Sound.createAsync(
+      { uri: TURN_CHIME_URI },
+      { shouldPlay: false, volume: 0.55 }
+    );
+    turnChimeSound = created.sound;
+    return turnChimeSound;
+  })().catch(() => null).finally(() => {
+    turnChimeLoading = null;
+  });
+  return turnChimeLoading;
+}
 
 async function playTurnChime() {
   try {
-    const { sound } = await Audio.Sound.createAsync(
-      { uri: TURN_CHIME_URI },
-      { shouldPlay: true, volume: 0.45 }
-    );
-    sound.setOnPlaybackStatusUpdate(status => {
-      if ('didJustFinish' in status && status.didJustFinish) {
-        sound.unloadAsync().catch(() => {});
-      }
-    });
+    const sound = await ensureTurnChimeSound();
+    if (!sound) return;
+    await sound.setPositionAsync(0);
+    await sound.playAsync();
   } catch {
+    if (turnChimeSound) {
+      turnChimeSound.unloadAsync().catch(() => {});
+      turnChimeSound = null;
+    }
     // Audio is a bonus cue; vibration and visual alerts still carry the turn.
   }
 }
@@ -380,6 +407,8 @@ export default function GameScreen({ route, navigation }: Props) {
     if (!isOnline || state.completed) return;
     const message = 'Finish this match before leaving the table.';
     const unsubscribe = navigation.addListener('beforeRemove', event => {
+      const action = event.data.action as { type?: string; payload?: { name?: string } };
+      if ((action.type === 'NAVIGATE' || action.type === 'PUSH') && action.payload?.name === 'PlayerProfile') return;
       event.preventDefault();
       Alert.alert('Match in progress', message);
     });
@@ -491,20 +520,24 @@ export default function GameScreen({ route, navigation }: Props) {
     const gap = Math.max(6, metrics.opp.gap);
     const oppPadding = 6;
     const oppGridWidth = metrics.opp.cardW * 3 + metrics.opp.gap * 2;
-    const oppPanelWidth = Math.ceil(oppGridWidth + oppPadding * 2 + 2);
-    const compactPileWidth = metrics.opp.cardW * 2 + metrics.opp.gap * 4 + 66;
-    const centerSlotWidth = oppCount >= 2
-      ? compactPileWidth
-      : Math.max(compactPileWidth, Math.min(150, winW - sidePad * 2));
-    const sideAvailable = Math.floor((winW - sidePad * 2 - centerSlotWidth - gap * 2) / 2);
+    const baseOppPanelWidth = Math.ceil(oppGridWidth + oppPadding * 2 + 2);
+    const opponentSlots = Math.max(1, oppCount);
+    const availableOppPanelWidth = Math.floor((winW - sidePad * 2 - gap * Math.max(0, opponentSlots - 1)) / opponentSlots);
+    const pileMetrics = {
+      cardW: Math.max(metrics.opp.cardW + 2, Math.round(metrics.opp.cardW * 1.12)),
+      cardH: Math.max(metrics.opp.cardH + 3, Math.round(metrics.opp.cardH * 1.12)),
+      gap: Math.max(5, Math.round(metrics.opp.gap * 0.75)),
+    };
+    const pileClusterWidth = pileMetrics.cardW * 2 + pileMetrics.gap * 3 + 22;
     return {
       gap,
       sidePad,
       oppPadding,
-      oppPanelWidth: oppCount >= 2 ? Math.min(oppPanelWidth, Math.max(92, sideAvailable)) : oppPanelWidth,
-      centerSlotWidth,
+      pileMetrics,
+      oppPanelWidth: oppCount > 0 ? Math.min(baseOppPanelWidth, availableOppPanelWidth) : baseOppPanelWidth,
+      centerSlotWidth: Math.min(winW - sidePad * 2, Math.max(128, pileClusterWidth)),
     };
-  }, [metrics.opp.cardW, metrics.opp.gap, oppCount, winW]);
+  }, [metrics.opp.cardH, metrics.opp.cardW, metrics.opp.gap, oppCount, winW]);
 
   // ===== Solo vs AI flags =====
   const isOnlineTurn = isOnline ? state.players[state.currentPlayerIndex]?.userId === user?.userId : true;
@@ -1439,9 +1472,6 @@ export default function GameScreen({ route, navigation }: Props) {
   const bottomActiveGift = avatarGifts[bottomPlayer.userId]?.type === 'gift' ? avatarGifts[bottomPlayer.userId] : null;
   const bottomActiveGiftOption = bottomActiveGift?.giftId ? TABLE_GIFTS_BY_ID.get(bottomActiveGift.giftId) : null;
   const timerLabel = `${secsLeft}s`;
-  const topOpponent = oppCount === 1 || oppCount >= 3 ? opponents[0] : null;
-  const leftOpponent = oppCount === 2 ? opponents[0] : oppCount >= 3 ? opponents[1] : null;
-  const rightOpponent = oppCount === 2 ? opponents[1] : oppCount >= 3 ? opponents[2] : null;
   const renderOpponentCard = (opponent: (typeof opponents)[number], slot: 'top' | 'side') => {
     const { p, i } = opponent;
     const roomPlayer = roomPlayersById.get(p.userId);
@@ -1554,58 +1584,34 @@ export default function GameScreen({ route, navigation }: Props) {
 
       {/* Table/Base Layer */}
       <View style={[styles.tableZone, { paddingHorizontal: tableLayout.sidePad, gap: tableLayout.gap }]}>
-        {topOpponent ? (
-          <View style={styles.tableTopSlot}>
-            {renderOpponentCard(topOpponent, 'top')}
+        {opponents.length ? (
+          <View style={[styles.tableOpponentRow, { gap: tableLayout.gap }]}>
+            {opponents.map(opponent => (
+              <View key={opponent.p.userId ?? opponent.i} style={[styles.tableOpponentSlot, { width: tableLayout.oppPanelWidth }]}>
+                {renderOpponentCard(opponent, 'top')}
+              </View>
+            ))}
           </View>
         ) : null}
-        {leftOpponent || rightOpponent ? (
-          <View style={[styles.tableCrossRow, { gap: tableLayout.gap }]}>
-            <View style={[styles.tableSideSlot, { width: tableLayout.oppPanelWidth }]}>
-              {leftOpponent ? renderOpponentCard(leftOpponent, 'side') : null}
-            </View>
-            <View style={[styles.tableCenterSlot, { width: tableLayout.centerSlotWidth }]}>
-              <Piles
-                drawCount={state.drawPile.length}
-                topDiscard={state.topDiscard}
-                held={held}
-                metrics={metrics.opp}
-                compact
-                onDraw={onDraw}
-                onTakeDiscard={onTakeDiscard}
-                activeSource={activeSource}
-                cardBackId={bottomCardBackId}
-                disableDraw={!canUsePiles && !canSwitchDiscardToDraw}
-                disableTake={!canUsePiles || isDrawOnlyTurn || !!state.pendingDecision || !state.topDiscard}
-                discardFlashKey={discardFlash?.key ?? null}
-                discardFlashCount={discardFlash?.count ?? 0}
-              />
-            </View>
-            <View style={[styles.tableSideSlot, { width: tableLayout.oppPanelWidth }]}>
-              {rightOpponent ? renderOpponentCard(rightOpponent, 'side') : null}
-            </View>
+        <View style={styles.tablePilesOnlyRow}>
+          <View style={[styles.tableCenterSlot, { width: tableLayout.centerSlotWidth }]}>
+            <Piles
+              drawCount={state.drawPile.length}
+              topDiscard={state.topDiscard}
+              held={held}
+              metrics={tableLayout.pileMetrics}
+              compact
+              onDraw={onDraw}
+              onTakeDiscard={onTakeDiscard}
+              activeSource={activeSource}
+              cardBackId={bottomCardBackId}
+              disableDraw={!canUsePiles && !canSwitchDiscardToDraw}
+              disableTake={!canUsePiles || isDrawOnlyTurn || !!state.pendingDecision || !state.topDiscard}
+              discardFlashKey={discardFlash?.key ?? null}
+              discardFlashCount={discardFlash?.count ?? 0}
+            />
           </View>
-        ) : (
-          <View style={styles.tablePilesOnlyRow}>
-            <View style={[styles.tableCenterSlot, { width: tableLayout.centerSlotWidth }]}>
-              <Piles
-                drawCount={state.drawPile.length}
-                topDiscard={state.topDiscard}
-                held={held}
-                metrics={metrics.opp}
-                compact
-                onDraw={onDraw}
-                onTakeDiscard={onTakeDiscard}
-                activeSource={activeSource}
-                cardBackId={bottomCardBackId}
-                disableDraw={!canUsePiles && !canSwitchDiscardToDraw}
-                disableTake={!canUsePiles || isDrawOnlyTurn || !!state.pendingDecision || !state.topDiscard}
-                discardFlashKey={discardFlash?.key ?? null}
-                discardFlashCount={discardFlash?.count ?? 0}
-              />
-            </View>
-          </View>
-        )}
+        </View>
       </View>
 
       {/* Action Layer: local grid */}
@@ -1855,7 +1861,7 @@ export default function GameScreen({ route, navigation }: Props) {
                     onPress={() => {
                       if (!avatarHubUserId) return;
                       setAvatarHubUserId(null);
-                      navigation.navigate('PlayerProfile', { userId: avatarHubUserId });
+                      navigation.navigate('PlayerProfile', { userId: avatarHubUserId, fromActiveMatchRoomCode: roomCode });
                     }}
                   >
                     <Trophy size={20} color="#52E5A7" strokeWidth={2.8} />
@@ -2920,23 +2926,20 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 6,
   },
-  tableTopSlot: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tableCrossRow: {
+  tableOpponentRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    alignSelf: 'stretch',
+  },
+  tableOpponentSlot: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 1,
   },
   tablePilesOnlyRow: {
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  tableSideSlot: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
   },
   tableCenterSlot: {
     alignItems: 'center',
@@ -2954,7 +2957,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 7,
+    gap: 4,
     marginBottom: 2,
   },
   oppGridName: {
@@ -2967,7 +2970,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   playerGridMeta: { color: '#9BA3C7', fontSize: 8, fontWeight: '900', marginTop: 1 },
-  inlineScores: { alignItems: 'flex-end', flexShrink: 0 },
+  inlineScores: { alignItems: 'flex-end', flexShrink: 0, minWidth: 42, paddingRight: 1 },
 
   localPanel: { position: 'relative', flexShrink: 0, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 6, borderTopWidth: 1, borderTopColor: 'transparent' },
   localPanelActive: { borderTopColor: '#4DA3FF', backgroundColor: '#0F1530' },

@@ -41,7 +41,7 @@ export type RootStackParamList = {
   Shop: undefined;
   Social: undefined;
   Club: undefined;
-  PlayerProfile: { userId: string };
+  PlayerProfile: { userId: string; fromActiveMatchRoomCode?: string };
   Settings: undefined;
 };
 
@@ -86,6 +86,12 @@ function isOnActiveGame(room: api.RoomSummary) {
   return current?.name === 'Game' && params?.roomCode === room.code;
 }
 
+function isAllowedActiveMatchRoute(room: api.RoomSummary) {
+  const current = navigationRef.getCurrentRoute();
+  const params = current?.params as Partial<RootStackParamList['PlayerProfile']> | undefined;
+  return isOnActiveGame(room) || (current?.name === 'PlayerProfile' && params?.fromActiveMatchRoomCode === room.code);
+}
+
 function resetToActiveGame(room: api.RoomSummary) {
   if (!navigationRef.isReady()) return false;
   if (isOnActiveGame(room)) return true;
@@ -112,7 +118,9 @@ function ActiveMatchGate({ navigationTick }: { navigationTick: number }) {
     try {
       const response = await api.activeRoom(token);
       if (response.mustRejoin && response.room) {
-        if (resetToActiveGame(response.room)) {
+        if (isAllowedActiveMatchRoute(response.room)) {
+          setActive(null);
+        } else if (resetToActiveGame(response.room)) {
           setActive(null);
         } else {
           setActive(response);

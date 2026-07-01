@@ -17,6 +17,7 @@ export default function PlayerProfileScreen({ route, navigation }: Props) {
   const { token, user } = useAuth();
   const [profile, setProfile] = useState<api.PublicPlayerProfile | null>(null);
   const [busy, setBusy] = useState(false);
+  const openedFromActiveMatch = !!route.params.fromActiveMatchRoomCode;
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -85,12 +86,14 @@ export default function PlayerProfileScreen({ route, navigation }: Props) {
         <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
           <Text style={styles.backText}>Back</Text>
         </Pressable>
-        <View style={styles.topActions}>
-          <PlayerAvatar cosmetics={user?.inventory.equipped} fallbackInitial={user?.avatarInitial ?? '?'} size={40} onPress={() => navigation.navigate('Profile')} />
-          <Pressable style={styles.topShopButton} onPress={() => navigation.navigate('Shop')}>
-            <ShoppingBag size={18} color="#FFCC66" strokeWidth={2.8} />
-          </Pressable>
-        </View>
+        {openedFromActiveMatch ? null : (
+          <View style={styles.topActions}>
+            <PlayerAvatar cosmetics={user?.inventory.equipped} fallbackInitial={user?.avatarInitial ?? '?'} size={40} onPress={() => navigation.navigate('Profile')} />
+            <Pressable style={styles.topShopButton} onPress={() => navigation.navigate('Shop')}>
+              <ShoppingBag size={18} color="#FFCC66" strokeWidth={2.8} />
+            </Pressable>
+          </View>
+        )}
       </View>
 
       <View style={styles.hero}>

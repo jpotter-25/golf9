@@ -88,6 +88,7 @@ const Piles: React.FC<PilesProps> = ({
   return (
     <View style={[styles.container, compact && styles.containerCompact]}>
       <Pressable onPress={onDraw} disabled={disableDraw} style={[styles.pile, disableDraw && activeSource !== 'draw' && styles.disabled]}>
+        <Text style={styles.label}>Deck</Text>
         <Card
           card={drawCard}
           width={cardW}
@@ -97,13 +98,13 @@ const Piles: React.FC<PilesProps> = ({
           disabled={disableDraw && activeSource !== 'draw'}
           cardBackId={cardBackId}
         />
-        <Text style={styles.label}>Deck</Text>
         <Text style={styles.count}>{pileCount}</Text>
       </Pressable>
       <Pressable
         onPress={handleTake}
         style={[styles.pile, disableTake && activeSource !== 'discard' && styles.disabled]}
       >
+        <Text style={styles.label}>Discard</Text>
         <View style={styles.discardStage}>
           <Card
             card={discardCard}
@@ -128,7 +129,6 @@ const Piles: React.FC<PilesProps> = ({
             </Animated.View>
           ) : null}
         </View>
-        <Text style={styles.label}>Discard</Text>
         <Text style={styles.count}>{discardCard ? '' : 'Empty'}</Text>
       </Pressable>
     </View>
@@ -146,7 +146,7 @@ const styles = StyleSheet.create({
   containerCompact: {
     alignSelf: 'center',
     justifyContent: 'center',
-    gap: 16,
+    gap: 10,
     marginVertical: 2,
   },
   pile: {
@@ -179,10 +179,15 @@ const styles = StyleSheet.create({
   },
   label: {
     color: '#E8ECF1',
-    marginTop: 4,
+    marginBottom: 3,
+    fontSize: 13,
+    fontWeight: '800',
   },
   count: {
     color: '#E8ECF1',
     fontSize: 12,
+    fontWeight: '800',
+    marginTop: 2,
+    minHeight: 16,
   },
 });
