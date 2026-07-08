@@ -9,6 +9,7 @@ import { Bell, Gem, MessageCircle, Settings, ShoppingBag, Trophy, UserPlus, X } 
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import type { GameState, Card, Grid } from '../game/types';
+import { aiPlayTurn, chooseAiMove } from '../game/ai';
 import {
   deal,
   drawFromDeck,
@@ -34,7 +35,6 @@ import { ShopContent } from './ShopScreen';
 import {
   cardValue,
   continueAfterRoundSummary,
-  pickTarget as sharedPickTarget,
   revealGridCardForDecision,
   ROUND_REVEAL_DURATION,
   resolvePendingGridDecision,
@@ -45,8 +45,6 @@ import {
 type Props = NativeStackScreenProps<RootStackParamList, 'Game'>;
 type GridSelection = { playerIndex: number; r: number; c: number };
 type DiscardFlash = { key: string; count: number };
-type AiDifficulty = 'easy' | 'hard';
-type AiMove = { source: 'draw' | 'discard'; card: Card; target: GridSelection | null; discardDrawn: boolean };
 type SocialBurst = { id: string; text: string; type: ChatMessageType; giftId?: string; giftIcon?: string; giftPrice?: number };
 type TurnNotice = GameNotice;
 type GiftOption = { id: string; label: string; accent: string; icon: string; price: number };
@@ -664,8 +662,10 @@ export default function GameScreen({ route, navigation }: Props) {
     setPending(null);
     setSelectedCell(null);
     soloAiTurnTimer.current = setTimeout(() => {
-      const previewCard = { ...move.card, faceUp: true };
-      setHeld(previewCard);
+      if (move.card) {
+        const previewCard = { ...move.card, faceUp: true };
+        setHeld(previewCard);
+      }
       if (move.target) setPending(move.target);
       soloAiTurnTimer.current = setTimeout(() => {
         soloAiTurnTimer.current = null;
@@ -2356,49 +2356,6 @@ function value(card: Card): number {
   return cardValue(card);
 }
 
-function colHasPairFor(card: Card, grid: Grid): boolean {
-  for (let c = 0; c < 3; c++) {
-    const ranks = [grid[0][c], grid[1][c], grid[2][c]].map(x => x?.rank ?? null);
-    const ups = [grid[0][c], grid[1][c], grid[2][c]].map(x => !!x?.faceUp);
-    const same = ranks.filter(r => r === card.rank).length;
-    if (same >= 2 && (!ups[0] || !ups[1] || !ups[2] || ranks.some(r => r !== card.rank))) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function worstFaceUp(grid: Grid): { r: number; c: number; score: number } | null {
-  let out: { r: number; c: number; score: number } | null = null;
-  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
-    const cell = grid[r][c];
-    if (!cell || !cell.faceUp || cell.zeroed) continue;
-    const v = value(cell);
-    if (!out || v > out.score) out = { r, c, score: v };
-  }
-  return out;
-}
-
-function anyFaceDown(grid: Grid): { r: number; c: number } | null {
-  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
-    const cell = grid[r][c];
-    if (cell && !cell.faceUp) return { r, c };
-  }
-  return null;
-}
-
-function shouldTakeDiscard(s: GameState, idx: number, top: Card): boolean {
-  const g = s.players[idx].grid;
-  if (colHasPairFor(top, g)) return true;
-  const worst = worstFaceUp(g);
-  if (!worst) return false;
-  return value(top) < worst.score;
-}
-
-function mustDrawOnly(s: GameState, idx: number): boolean {
-  return s.mustDrawOnlyForPlayerIndex === idx;
-}
-
 function countFaceDownCards(grid: Grid | undefined): number {
   if (!grid) return 0;
   return grid.reduce((total, row) => total + row.filter(card => card && !card.faceUp).length, 0);
@@ -2431,136 +2388,6 @@ function revealHiddenForDisplay(state: GameState): GameState {
     }
   }
   return next;
-}
-
-function pickTarget(grid: Grid, incoming: Card): { r: number; c: number } {
-  return sharedPickTarget(grid, incoming);
-}
-
-function chooseAiMove(s: GameState, idx: number, difficulty: AiDifficulty): AiMove {
-  return difficulty === 'hard' ? chooseHardAiMove(s, idx) : chooseEasyAiMove(s, idx);
-}
-
-function chooseEasyAiMove(s: GameState, idx: number): AiMove {
-  const top = s.topDiscard;
-  const source: 'draw' | 'discard' = !mustDrawOnly(s, idx) && top && shouldTakeDiscard(s, idx, top) ? 'discard' : 'draw';
-  const card = source === 'discard' && top ? top : s.drawPile[s.drawPile.length - 1];
-  const target = pickTarget(s.players[idx].grid, card);
-  return { source, card, target: { playerIndex: idx, r: target.r, c: target.c }, discardDrawn: false };
-}
-
-function chooseHardAiMove(s: GameState, idx: number): AiMove {
-  const grid = s.players[idx].grid;
-  const top = s.topDiscard;
-  const source: 'draw' | 'discard' = !mustDrawOnly(s, idx) && top && shouldTakeDiscardHard(s, idx, top) ? 'discard' : 'draw';
-  const card = source === 'discard' && top ? top : s.drawPile[s.drawPile.length - 1];
-  const target = chooseHardTarget(grid, card);
-  const discardDrawn = source === 'draw' && shouldDiscardDrawnHard(s, idx, card);
-  return {
-    source,
-    card,
-    target: discardDrawn ? null : { playerIndex: idx, r: target.r, c: target.c },
-    discardDrawn,
-  };
-}
-
-function shouldTakeDiscardHard(s: GameState, idx: number, top: Card): boolean {
-  const grid = s.players[idx].grid;
-  const incomingValue = value(top);
-  const worst = worstFaceUp(grid);
-
-  if (visibleColumnCompletionTarget(grid, top)) return true;
-  if (incomingValue <= 0) return true;
-  if (visibleColumnSetupTarget(grid, top) && incomingValue <= 7) return true;
-  if (worst && incomingValue <= worst.score - 2) return true;
-  if (countFaceDownCards(grid) <= 2 && worst && incomingValue < worst.score) return true;
-  return false;
-}
-
-function shouldDiscardDrawnHard(s: GameState, idx: number, card: Card): boolean {
-  if (!canDiscardDrawnForAi(s, idx)) return false;
-  const grid = s.players[idx].grid;
-  const incomingValue = value(card);
-  const worst = worstFaceUp(grid);
-
-  if (visibleColumnCompletionTarget(grid, card)) return false;
-  if (incomingValue <= 2) return false;
-  if (visibleColumnSetupTarget(grid, card) && incomingValue <= 6) return false;
-  if (worst && incomingValue < worst.score) return false;
-  return true;
-}
-
-function canDiscardDrawnForAi(s: GameState, idx: number): boolean {
-  return mustDrawOnly(s, idx) || (countFaceDownCards(s.players[idx]?.grid) === 1 && !s.sweepActive);
-}
-
-function chooseHardTarget(grid: Grid, incoming: Card): { r: number; c: number } {
-  const incomingValue = value(incoming);
-  const completion = visibleColumnCompletionTarget(grid, incoming);
-  if (completion) return completion;
-
-  const worst = worstFaceUp(grid);
-  if (worst && incomingValue <= worst.score - 1) return { r: worst.r, c: worst.c };
-
-  const setup = visibleColumnSetupTarget(grid, incoming);
-  if (setup && incomingValue <= 7) return setup;
-
-  const faceDown = anyFaceDown(grid);
-  if (faceDown && incomingValue <= 4) return faceDown;
-  if (worst && incomingValue < worst.score) return { r: worst.r, c: worst.c };
-  if (faceDown) return faceDown;
-  if (worst) return { r: worst.r, c: worst.c };
-  return pickTarget(grid, incoming);
-}
-
-function visibleColumnCompletionTarget(grid: Grid, incoming: Card): { r: number; c: number } | null {
-  for (let c = 0; c < 3; c++) {
-    const column = [grid[0][c], grid[1][c], grid[2][c]];
-    const visibleMatches = column.filter(card => card && card.faceUp && card.rank === incoming.rank).length;
-    if (visibleMatches < 2) continue;
-    for (let r = 0; r < 3; r++) {
-      const card = grid[r][c];
-      if (card && (!card.faceUp || card.rank !== incoming.rank)) return { r, c };
-    }
-  }
-  return null;
-}
-
-function visibleColumnSetupTarget(grid: Grid, incoming: Card): { r: number; c: number } | null {
-  for (let c = 0; c < 3; c++) {
-    const column = [grid[0][c], grid[1][c], grid[2][c]];
-    const visibleMatches = column.filter(card => card && card.faceUp && card.rank === incoming.rank).length;
-    if (visibleMatches !== 1) continue;
-    for (let r = 0; r < 3; r++) {
-      const card = grid[r][c];
-      if (card && !card.faceUp) return { r, c };
-    }
-  }
-  return null;
-}
-
-function aiPlayTurn(s: GameState, idx: number, difficulty: AiDifficulty): GameState {
-  if (s.phase !== 'turn' || s.currentPlayerIndex !== idx) return s;
-
-  let working = s;
-  const move = chooseAiMove(working, idx, difficulty);
-
-  if (move.source === 'discard') {
-    const res = takeDiscard(working);
-    working = res.state;
-    const card = res.drawn!;
-    const target = move.target ?? { playerIndex: idx, ...pickTarget(working.players[idx].grid, card) };
-    const { r, c } = target;
-    return replaceGridCard(working, idx, r, c, card);
-  }
-
-  const res = drawFromDeck(working);
-  working = res.state;
-  const drawn = res.drawn;
-  if (move.discardDrawn) return discardDrawn(working, drawn);
-  const target = move.target ?? { playerIndex: idx, ...pickTarget(working.players[idx].grid, drawn) };
-  const { r, c } = target;
-  return replaceGridCard(working, idx, r, c, drawn);
 }
 
 const styles = StyleSheet.create({

@@ -1,11 +1,17 @@
-// src/game/ai.ts
-// Purpose: Minimal AI helper for solo mode.
-
 import type { GameState } from './types';
-import { pickTarget } from '../../../shared/rules';
+import {
+  aiPlayTurn as sharedAiPlayTurn,
+  chooseAiMove as sharedChooseAiMove,
+  type AiDifficulty,
+  type AiMove,
+} from '../../../shared/soloAi';
 
-export function aiChoose(state: GameState, playerIndex: number): { action: 'drawReplace'; replaceAt: { r: number; c: number } } {
-  const player = state.players[playerIndex];
-  const topDiscard = state.discardPile[state.discardPile.length - 1] ?? state.drawPile[state.drawPile.length - 1];
-  return { action: 'drawReplace', replaceAt: pickTarget(player.grid, topDiscard) };
+export type { AiDifficulty, AiMove };
+
+export function chooseAiMove(state: GameState, playerIndex: number, difficulty: AiDifficulty): AiMove {
+  return sharedChooseAiMove(state, playerIndex, difficulty);
+}
+
+export function aiPlayTurn(state: GameState, playerIndex: number, difficulty: AiDifficulty): GameState {
+  return sharedAiPlayTurn(state, playerIndex, difficulty) as GameState;
 }
