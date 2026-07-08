@@ -176,6 +176,8 @@ export default function GameScreen({ route, navigation }: Props) {
   const [avatarHubProfile, setAvatarHubProfile] = useState<api.PublicPlayerProfile | null>(null);
   const [avatarHubLoading, setAvatarHubLoading] = useState(false);
   const [avatarHubBusy, setAvatarHubBusy] = useState<string | null>(null);
+  const [avatarHubCosmeticCatalog, setAvatarHubCosmeticCatalog] = useState<api.CosmeticItem[]>([]);
+  const [avatarHubCosmeticsLoading, setAvatarHubCosmeticsLoading] = useState(false);
   const [turnNotice, setTurnNotice] = useState<TurnNotice | null>(null);
   const [gameplayPrefs, setGameplayPrefs] = useState<GameplayPreferences>(getGameplayPreferences());
   const [matchProgression, setMatchProgression] = useState<api.MatchProgressionSummary | null>(null);
@@ -226,9 +228,10 @@ export default function GameScreen({ route, navigation }: Props) {
   const viewerCosmetics = user?.inventory?.equipped;
   const tableTheme = getTableThemeVisual(viewerCosmetics?.tableTheme);
   const playerCosmetics = useCallback((player: GameState['players'][number] | undefined, index: number): EquippedCosmetics | undefined => {
+    if (player?.userId && player.userId === user?.userId && viewerCosmetics) return viewerCosmetics;
     if (!isOnline && index === 0 && viewerCosmetics) return viewerCosmetics;
     return player?.cosmetics ?? (index === bottomIndex ? viewerCosmetics : undefined);
-  }, [bottomIndex, isOnline, viewerCosmetics]);
+  }, [bottomIndex, isOnline, user?.userId, viewerCosmetics]);
   const bottomCardBackId = playerCosmetics(bottomPlayer, bottomIndex)?.cardBack;
 
   useEffect(() => subscribeGameplayPreferences(setGameplayPrefs), []);
@@ -277,6 +280,25 @@ export default function GameScreen({ route, navigation }: Props) {
       .catch(() => setAvatarHubProfile(null))
       .finally(() => setAvatarHubLoading(false));
   }, [isOnline, token, user?.userId]);
+
+  useEffect(() => {
+    if (!token || !avatarHubUserId || avatarHubUserId !== user?.userId) return;
+    let cancelled = false;
+    setAvatarHubCosmeticsLoading(true);
+    api.cosmeticCatalog(token)
+      .then(response => {
+        if (!cancelled) setAvatarHubCosmeticCatalog(response.cosmetics);
+      })
+      .catch(() => {
+        if (!cancelled) setAvatarHubCosmeticCatalog([]);
+      })
+      .finally(() => {
+        if (!cancelled) setAvatarHubCosmeticsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [avatarHubUserId, token, user?.userId]);
 
   const showGameplayNotice = useCallback((
     notice: TurnNotice,
@@ -1406,6 +1428,20 @@ export default function GameScreen({ route, navigation }: Props) {
     }
   }, [avatarHubBusy, isOnline, refreshProfile, roomCode, token]);
 
+  const equipAvatarHubCosmetic = useCallback(async (item: api.CosmeticItem) => {
+    if (!token || avatarHubBusy || !item.owned || item.equipped) return;
+    setAvatarHubBusy(`cosmetic:${item.id}`);
+    try {
+      const response = await api.equipCosmetic(token, item.id);
+      setAvatarHubCosmeticCatalog(response.cosmetics);
+      await refreshProfile().catch(() => {});
+    } catch (error) {
+      Alert.alert('Cosmetic update failed', error instanceof Error ? error.message : 'Try again.');
+    } finally {
+      setAvatarHubBusy(null);
+    }
+  }, [avatarHubBusy, refreshProfile, token]);
+
   const runAvatarHubFriendAction = useCallback(async () => {
     if (!token || !avatarHubProfile || avatarHubBusy) return;
     setAvatarHubBusy('friend');
@@ -1469,6 +1505,13 @@ export default function GameScreen({ route, navigation }: Props) {
   const avatarHubProgress = avatarHubIsSelf
     ? user?.progression
     : avatarHubProfile?.progression ?? avatarHubRoomPlayer?.progression ?? null;
+  const avatarHubLockerGroups = useMemo(() => {
+    const owned = avatarHubCosmeticCatalog.filter(item => item.owned && (item.type === 'avatarIcon' || item.type === 'cardBack'));
+    return [
+      { key: 'avatarIcon', title: 'Avatar Icons', empty: 'No owned avatar icons yet.', items: owned.filter(item => item.type === 'avatarIcon') },
+      { key: 'cardBack', title: 'Card Backs', empty: 'No owned card backs yet.', items: owned.filter(item => item.type === 'cardBack') },
+    ];
+  }, [avatarHubCosmeticCatalog]);
   const bottomActiveGift = avatarGifts[bottomPlayer.userId]?.type === 'gift' ? avatarGifts[bottomPlayer.userId] : null;
   const bottomActiveGiftOption = bottomActiveGift?.giftId ? TABLE_GIFTS_BY_ID.get(bottomActiveGift.giftId) : null;
   const timerLabel = `${secsLeft}s`;
@@ -1519,8 +1562,6 @@ export default function GameScreen({ route, navigation }: Props) {
         <Text
           style={styles.oppGridName}
           numberOfLines={1}
-          adjustsFontSizeToFit
-          minimumFontScale={0.66}
         >
           {opponentName}
         </Text>
@@ -1638,15 +1679,13 @@ export default function GameScreen({ route, navigation }: Props) {
               giftIcon={bottomActiveGift?.giftIcon ?? bottomActiveGiftOption?.icon ?? null}
               giftAccent={bottomActiveGiftOption?.accent ?? null}
               connectionState={bottomConnected ? 'online' : 'offline'}
-              onPress={() => openAvatarHub(bottomPlayer.userId)}
-              disabled={!isOnline}
+              onPress={() => openAvatarHub(bottomPlayer.userId ?? user?.userId)}
+              disabled={!isOnline || !(bottomPlayer.userId ?? user?.userId)}
             />
             <View style={styles.localTitlePressable}>
               <Text
                 style={[styles.meTitle, bottomIsActive && styles.activeName]}
                 numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.7}
               >
                 {isOnline ? (bottomRoomPlayer?.displayName ?? bottomPlayer.name ?? 'Your Grid') : isSolo ? bottomPlayer.name : bottomPlayer.name}
               </Text>
@@ -1766,7 +1805,6 @@ export default function GameScreen({ route, navigation }: Props) {
                     size={74}
                     mode="self"
                     league={avatarHubLeague}
-                    showClaim={selfClaimableCount > 0}
                   />
                 ) : (
                   <PlayerAvatar
@@ -1798,6 +1836,7 @@ export default function GameScreen({ route, navigation }: Props) {
               ) : null}
             </View>
 
+            <ScrollView style={styles.avatarHubScroll} contentContainerStyle={styles.avatarHubScrollContent} showsVerticalScrollIndicator={false}>
             {avatarHubIsSelf ? (
               <View style={styles.avatarHubBody}>
                 <View style={styles.avatarHubStatRow}>
@@ -1809,8 +1848,7 @@ export default function GameScreen({ route, navigation }: Props) {
                   <Pressable
                     style={styles.avatarHubAction}
                     onPress={() => {
-                      setAvatarHubUserId(null);
-                      navigation.navigate('Profile');
+                      refreshProfile().catch(() => {});
                     }}
                   >
                     <Trophy size={20} color="#52E5A7" strokeWidth={2.8} />
@@ -1819,8 +1857,12 @@ export default function GameScreen({ route, navigation }: Props) {
                   <Pressable
                     style={styles.avatarHubAction}
                     onPress={() => {
-                      setAvatarHubUserId(null);
-                      navigation.navigate('Profile');
+                      if (!token) return;
+                      setAvatarHubCosmeticsLoading(true);
+                      api.cosmeticCatalog(token)
+                        .then(response => setAvatarHubCosmeticCatalog(response.cosmetics))
+                        .catch(() => setAvatarHubCosmeticCatalog([]))
+                        .finally(() => setAvatarHubCosmeticsLoading(false));
                     }}
                   >
                     <Gem size={20} color="#BDEBFF" strokeWidth={2.8} />
@@ -1839,14 +1881,45 @@ export default function GameScreen({ route, navigation }: Props) {
                   <Pressable
                     style={styles.avatarHubAction}
                     onPress={() => {
-                      setAvatarHubUserId(null);
-                      navigation.navigate('Profile');
+                      refreshProfile().catch(() => {});
                     }}
                   >
                     <Bell size={20} color="#FF6B6B" strokeWidth={2.8} />
                     <Text style={styles.avatarHubActionText}>Rewards</Text>
                   </Pressable>
                 </View>
+                <Text style={styles.avatarHubSectionTitle}>Quick Locker</Text>
+                {avatarHubCosmeticsLoading ? (
+                  <Text style={styles.avatarHubEmptyText}>Loading owned cosmetics...</Text>
+                ) : (
+                  avatarHubLockerGroups.map(group => (
+                    <View key={group.key} style={styles.lockerSection}>
+                      <Text style={styles.lockerTitle}>{group.title}</Text>
+                      {group.items.length ? (
+                        <View style={styles.lockerGrid}>
+                          {group.items.map(item => {
+                            const busy = avatarHubBusy === `cosmetic:${item.id}`;
+                            return (
+                              <Pressable
+                                key={item.id}
+                                style={[styles.lockerChip, item.equipped && styles.lockerChipEquipped, busy && styles.avatarHubActionDisabled]}
+                                disabled={item.equipped || busy || !!avatarHubBusy}
+                                onPress={() => equipAvatarHubCosmetic(item)}
+                              >
+                                <Text style={styles.lockerName} numberOfLines={1}>{item.name}</Text>
+                                <Text style={[styles.lockerState, item.equipped && styles.lockerStateEquipped]} numberOfLines={1}>
+                                  {item.equipped ? 'Equipped' : busy ? 'Equipping...' : 'Equip'}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      ) : (
+                        <Text style={styles.avatarHubEmptyText}>{group.empty}</Text>
+                      )}
+                    </View>
+                  ))
+                )}
               </View>
             ) : (
               <View style={styles.avatarHubBody}>
@@ -1907,6 +1980,7 @@ export default function GameScreen({ route, navigation }: Props) {
                 </View>
               </View>
             )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -2633,6 +2707,7 @@ const styles = StyleSheet.create({
   },
   avatarHubDismissArea: { flex: 1 },
   avatarHubSheet: {
+    maxHeight: '88%',
     borderTopLeftRadius: 14,
     borderTopRightRadius: 14,
     borderWidth: 1,
@@ -2650,6 +2725,8 @@ const styles = StyleSheet.create({
     borderBottomColor: '#2A2F57',
     paddingBottom: 12,
   },
+  avatarHubScroll: { flexGrow: 0 },
+  avatarHubScrollContent: { paddingBottom: 2 },
   avatarHubHero: {
     minHeight: 84,
     flexDirection: 'row',
@@ -2715,6 +2792,25 @@ const styles = StyleSheet.create({
   avatarHubActionDisabled: { opacity: 0.48 },
   avatarHubActionText: { color: '#E8ECF1', fontSize: 11, fontWeight: '900', textAlign: 'center' },
   avatarHubSectionTitle: { color: '#9BA3C7', fontSize: 11, fontWeight: '900', textTransform: 'uppercase', marginTop: 14, marginBottom: 8 },
+  avatarHubEmptyText: { color: '#9BA3C7', fontSize: 11, fontWeight: '800', lineHeight: 16 },
+  lockerSection: { marginTop: 8 },
+  lockerTitle: { color: '#E8ECF1', fontSize: 12, fontWeight: '900', marginBottom: 7 },
+  lockerGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  lockerChip: {
+    flexGrow: 1,
+    flexBasis: '47%',
+    minHeight: 50,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2A2F57',
+    backgroundColor: '#121737',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  lockerChipEquipped: { borderColor: '#52E5A7', backgroundColor: '#123B32' },
+  lockerName: { color: '#E8ECF1', fontSize: 12, fontWeight: '900' },
+  lockerState: { color: '#BDEBFF', fontSize: 10, fontWeight: '900', marginTop: 3 },
+  lockerStateEquipped: { color: '#52E5A7' },
   giftGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   giftChip: {
     flexGrow: 1,

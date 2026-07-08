@@ -826,9 +826,19 @@ function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
   return { salt, passwordHash };
 }
 
+const PLAYER_NAME_MIN_LENGTH = 2;
+const PLAYER_NAME_MAX_LENGTH = 12;
+const PLAYER_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+function cleanPlayerNameCandidate(value) {
+  return String(value || '').trim();
+}
+
 function validateNewDisplayName(displayName, existingUserId = null) {
-  const clean = String(displayName || '').trim();
-  if (clean.length < 2) return { error: 'Display name must be at least 2 characters.' };
+  const clean = cleanPlayerNameCandidate(displayName);
+  if (clean.length < PLAYER_NAME_MIN_LENGTH) return { error: `Display name must be at least ${PLAYER_NAME_MIN_LENGTH} characters.` };
+  if (clean.length > PLAYER_NAME_MAX_LENGTH) return { error: `Display name must be ${PLAYER_NAME_MAX_LENGTH} characters or fewer.` };
+  if (!PLAYER_NAME_PATTERN.test(clean)) return { error: 'Display name can only use letters, numbers, dashes, and underscores.' };
   const duplicate = [...users.values()].find(user => user.userId !== existingUserId && user.displayName.toLowerCase() === clean.toLowerCase());
   if (duplicate) return { error: 'Display name is already taken.' };
   return { displayName: clean };
@@ -836,10 +846,11 @@ function validateNewDisplayName(displayName, existingUserId = null) {
 
 function suggestedSocialDisplayName(profile) {
   const base = String(profile.displayName || profile.email?.split('@')[0] || `${providerLabel(profile.provider)} Player`)
-    .replace(/\s+/g, ' ')
+    .replace(/\s+/g, '')
+    .replace(/[^A-Za-z0-9_-]/g, '')
     .trim()
-    .slice(0, 24);
-  return base.length >= 2 ? base : `${providerLabel(profile.provider)} Player`;
+    .slice(0, PLAYER_NAME_MAX_LENGTH);
+  return base.length >= PLAYER_NAME_MIN_LENGTH ? base : `${providerLabel(profile.provider)}Player`.slice(0, PLAYER_NAME_MAX_LENGTH);
 }
 
 function findUserByProvider(provider, providerUserId) {
@@ -2621,11 +2632,9 @@ app.patch('/admin/api/users/:userId/profile', requireAdmin(adminStore, 'users:wr
   const reason = cleanAdminReason(req.body?.reason);
   if (!reason) return res.status(400).json({ error: 'Reason is required.' });
   const before = { displayName: user.displayName };
-  const nextDisplayName = String(req.body?.displayName ?? user.displayName).replace(/\s+/g, ' ').trim().slice(0, 32);
-  if (nextDisplayName.length < 2) return res.status(400).json({ error: 'Display name must be at least 2 characters.' });
-  const duplicate = [...users.values()].find(item => item.userId !== user.userId && item.displayName.toLowerCase() === nextDisplayName.toLowerCase());
-  if (duplicate) return res.status(409).json({ error: 'Display name is already taken.' });
-  user.displayName = nextDisplayName;
+  const displayNameCheck = validateNewDisplayName(req.body?.displayName ?? user.displayName, user.userId);
+  if (displayNameCheck.error) return res.status(displayNameCheck.error.includes('taken') ? 409 : 400).json({ error: displayNameCheck.error });
+  user.displayName = displayNameCheck.displayName;
   writeAudit(adminStore, req, req.admin.admin, 'admin.users.profile.update', { userId: user.userId }, { reason, before, after: { displayName: user.displayName } });
   saveStore();
   return res.json({ user: safeUser(user) });

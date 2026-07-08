@@ -43,15 +43,23 @@ function adminHeaders(session) {
   return { 'Content-Type': 'application/json', Cookie: session.cookie };
 }
 
+let testNameCounter = 0;
+function testDisplayName(prefix = 'Player') {
+  const base = String(prefix).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 9) || 'Player';
+  const suffix = (++testNameCounter).toString(36).padStart(3, '0').slice(-3);
+  return `${base.slice(0, 12 - suffix.length)}${suffix}`;
+}
+
 function emitAck(socket, event, payload) {
   return new Promise(resolve => socket.emit(event, payload, resolve));
 }
 
 async function signup(baseUrl, displayName, inviteCode = '') {
+  const playerName = testDisplayName(displayName);
   return json(await fetch(`${baseUrl}/auth/signup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ displayName, password: 'password1', inviteCode }),
+    body: JSON.stringify({ displayName: playerName, password: 'password1', inviteCode }),
   }));
 }
 
@@ -388,6 +396,38 @@ test('dev test accounts can be seeded for local playtesting', async () => {
   }, { SEED_TEST_ACCOUNTS: '1' });
 });
 
+test('signup enforces compact player names', async () => {
+  await withServer(async (baseUrl) => {
+    const tooShort = await fetch(`${baseUrl}/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'A', password: 'password1' }),
+    });
+    assert.equal(tooShort.status, 400);
+
+    const tooLong = await fetch(`${baseUrl}/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: '1234567890123', password: 'password1' }),
+    });
+    assert.equal(tooLong.status, 400);
+
+    const badCharacters = await fetch(`${baseUrl}/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'Bad Name!', password: 'password1' }),
+    });
+    assert.equal(badCharacters.status, 400);
+
+    const accepted = await json(await fetch(`${baseUrl}/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'Ace_12-Play', password: 'password1' }),
+    }));
+    assert.equal(accepted.user.displayName, 'Ace_12-Play');
+  });
+});
+
 test('pre-alpha invite gate blocks open signup and consumes admin-created invites once', async () => {
   await withServer(async (baseUrl) => {
     const config = await json(await fetch(`${baseUrl}/auth/config`));
@@ -396,7 +436,7 @@ test('pre-alpha invite gate blocks open signup and consumes admin-created invite
     const blocked = await fetch(`${baseUrl}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: `NoInvite${Date.now()}`, password: 'password1' }),
+      body: JSON.stringify({ displayName: testDisplayName('NoInvite'), password: 'password1' }),
     });
     assert.equal(blocked.status, 403);
 
@@ -417,7 +457,7 @@ test('pre-alpha invite gate blocks open signup and consumes admin-created invite
     const accepted = await json(await fetch(`${baseUrl}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: `Invited${Date.now()}`, password: 'password1', inviteCode: 'ALPHA1' }),
+      body: JSON.stringify({ displayName: testDisplayName('Invited'), password: 'password1', inviteCode: 'ALPHA1' }),
     }));
     assert.ok(accepted.token);
 
@@ -428,7 +468,7 @@ test('pre-alpha invite gate blocks open signup and consumes admin-created invite
     const exhausted = await fetch(`${baseUrl}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: `Late${Date.now()}`, password: 'password1', inviteCode: 'ALPHA1' }),
+      body: JSON.stringify({ displayName: testDisplayName('Late'), password: 'password1', inviteCode: 'ALPHA1' }),
     });
     assert.equal(exhausted.status, 403);
   }, { REQUIRE_INVITE_CODE: '1', SEED_ADMIN_ACCOUNT: '1' });
@@ -449,12 +489,12 @@ test('social auth gates new accounts and links existing profiles', async () => {
     assert.equal(needsProfile.requiresProfile, true);
     assert.equal(needsProfile.provider, 'google');
     assert.equal(needsProfile.inviteRequired, true);
-    assert.equal(needsProfile.suggestedDisplayName, 'Golfy Google');
+    assert.equal(needsProfile.suggestedDisplayName, 'GolfyGoogle');
 
     const blocked = await fetch(`${baseUrl}/auth/social/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'google', idToken: googleToken, displayName: `Social${Date.now()}` }),
+      body: JSON.stringify({ provider: 'google', idToken: googleToken, displayName: testDisplayName('Social') }),
     });
     assert.equal(blocked.status, 403);
 
@@ -480,7 +520,7 @@ test('social auth gates new accounts and links existing profiles', async () => {
       }),
     }));
 
-    const displayName = `Google${Date.now()}`;
+    const displayName = testDisplayName('Google');
     const accepted = await json(await fetch(`${baseUrl}/auth/social/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

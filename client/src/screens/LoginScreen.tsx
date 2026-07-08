@@ -14,6 +14,18 @@ import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui 
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
 
+const PLAYER_NAME_RULES = 'Use 2-12 letters, numbers, dashes, or underscores.';
+const PLAYER_NAME_PATTERN = /^[A-Za-z0-9_-]{2,12}$/;
+
+function cleanSignupNameInput(value: string) {
+  return value.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 12);
+}
+
+function playerNameError(value: string) {
+  if (!PLAYER_NAME_PATTERN.test(value)) return PLAYER_NAME_RULES;
+  return null;
+}
+
 const LoginScreen: React.FC<Props> = ({ navigation }) => {
   const { signIn, signUp, signInWithSocial, completeSocialSignUp } = useAuth();
   const [displayName, setDisplayName] = useState('');
@@ -45,6 +57,13 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
     if (!cleanDisplayName || !cleanPassword) {
       Alert.alert('Profile needed', 'Enter your display name and password.');
       return;
+    }
+    if (mode === 'signup') {
+      const nameError = playerNameError(cleanDisplayName);
+      if (nameError) {
+        Alert.alert('Name needs cleanup', nameError);
+        return;
+      }
     }
     const cleanInviteCode = inviteCode.trim();
     if (mode === 'signup' && inviteRequired && !cleanInviteCode) {
@@ -84,6 +103,11 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
     const cleanInvite = socialInviteCode.trim();
     if (!cleanName) {
       Alert.alert('Profile needed', 'Choose your Golf 9 display name.');
+      return;
+    }
+    const nameError = playerNameError(cleanName);
+    if (nameError) {
+      Alert.alert('Name needs cleanup', nameError);
       return;
     }
     if (pendingSocial.inviteRequired && !cleanInvite) {
@@ -127,13 +151,15 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
           placeholder="Display name"
           placeholderTextColor={ui.text.muted}
           value={displayName}
-          onChangeText={setDisplayName}
+          onChangeText={text => setDisplayName(isLogin ? text : cleanSignupNameInput(text))}
+          maxLength={isLogin ? 64 : 12}
           autoCapitalize="none"
           autoCorrect={false}
           spellCheck={false}
           textContentType="username"
           autoComplete="username"
         />
+        {!isLogin ? <Text style={styles.inputHint}>{PLAYER_NAME_RULES}</Text> : null}
         <TextInput
           style={styles.input}
           placeholder="Password"
@@ -203,11 +229,13 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
               placeholder="Display name"
               placeholderTextColor={ui.text.muted}
               value={socialDisplayName}
-              onChangeText={setSocialDisplayName}
+              onChangeText={text => setSocialDisplayName(cleanSignupNameInput(text))}
+              maxLength={12}
               autoCapitalize="none"
               autoCorrect={false}
               spellCheck={false}
             />
+            <Text style={styles.inputHint}>{PLAYER_NAME_RULES}</Text>
             {pendingSocial?.inviteRequired ? (
               <TextInput
                 style={styles.input}
@@ -271,6 +299,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
   },
+  inputHint: { color: ui.text.muted, fontSize: 11, fontWeight: '800', marginTop: -6, marginBottom: 12, lineHeight: 15 },
   quickActions: { flexDirection: 'row', gap: 10, marginTop: 2 },
   secondaryAction: {
     flex: 1,
