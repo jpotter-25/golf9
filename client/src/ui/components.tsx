@@ -140,23 +140,30 @@ function GlobalTopBar() {
 
       <Modal animationType="fade" transparent visible={settingsOpen} onRequestClose={() => setSettingsOpen(false)}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.settingsCard}>
-            <Pressable style={styles.modalClose} onPress={() => setSettingsOpen(false)} accessibilityRole="button" accessibilityLabel="Close settings">
-              <X size={24} color={ui.text.primary} strokeWidth={3} />
-            </Pressable>
-            <View style={styles.settingsTitleBar}>
-              <Text style={styles.settingsTitle}>Settings</Text>
+          <LinearGradient colors={gradients.panel} style={styles.settingsCard}>
+            <View style={styles.settingsHeader}>
+              <View style={styles.settingsHeaderCopy}>
+                <Text style={styles.settingsEyebrow}>Player Controls</Text>
+                <Text style={styles.settingsTitle}>Settings</Text>
+              </View>
+              <Pressable style={styles.modalClose} onPress={() => setSettingsOpen(false)} accessibilityRole="button" accessibilityLabel="Close settings">
+                <X size={23} color={ui.text.primary} strokeWidth={3} />
+              </Pressable>
             </View>
             <View style={styles.settingsBody}>
+              <Text style={styles.settingsSectionLabel}>Alerts and audio</Text>
               <SettingsToggle Icon={Volume2} label="Sound" value={prefs.sound} onValueChange={value => updatePrefs({ sound: value })} />
               <SettingsToggle Icon={Music2} label="Music" value={prefs.music} onValueChange={value => updatePrefs({ music: value })} />
               <SettingsToggle Icon={Bell} label="Pop-up Notifications" value={prefs.turnAlerts} onValueChange={value => updatePrefs({ turnAlerts: value })} />
               <SettingsToggle Icon={Zap} label="Vibration" value={prefs.vibrate} onValueChange={value => updatePrefs({ vibrate: value })} />
+              <View style={styles.settingsDivider} />
+              <Text style={styles.settingsSectionLabel}>Game help</Text>
               <SettingsAction Icon={BookOpen} label="Rules" onPress={() => { setSettingsOpen(false); navigation.navigate('Rules'); }} />
               <SettingsAction Icon={GraduationCap} label="Play Tutorial" onPress={() => { setSettingsOpen(false); navigation.navigate('Rules'); }} />
+              <View style={styles.settingsDivider} />
               <SettingsAction Icon={LogOut} label="Log Out" danger onPress={() => { setSettingsOpen(false); signOut(); }} />
             </View>
-          </View>
+          </LinearGradient>
         </View>
       </Modal>
     </View>
@@ -167,12 +174,12 @@ function SettingsToggle({ Icon, label, value, onValueChange }: { Icon: LucideIco
   return (
     <View style={styles.settingsRow}>
       <View style={styles.settingsRowIcon}><Icon size={22} color={ui.palette.sky} strokeWidth={2.8} /></View>
-      <Text style={styles.settingsRowText}>{label}</Text>
+      <Text style={styles.settingsRowText} numberOfLines={1}>{label}</Text>
       <Switch
         value={value}
         onValueChange={onValueChange}
-        thumbColor={value ? ui.palette.gold : ui.text.muted}
-        trackColor={{ false: '#88A9D2', true: ui.palette.feltLight }}
+        thumbColor={value ? ui.palette.emerald : ui.text.muted}
+        trackColor={{ false: ui.border.strong, true: 'rgba(82, 229, 167, 0.35)' }}
       />
     </View>
   );
@@ -182,7 +189,7 @@ function SettingsAction({ Icon, label, onPress, danger = false }: { Icon: Lucide
   return (
     <Pressable style={styles.settingsRow} onPress={onPress}>
       <View style={styles.settingsRowIcon}><Icon size={22} color={danger ? ui.feedback.danger : ui.palette.sky} strokeWidth={2.8} /></View>
-      <Text style={[styles.settingsRowText, danger && styles.settingsDanger]}>{label}</Text>
+      <Text style={[styles.settingsRowText, danger && styles.settingsDanger]} numberOfLines={1}>{label}</Text>
       <Text style={styles.settingsChevron}>›</Text>
     </Pressable>
   );
@@ -409,63 +416,76 @@ const styles = StyleSheet.create({
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.54)',
+    backgroundColor: 'rgba(0, 0, 0, 0.62)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
   },
   settingsCard: {
     width: '100%',
-    maxWidth: 420,
-    borderRadius: 8,
-    backgroundColor: '#ECF5FF',
-    borderWidth: 5,
-    borderColor: '#FFFFFF',
-    overflow: 'visible',
+    maxWidth: 390,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: ui.border.strong,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 12,
   },
   modalClose: {
-    position: 'absolute',
-    zIndex: 2,
-    top: -23,
-    right: -12,
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    borderWidth: 3,
-    borderColor: '#FFFFFF',
-    backgroundColor: '#6EA0D7',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  settingsTitleBar: {
-    minHeight: 64,
-    backgroundColor: '#2F63C7',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderBottomWidth: 4,
-    borderBottomColor: '#1B4189',
-  },
-  settingsTitle: { color: '#FFFFFF', fontSize: 27, fontWeight: '900', textTransform: 'uppercase' },
-  settingsBody: { padding: 14, gap: 10 },
-  settingsRow: {
-    minHeight: 50,
+    width: 42,
+    height: 42,
     borderRadius: 8,
-    backgroundColor: '#FFC247',
-    borderWidth: 2,
-    borderColor: '#EF8F1E',
+    borderWidth: 1,
+    borderColor: ui.border.soft,
+    backgroundColor: ui.surface.glass,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingsHeader: {
+    minHeight: 72,
+    borderBottomWidth: 1,
+    borderBottomColor: ui.border.soft,
+    backgroundColor: 'rgba(11, 16, 35, 0.54)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  settingsHeaderCopy: { flex: 1, minWidth: 0 },
+  settingsEyebrow: { color: ui.palette.gold, fontSize: 11, fontWeight: '900', textTransform: 'uppercase', marginBottom: 3 },
+  settingsTitle: { color: ui.text.primary, fontSize: 28, fontWeight: '900' },
+  settingsBody: { padding: 16, gap: 9 },
+  settingsSectionLabel: { color: ui.text.muted, fontSize: 11, fontWeight: '900', textTransform: 'uppercase', marginTop: 2 },
+  settingsDivider: { height: 1, backgroundColor: ui.border.soft, marginVertical: 4 },
+  settingsRow: {
+    minHeight: 54,
+    borderRadius: 8,
+    backgroundColor: 'rgba(11, 16, 35, 0.7)',
+    borderWidth: 1,
+    borderColor: ui.border.soft,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     paddingHorizontal: 12,
   },
   settingsRowIcon: {
-    width: 32,
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: ui.border.soft,
+    backgroundColor: ui.surface.base,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  settingsRowText: { flex: 1, color: '#9A4F13', fontSize: 15, fontWeight: '900', textTransform: 'uppercase' },
+  settingsRowText: { flex: 1, color: ui.text.primary, fontSize: 15, fontWeight: '900' },
   settingsDanger: { color: ui.feedback.danger },
-  settingsChevron: { color: '#416789', fontSize: 28, fontWeight: '900' },
+  settingsChevron: { color: ui.text.muted, fontSize: 27, fontWeight: '900' },
   header: {
     minHeight: 72,
     flexDirection: 'row',
