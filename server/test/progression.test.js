@@ -163,7 +163,7 @@ test('ranked cosmetics require season-best eligibility and coins', () => {
 
   const eligible = user({
     currency: { coins: 5000, lifetimeCoins: 5000 },
-    competitive: { seasonId: 's1', mmr: 2100, seasonBestMmr: 2100, placementsPlayed: 5, claimedSeasonRewards: [], matchHistory: [] },
+    competitive: { seasonId: 's1', mmr: 2500, seasonBestMmr: 2500, placementsPlayed: 5, claimedSeasonRewards: [], matchHistory: [] },
   });
   normalizeUserProgression(eligible, now, season);
   const catalogItem = publicCosmeticCatalog(eligible, season).find(item => item.id === 's1-gold-card-back');

@@ -2,7 +2,7 @@
 // Purpose: Tabbed player profile hub for progression, results, cosmetics, and social.
 
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CheckCircle2, Gift, Link, MessageCircle, Pencil, ShoppingBag, Trophy, Users } from 'lucide-react-native';
@@ -13,6 +13,7 @@ import { isProviderConfigured } from '../services/socialAuth';
 import { ActionButton, PremiumPanel, ProgressBar, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
 import { CoinClaimBurst, type CoinClaimBurstState } from '../components/CoinClaimBurst';
 import { PlayerAvatar } from '../components/PlayerAvatar';
+import { RankEmblem } from '../components/AvatarDecorations';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Profile'>;
 type ProfileTab = 'stats' | 'matches' | 'avatar' | 'cosmetics' | 'social';
@@ -35,12 +36,35 @@ const MATCH_FILTERS: Array<{ key: MatchFilter; label: string }> = [
   { key: 'passplay', label: 'Pass' },
 ];
 
+const FALLBACK_RANK_BANDS: api.RankedLeagueBand[] = [
+  { league: 'Iron', min: 0, max: 799, divisions: ['III', 'II', 'I'] },
+  { league: 'Bronze', min: 800, max: 1599, divisions: ['III', 'II', 'I'] },
+  { league: 'Silver', min: 1600, max: 2399, divisions: ['III', 'II', 'I'] },
+  { league: 'Gold', min: 2400, max: 3199, divisions: ['III', 'II', 'I'] },
+  { league: 'Platinum', min: 3200, max: 3999, divisions: ['III', 'II', 'I'] },
+  { league: 'Diamond', min: 4000, max: 4799, divisions: ['III', 'II', 'I'] },
+  { league: 'Master', min: 4800, max: 5399, divisions: [] },
+  { league: 'Grandmaster', min: 5400, max: 5999, divisions: [] },
+  { league: 'Legend', min: 6000, max: null, divisions: [] },
+];
+
+type RankStep = {
+  id: string;
+  leagueName: string;
+  division: string | null;
+  name: string;
+  minMmr: number;
+  maxMmr: number | null;
+  league: api.RankedLeague;
+};
+
 const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const { token, user, signOut, refreshProfile, linkSocialProvider } = useAuth();
   const [tab, setTab] = useState<ProfileTab>('stats');
   const [matchFilter, setMatchFilter] = useState<MatchFilter>('all');
   const [results, setResults] = useState<api.GameResult[]>([]);
   const [cosmetics, setCosmetics] = useState<api.CosmeticItem[]>([]);
+  const [rankCatalog, setRankCatalog] = useState<api.RankedCatalog | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [coinBurst, setCoinBurst] = useState<CoinClaimBurstState>(null);
 
@@ -49,6 +73,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
     if (token) {
       api.myResults(token).then(response => setResults(response.results)).catch(() => setResults([]));
       api.cosmeticCatalog(token).then(response => setCosmetics(response.cosmetics)).catch(() => setCosmetics([]));
+      api.rankedCatalog(token).then(response => setRankCatalog(response.catalog)).catch(() => setRankCatalog(null));
     }
   }, [refreshProfile, token]));
 
@@ -67,6 +92,13 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const dailyBonus = user?.currency.dailyBonus ?? null;
   const dailyChallenges = user?.challenges?.daily?.items ?? [];
   const weeklyChallenges = user?.challenges?.weekly?.items ?? [];
+  const rankSteps = useMemo(() => rankStepsFromCatalog(rankCatalog), [rankCatalog]);
+  const activeLadder = user?.competitiveByPlayers?.['2'] ?? user?.competitive ?? null;
+  const currentRankStep = useMemo(
+    () => findRankStep(rankSteps, activeLadder?.league, activeLadder?.mmr),
+    [activeLadder?.league, activeLadder?.mmr, rankSteps]
+  );
+  const nextRank = useMemo(() => nextRankStep(rankSteps, currentRankStep), [currentRankStep, rankSteps]);
 
   const reloadBits = async () => {
     await refreshProfile().catch(() => {});
@@ -140,10 +172,13 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
       />
 
       <PremiumPanel tone="felt" style={styles.hero}>
-        <PlayerAvatar cosmetics={user?.inventory.equipped} fallbackInitial={user?.avatarInitial ?? '?'} size={82} />
+        <View style={styles.heroAvatarWrap}>
+          <PlayerAvatar cosmetics={user?.inventory.equipped} fallbackInitial={user?.avatarInitial ?? '?'} size={82} />
+          <RankEmblem league={user?.competitive.league} size={38} style={styles.heroRankBadge} />
+        </View>
         <View style={styles.heroCopy}>
           <Text style={styles.name} numberOfLines={1}>{user?.displayName ?? 'Player'}</Text>
-          <Text style={styles.meta}>Level {progression?.level ?? 1} - {user?.competitive.league.name ?? 'Silver III'}</Text>
+          <Text style={styles.meta}>Level {progression?.level ?? 1} - {user?.competitive.league.name ?? 'Iron III'}</Text>
           <ProgressBar value={progression?.levelProgress ?? 0} />
           <Text style={styles.progressText}>{progression?.currentLevelXp ?? 0} / {progression?.nextLevelXp ?? 1000} XP</Text>
         </View>
@@ -159,6 +194,13 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
 
       {tab === 'stats' ? (
         <>
+          <RankRoadmap
+            competitive={activeLadder}
+            steps={rankSteps}
+            current={currentRankStep}
+            next={nextRank}
+          />
+
           <View style={styles.statGrid}>
             <Stat label="Coins" value={String(user?.currency.coins ?? 0)} tone="gold" />
             <Stat label="Games" value={String(user?.statistics.gamesPlayed ?? 0)} />
@@ -184,8 +226,10 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
                 return (
                   <View key={count} style={styles.ladderCard}>
                     <Text style={styles.ladderCount}>{count}P</Text>
-                    <Text style={styles.ladderMmr} numberOfLines={1}>{ladder?.league.name ?? 'Silver III'}</Text>
-                    <Text style={styles.ladderLeague} numberOfLines={1}>{ladder?.rankedGames ?? 0} ranked games</Text>
+                    <RankEmblem league={ladder?.league} size={44} style={styles.ladderEmblem} />
+                    <Text style={styles.ladderMmr} numberOfLines={1}>{ladder?.league.name ?? 'Iron III'}</Text>
+                    <Text style={styles.ladderLeague} numberOfLines={1}>{ladder?.mmr ?? 0} MMR</Text>
+                    <Text style={styles.ladderLeague} numberOfLines={1}>{ladder?.rankedGames ?? 0} games</Text>
                   </View>
                 );
               })}
@@ -312,6 +356,65 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'go
       <Text style={[styles.statValue, tone === 'gold' && styles.goldText]} numberOfLines={1}>{value}</Text>
       <Text style={styles.statLabel} numberOfLines={1}>{label}</Text>
     </View>
+  );
+}
+
+function RankRoadmap({
+  competitive,
+  steps,
+  current,
+  next,
+}: {
+  competitive: api.CompetitiveState | null;
+  steps: RankStep[];
+  current: RankStep | null;
+  next: RankStep | null;
+}) {
+  const currentMmr = competitive?.mmr ?? 0;
+  const currentLabel = current?.name ?? competitive?.league.name ?? 'Iron III';
+  const nextLabel = next?.name ?? 'Top Rank';
+  const mmrToNext = next ? Math.max(0, next.minMmr - currentMmr) : 0;
+  const progressWindow = next && current ? Math.max(1, next.minMmr - current.minMmr) : 1;
+  const rankProgress = next && current
+    ? Math.max(0, Math.min(1, (currentMmr - current.minMmr) / progressWindow))
+    : 1;
+
+  return (
+    <PremiumPanel tone="felt" style={styles.rankRoadmap}>
+      <View style={styles.rankOverview}>
+        <RankEmblem league={current?.league ?? competitive?.league} size={76} />
+        <View style={styles.rankCopy}>
+          <Text style={styles.rankEyebrow}>Rank Path</Text>
+          <Text style={styles.rankName} numberOfLines={1}>{currentLabel}</Text>
+          <Text style={styles.rankMeta}>
+            {next ? `${mmrToNext} MMR to ${nextLabel}` : 'You are at the top of the ladder.'}
+          </Text>
+        </View>
+        <View style={styles.mmrPill}>
+          <Text style={styles.mmrPillValue}>{currentMmr}</Text>
+          <Text style={styles.mmrPillLabel}>MMR</Text>
+        </View>
+      </View>
+      <ProgressBar value={rankProgress} color={ui.palette.gold} />
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.rankTrack}
+        nestedScrollEnabled
+      >
+        {steps.map(step => {
+          const active = step.id === current?.id;
+          const passed = currentMmr >= step.minMmr && (step.maxMmr === null || currentMmr > step.maxMmr);
+          return (
+            <View key={step.id} style={[styles.rankStep, active && styles.rankStepActive, passed && styles.rankStepPassed]}>
+              <RankEmblem league={step.league} size={48} />
+              <Text style={styles.rankStepName} numberOfLines={1}>{step.name}</Text>
+              <Text style={styles.rankStepMeta} numberOfLines={1}>{formatRankRange(step)}</Text>
+            </View>
+          );
+        })}
+      </ScrollView>
+    </PremiumPanel>
   );
 }
 
@@ -452,6 +555,66 @@ function cosmeticTypeLabel(type: string) {
   return 'Title';
 }
 
+function rankStepsFromCatalog(catalog: api.RankedCatalog | null): RankStep[] {
+  const bands = catalog?.leagueBands?.length ? catalog.leagueBands : FALLBACK_RANK_BANDS;
+  return bands.flatMap((band) => {
+    const max = typeof band.max === 'number' ? band.max : null;
+    const divisions = Array.isArray(band.divisions) ? band.divisions.filter(Boolean) : [];
+    if (!divisions.length || max === null) {
+      return [rankStepFor(band.league, null, band.min, max)];
+    }
+    const width = Math.max(1, max - band.min + 1);
+    return divisions.map((division, index) => {
+      const minMmr = band.min + Math.floor((width * index) / divisions.length);
+      const maxMmr = index === divisions.length - 1
+        ? max
+        : band.min + Math.floor((width * (index + 1)) / divisions.length) - 1;
+      return rankStepFor(band.league, division, minMmr, maxMmr);
+    });
+  });
+}
+
+function rankStepFor(leagueName: string, division: string | null, minMmr: number, maxMmr: number | null): RankStep {
+  const name = division ? `${leagueName} ${division}` : leagueName;
+  return {
+    id: `${leagueName}:${division ?? 'elite'}`,
+    leagueName,
+    division,
+    name,
+    minMmr,
+    maxMmr,
+    league: {
+      league: leagueName,
+      division,
+      name,
+      minMmr,
+      nextLeagueMmr: maxMmr === null ? null : maxMmr + 1,
+    },
+  };
+}
+
+function findRankStep(steps: RankStep[], league?: api.RankedLeague | null, mmr = 0) {
+  const byRange = steps.find(step => mmr >= step.minMmr && (step.maxMmr === null || mmr <= step.maxMmr));
+  if (byRange) return byRange;
+  if (!league) return steps[0] ?? null;
+  return steps.find(step => step.name === league.name)
+    ?? steps.find(step => step.leagueName === league.league && step.division === league.division)
+    ?? steps[0]
+    ?? null;
+}
+
+function nextRankStep(steps: RankStep[], current: RankStep | null) {
+  if (!current) return steps[0] ?? null;
+  const index = steps.findIndex(step => step.id === current.id);
+  if (index < 0) return null;
+  return steps[index + 1] ?? null;
+}
+
+function formatRankRange(step: RankStep) {
+  if (step.maxMmr === null) return `${step.minMmr}+`;
+  return `${step.minMmr}-${step.maxMmr}`;
+}
+
 function formatNullable(value: number | null | undefined) {
   return typeof value === 'number' ? String(value) : '--';
 }
@@ -464,6 +627,18 @@ export default ProfileScreen;
 
 const styles = StyleSheet.create({
   hero: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  heroAvatarWrap: {
+    width: 92,
+    height: 92,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'visible',
+  },
+  heroRankBadge: {
+    position: 'absolute',
+    right: -1,
+    bottom: 1,
+  },
   avatar: {
     width: 82,
     height: 82,
@@ -479,6 +654,41 @@ const styles = StyleSheet.create({
   name: { color: ui.text.primary, fontSize: 25, fontWeight: '900' },
   meta: { color: ui.palette.gold, fontSize: 13, fontWeight: '900', marginTop: 4, marginBottom: 9 },
   progressText: { color: ui.text.muted, fontSize: 11, fontWeight: '800', marginTop: 5 },
+  rankRoadmap: { marginBottom: 12 },
+  rankOverview: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+  rankCopy: { flex: 1, minWidth: 0 },
+  rankEyebrow: { color: ui.palette.gold, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
+  rankName: { color: ui.text.primary, fontSize: 24, fontWeight: '900', marginTop: 3 },
+  rankMeta: { color: ui.text.secondary, fontSize: 12, fontWeight: '800', lineHeight: 17, marginTop: 4 },
+  mmrPill: {
+    minWidth: 66,
+    minHeight: 58,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: ui.border.soft,
+    backgroundColor: ui.surface.glass,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  mmrPillValue: { color: ui.palette.gold, fontSize: 18, fontWeight: '900' },
+  mmrPillLabel: { color: ui.text.muted, fontSize: 10, fontWeight: '900', marginTop: 2 },
+  rankTrack: { gap: 8, paddingTop: 12, paddingBottom: 2 },
+  rankStep: {
+    width: 104,
+    minHeight: 108,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: ui.border.soft,
+    backgroundColor: ui.surface.glass,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 8,
+  },
+  rankStepActive: { borderColor: ui.palette.gold, backgroundColor: 'rgba(255, 204, 102, 0.13)' },
+  rankStepPassed: { borderColor: 'rgba(82, 229, 167, 0.42)' },
+  rankStepName: { color: ui.text.primary, fontSize: 12, fontWeight: '900', marginTop: 7, textAlign: 'center' },
+  rankStepMeta: { color: ui.text.muted, fontSize: 10, fontWeight: '900', marginTop: 3 },
   tabRow: { flexDirection: 'row', gap: 6, marginBottom: 12 },
   tab: {
     flex: 1,
@@ -513,10 +723,11 @@ const styles = StyleSheet.create({
   sectionTitle: { color: ui.text.primary, fontSize: 18, fontWeight: '900' },
   sectionMeta: { color: ui.text.secondary, fontSize: 12, fontWeight: '800', lineHeight: 17, marginTop: 4 },
   ladderRow: { flexDirection: 'row', gap: 8 },
-  ladderCard: { flex: 1, minHeight: 86, borderRadius: 8, backgroundColor: ui.surface.glass, alignItems: 'center', justifyContent: 'center', padding: 8 },
+  ladderCard: { flex: 1, minHeight: 128, borderRadius: 8, backgroundColor: ui.surface.glass, alignItems: 'center', justifyContent: 'center', padding: 8 },
   ladderCount: { color: ui.palette.gold, fontSize: 13, fontWeight: '900' },
-  ladderMmr: { color: ui.text.primary, fontSize: 20, fontWeight: '900', marginTop: 5 },
-  ladderLeague: { color: ui.text.muted, fontSize: 10, fontWeight: '900', marginTop: 4 },
+  ladderEmblem: { marginTop: 6 },
+  ladderMmr: { color: ui.text.primary, fontSize: 12, fontWeight: '900', marginTop: 5, textAlign: 'center' },
+  ladderLeague: { color: ui.text.muted, fontSize: 10, fontWeight: '900', marginTop: 3, textAlign: 'center' },
   challengeItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderTopWidth: 1, borderTopColor: ui.border.soft },
   rowCopy: { flex: 1, minWidth: 0 },
   rowTitle: { color: ui.text.primary, fontSize: 14, fontWeight: '900' },

@@ -670,9 +670,9 @@ test('admin competitive operations manage config, players, and ranked queues', a
     const adjusted = await json(await fetch(`${baseUrl}/admin/api/users/${player.user.userId}/competitive/adjust`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
-      body: JSON.stringify({ reason: 'Integration test MMR correction', mmr: 2050, placementsPlayed: 6 }),
+      body: JSON.stringify({ reason: 'Integration test MMR correction', mmr: 2500, placementsPlayed: 6 }),
     }));
-    assert.equal(adjusted.competitive.mmr, 2050);
+    assert.equal(adjusted.competitive.mmr, 2500);
     assert.equal(adjusted.competitive.league.league, 'Gold');
     assert.equal(adjusted.competitive.placementComplete, true);
 
@@ -1034,8 +1034,8 @@ test('loads durable profile stats and completed results', async () => {
     assert.deepEqual(profile.user.stats, { gamesPlayed: 3, wins: 2 });
     assert.equal(profile.user.statistics.gamesPlayed, 3);
     assert.equal(profile.user.progression.level, 1);
-    assert.equal(profile.user.competitive.mmr, 1000);
-    assert.equal(profile.user.competitive.league.name, 'Silver III');
+    assert.equal(profile.user.competitive.mmr, 0);
+    assert.equal(profile.user.competitive.league.name, 'Iron III');
     assert.ok(profile.user.achievements.some(item => item.id === 'first_match'));
 
     const completed = await json(await fetch(`${baseUrl}/results/me`, { headers: authHeaders(token) }));
@@ -1421,6 +1421,11 @@ test('ranked queue creates a human-only ranked room and starts automatically', a
     await earnFreeCoins(baseUrl, one.token);
     await earnFreeCoins(baseUrl, two.token);
 
+    const catalog = await json(await fetch(`${baseUrl}/ranked/catalog`, { headers: authHeaders(one.token) }));
+    assert.equal(catalog.catalog.baseMmr, 0);
+    assert.equal(catalog.catalog.leagueBands[0].league, 'Iron');
+    assert.equal(catalog.catalog.leagueBands.at(-1).league, 'Legend');
+
     const first = await json(await fetch(`${baseUrl}/ranked/queue`, {
       method: 'POST',
       headers: authHeaders(one.token),
@@ -1429,7 +1434,7 @@ test('ranked queue creates a human-only ranked room and starts automatically', a
     assert.equal(first.queue.queued, true);
     assert.equal(first.queue.matchedRoomCode, null);
     assert.equal(first.queue.rounds, 9);
-    assert.equal(first.competitive.mmr, 1000);
+    assert.equal(first.competitive.mmr, 0);
     assert.equal(first.competitive.playerCount, 2);
 
     const second = await json(await fetch(`${baseUrl}/ranked/queue`, {

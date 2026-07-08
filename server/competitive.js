@@ -71,6 +71,21 @@ function normalizeRewards(input) {
     }));
 }
 
+function hasLegacyDefaultRankBands(input) {
+  if (!Array.isArray(input) || input.length < 8) return false;
+  const bands = normalizeLeagueBands(input);
+  return bands.length === 8
+    && bands[0]?.league === 'Bronze'
+    && bands[0]?.min === 0
+    && bands[0]?.max === 999
+    && bands[1]?.league === 'Silver'
+    && bands[1]?.min === 1000
+    && bands[4]?.league === 'Diamond'
+    && bands[4]?.max === 4999
+    && bands[7]?.league === 'Legend'
+    && bands[7]?.max === null;
+}
+
 export function defaultCompetitiveConfig(timestamp = now()) {
   return {
     versionId: `competitive-default-${timestamp}`,
@@ -93,11 +108,13 @@ export function defaultCompetitiveConfig(timestamp = now()) {
 
 export function normalizeCompetitiveConfig(input = null, fallback = defaultCompetitiveConfig()) {
   const source = input && typeof input === 'object' ? input : {};
+  const migrateLegacyRankDefaults = hasLegacyDefaultRankBands(source.leagueBands)
+    && safeInteger(source.baseMmr, 1000) === 1000;
   return {
     versionId: cleanText(source.versionId || fallback.versionId || `competitive-${now()}`, 80),
     publishedAt: Number(source.publishedAt || fallback.publishedAt || now()),
     publishedBy: cleanText(source.publishedBy || fallback.publishedBy || 'system', 80),
-    baseMmr: Math.max(0, safeInteger(source.baseMmr, fallback.baseMmr)),
+    baseMmr: migrateLegacyRankDefaults ? BASE_MMR : Math.max(0, safeInteger(source.baseMmr, fallback.baseMmr)),
     placementMatchesRequired: Math.max(1, safeInteger(source.placementMatchesRequired, fallback.placementMatchesRequired)),
     seasonLengthDays: Math.max(1, safeInteger(source.seasonLengthDays, fallback.seasonLengthDays)),
     rewardGraceDays: Math.max(0, safeInteger(source.rewardGraceDays, fallback.rewardGraceDays)),
@@ -105,9 +122,9 @@ export function normalizeCompetitiveConfig(input = null, fallback = defaultCompe
     strengthAdjustmentCap: Math.max(0, safeInteger(source.strengthAdjustmentCap, fallback.strengthAdjustmentCap)),
     performanceBonusCap: Math.max(0, safeInteger(source.performanceBonusCap, fallback.performanceBonusCap)),
     softReset: {
-      anchorMmr: Math.max(0, safeInteger(source.softReset?.anchorMmr, fallback.softReset.anchorMmr)),
+      anchorMmr: migrateLegacyRankDefaults ? DEFAULT_SOFT_RESET.anchorMmr : Math.max(0, safeInteger(source.softReset?.anchorMmr, fallback.softReset.anchorMmr)),
       multiplier: Number.isFinite(Number(source.softReset?.multiplier)) ? Number(source.softReset.multiplier) : fallback.softReset.multiplier,
-      floor: Math.max(0, safeInteger(source.softReset?.floor, fallback.softReset.floor)),
+      floor: migrateLegacyRankDefaults ? DEFAULT_SOFT_RESET.floor : Math.max(0, safeInteger(source.softReset?.floor, fallback.softReset.floor)),
     },
     matchmaking: {
       firstRange: Math.max(0, safeInteger(source.matchmaking?.firstRange, fallback.matchmaking.firstRange)),
@@ -119,8 +136,8 @@ export function normalizeCompetitiveConfig(input = null, fallback = defaultCompe
       maxRange: Math.max(0, safeInteger(source.matchmaking?.maxRange, fallback.matchmaking.maxRange)),
     },
     mmrDeltas: normalizeDeltas(source.mmrDeltas || fallback.mmrDeltas),
-    leagueBands: normalizeLeagueBands(source.leagueBands || fallback.leagueBands),
-    rewards: normalizeRewards(source.rewards || fallback.rewards),
+    leagueBands: normalizeLeagueBands(migrateLegacyRankDefaults ? DEFAULT_LEAGUE_BANDS : source.leagueBands || fallback.leagueBands),
+    rewards: normalizeRewards(migrateLegacyRankDefaults ? SEASON_REWARDS : source.rewards || fallback.rewards),
   };
 }
 

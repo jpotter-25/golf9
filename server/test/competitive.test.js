@@ -32,7 +32,8 @@ test('competitive config seeds from current ranked defaults', () => {
 
   assert.equal(config.placementMatchesRequired, 5);
   assert.equal(config.placementMultiplier, 1.25);
-  assert.equal(leagueForMmr(1000, config).name, 'Silver III');
+  assert.equal(config.baseMmr, 0);
+  assert.equal(leagueForMmr(config.baseMmr, config).name, 'Iron III');
   assert.equal(previewRankedDelta({
     mmr: 1000,
     opponentMmrs: [1000],
@@ -100,7 +101,7 @@ test('season activation and ending drive ranked soft reset behavior', () => {
   normalizeCompetitiveState(account, rankedSeason, config);
 
   assert.equal(account.competitive.seasonId, 's2');
-  assert.equal(account.competitive.mmr, 2100);
+  assert.equal(account.competitive.mmr, 1650);
   assert.equal(account.competitive.placementsPlayed, 0);
   assert.deepEqual(account.competitive.claimedSeasonRewards, []);
 

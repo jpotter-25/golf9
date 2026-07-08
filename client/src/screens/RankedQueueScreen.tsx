@@ -3,12 +3,13 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
-import { ChevronLeft, Radar, Shield, Sparkles, Trophy, Users, type LucideIcon } from 'lucide-react-native';
+import { ChevronLeft, Radar, Sparkles, Trophy, Users, type LucideIcon } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
 import { ActionButton, PremiumPanel, ProgressBar, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
+import { RankEmblem } from '../components/AvatarDecorations';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'RankedQueue'>;
 
@@ -90,7 +91,7 @@ export default function RankedQueueScreen({ route, navigation }: Props) {
     }
   };
 
-  const league = competitive?.league.name ?? 'Silver III';
+  const league = competitive?.league.name ?? 'Iron III';
   const placementsRemaining = competitive?.placementsRemaining ?? 5;
   const waitedSeconds = queue?.joinedAt ? Math.floor((now - queue.joinedAt) / 1000) : 0;
   const seasonDaysLeft = competitive?.season?.endsAt
@@ -110,7 +111,7 @@ export default function RankedQueueScreen({ route, navigation }: Props) {
 
       <PremiumPanel tone="gold">
         <View style={styles.rankHero}>
-          <Shield size={34} color={ui.text.inverse} strokeWidth={2.6} />
+          <RankEmblem league={competitive?.league} size={46} />
           <View style={styles.rankCopy}>
             <Text style={styles.rankTitle}>{league}</Text>
             <Text style={styles.rankMeta}>{competitive?.placementComplete ? 'Ranked ladder' : `${placementsRemaining} placements remaining`}</Text>

@@ -13,6 +13,14 @@ const IMAGE_MIME_EXT = {
   'image/jpeg': 'jpg',
   'image/webp': 'webp',
 };
+const LEGACY_RANK_REQUIREMENTS = new Map([
+  ['s1-bronze-frame', 0],
+  ['s1-silver-title', 1000],
+  ['season-watch-accessory', 1000],
+  ['s1-gold-card-back', 2000],
+  ['s1-platinum-table-theme', 3000],
+  ['s1-master-card-back', 5000],
+]);
 
 function now() {
   return Date.now();
@@ -93,6 +101,7 @@ export function seedCatalogStore(store) {
   normalizeCatalogStore(store);
   let changed = false;
   const seed = COSMETIC_CATALOG.map((item, index) => normalizeCatalogItem({ ...item, sortOrder: index }));
+  const seedById = new Map(seed.map(item => [item.id, item]));
   for (const seedItem of seed) {
     if (!store.live.some(item => item.id === seedItem.id)) {
       store.live.push(seedItem);
@@ -103,8 +112,25 @@ export function seedCatalogStore(store) {
       changed = true;
     }
   }
+  changed = migrateLegacyRankRequirements(store.live, seedById) || changed;
+  changed = migrateLegacyRankRequirements(store.draft, seedById) || changed;
   store.live.sort(compareCatalogItems);
   store.draft.sort(compareCatalogItems);
+  return changed;
+}
+
+function migrateLegacyRankRequirements(items, seedById) {
+  let changed = false;
+  for (const item of items) {
+    const legacyMmr = LEGACY_RANK_REQUIREMENTS.get(item.id);
+    const seedItem = seedById.get(item.id);
+    if (legacyMmr === undefined || !seedItem || item.requiredMmr !== legacyMmr) continue;
+    item.requiredMmr = seedItem.requiredMmr;
+    item.requiredLeague = seedItem.requiredLeague;
+    item.description = seedItem.description;
+    item.updatedAt = now();
+    changed = true;
+  }
   return changed;
 }
 

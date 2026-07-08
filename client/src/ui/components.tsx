@@ -126,7 +126,7 @@ function GlobalTopBar() {
 
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Open ranked profile, ${ranked?.league.name ?? 'Rookie'}`}
+          accessibilityLabel={`Open ranked profile, ${ranked?.league.name ?? 'Iron III'}`}
           style={styles.rankChip}
           onPress={() => navigation.navigate('Profile')}
         >

@@ -154,7 +154,7 @@ function renderUserDetail(user) {
       <span class="chip">Coins ${money(user.currency?.coins)}</span>
       <span class="chip">Level ${user.progression?.level ?? 1}</span>
       <span class="chip">Wins ${user.statistics?.wins ?? 0}</span>
-      <span class="chip">MMR ${user.competitive?.mmr ?? 1000}</span>
+      <span class="chip">MMR ${user.competitive?.mmr ?? 0}</span>
     </div>
     <div class="card">
       <strong>Equipped</strong>

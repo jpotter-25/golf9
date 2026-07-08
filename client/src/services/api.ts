@@ -364,6 +364,13 @@ export type RankedLeague = {
   nextLeagueMmr: number | null;
 };
 
+export type RankedLeagueBand = {
+  league: string;
+  min: number;
+  max: number | null;
+  divisions: string[];
+};
+
 export type RankedSeasonReward = {
   id: string;
   name: string;
@@ -391,6 +398,19 @@ export type CompetitiveState = {
   seasonBestLeague: RankedLeague;
   claimedSeasonRewards: string[];
   matchHistory: RankedMatchSummary[];
+  season: {
+    id: string;
+    name: string;
+    startsAt: number;
+    endsAt: number;
+    rewards: RankedSeasonReward[];
+  };
+};
+
+export type RankedCatalog = {
+  baseMmr: number;
+  leagueBands: RankedLeagueBand[];
+  placementMatchesRequired: number;
   season: {
     id: string;
     name: string;
@@ -912,6 +932,10 @@ export function wagerPlayOnlineRoom(token: string, maxPlayers: number, rounds: n
 
 export function rankedProfile(token: string): Promise<{ competitive: CompetitiveState; competitiveByPlayers: RankedLadders; queue: RankedQueueStatus }> {
   return request<{ competitive: CompetitiveState; competitiveByPlayers: RankedLadders; queue: RankedQueueStatus }>('/ranked/me', {}, token);
+}
+
+export function rankedCatalog(token: string): Promise<{ catalog: RankedCatalog }> {
+  return request<{ catalog: RankedCatalog }>('/ranked/catalog', {}, token);
 }
 
 export function joinRankedQueue(token: string, maxPlayers: number): Promise<{ competitive: CompetitiveState; competitiveByPlayers: RankedLadders; queue: RankedQueueStatus }> {

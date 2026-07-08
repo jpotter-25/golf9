@@ -1821,8 +1821,8 @@ export default function GameScreen({ route, navigation }: Props) {
                     {avatarHubLoading
                       ? 'Loading...'
                       : avatarHubIsSelf
-                        ? `Level ${user?.progression.level ?? 1} - ${user?.competitive.league.name ?? 'Rookie'}`
-                        : `${avatarHubLeague?.name ?? 'Rookie'} - ${(avatarHubRoomPlayer?.connected ?? avatarHubProfile?.status.online) ? 'Online' : 'Offline'}`}
+                        ? `Level ${user?.progression.level ?? 1} - ${user?.competitive.league.name ?? 'Iron III'}`
+                        : `${avatarHubLeague?.name ?? 'Iron III'} - ${(avatarHubRoomPlayer?.connected ?? avatarHubProfile?.status.online) ? 'Online' : 'Offline'}`}
                   </Text>
                 </View>
                 <Pressable style={styles.avatarHubCloseButton} onPress={() => setAvatarHubUserId(null)}>

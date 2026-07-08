@@ -191,7 +191,7 @@ export default function OnlineMenuScreen({ navigation }: Props) {
         <Segmented values={PLAYER_OPTIONS} selected={rankedPlayers} onSelect={setRankedPlayers} suffix="P" />
         <View style={styles.rankedStats}>
           <StatMini label="Rounds" value="9" dark />
-          <StatMini label="League" value={rankedLadder?.league.name ?? 'Silver III'} dark />
+          <StatMini label="League" value={rankedLadder?.league.name ?? 'Iron III'} dark />
           <StatMini label="Ladder" value={`${rankedPlayers}P`} dark />
         </View>
         <ActionButton

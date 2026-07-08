@@ -51,6 +51,7 @@ import {
   uploadCatalogAsset,
 } from './catalog.js';
 import {
+  BASE_MMR,
   applyRankedMatchResult,
   claimSeasonRewards,
   leagueForMmr,
@@ -358,6 +359,27 @@ function storageStatus() {
 
 function rankedConfig() {
   return liveCompetitiveConfig(competitiveStore);
+}
+
+function publicRankedCatalog() {
+  const config = rankedConfig();
+  rankedSeason = normalizeRankedSeason(rankedSeason, Date.now(), config);
+  return {
+    baseMmr: config.baseMmr,
+    leagueBands: config.leagueBands,
+    placementMatchesRequired: config.placementMatchesRequired,
+    season: {
+      id: rankedSeason.id,
+      name: rankedSeason.name,
+      startsAt: rankedSeason.startsAt,
+      endsAt: rankedSeason.endsAt,
+      rewards: (rankedSeason.rewards || config.rewards || []).map(reward => ({
+        ...reward,
+        earned: false,
+        claimed: false,
+      })),
+    },
+  };
 }
 
 function economyConfig() {
@@ -1037,7 +1059,7 @@ function adminCompetitiveOverview() {
   let totalMmr = 0;
   const recentMovement = [];
   for (const user of rankedUsers) {
-    const league = user.competitive?.league?.name || leagueForMmr(user.competitive?.mmr || 1000, config).name;
+    const league = user.competitive?.league?.name || leagueForMmr(user.competitive?.mmr ?? BASE_MMR, config).name;
     leagueDistribution[league] = (leagueDistribution[league] || 0) + 1;
     totalMmr += Number(user.competitive?.mmr || 0);
     for (const history of user.competitive?.matchHistory || []) {
@@ -1655,7 +1677,7 @@ function roomSummary(room) {
     } : { buyIn: 0, pot: 0, chargedAt: null },
     ranked: room.matchType === 'ranked' ? {
       seasonId: room.ranked?.seasonId || rankedSeason.id,
-      league: leagueForMmr(room.ranked?.averageMmr || 1000, rankedConfig()).name,
+      league: leagueForMmr(room.ranked?.averageMmr ?? BASE_MMR, rankedConfig()).name,
       playerCount: room.ranked?.playerCount || room.maxPlayers,
       buyIn: room.economy?.buyIn || 0,
     } : null,
@@ -2306,7 +2328,7 @@ function recordCompletedGame(room) {
         .map(item => {
           const opponent = users.get(item.userId);
           const ladder = opponent ? normalizeCompetitiveState(opponent, rankedSeason, rankedConfig(), result.players.length) : null;
-          return Number(snapshot[item.userId] ?? ladder?.mmr ?? 1000);
+          return Number(snapshot[item.userId] ?? ladder?.mmr ?? BASE_MMR);
         });
       const ranked = applyRankedMatchResult(user, {
         matchId: result.resultId,
@@ -3812,6 +3834,10 @@ app.post('/economy/daily-bonus/claim', requireAuth, (req, res) => {
   if (result.error) return res.status(400).json({ error: result.error, dailyBonus: result.dailyBonus, user: safeUser(req.auth.user) });
   saveStore();
   return res.json({ ...result, user: safeUser(req.auth.user), economy: publicEconomyCatalog(req.auth.user, economyConfig()) });
+});
+
+app.get('/ranked/catalog', requireAuth, (_req, res) => {
+  return res.json({ catalog: publicRankedCatalog() });
 });
 
 app.get('/ranked/me', requireAuth, (req, res) => {

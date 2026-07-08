@@ -153,7 +153,7 @@ export function normalizeBuyIn(value, config = null) {
 }
 
 export function rankedBuyInForMmr(mmr) {
-  safeInteger(mmr, 1000);
+  safeInteger(mmr, 0);
   return 0;
 }
 

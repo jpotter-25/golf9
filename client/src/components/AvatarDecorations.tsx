@@ -11,7 +11,7 @@ export type RankEmblemVisual = {
   borderColor: string;
   backgroundColor: string;
   textColor: string;
-  tier: 'rookie' | 'bronze' | 'silver' | 'gold' | 'platinum' | 'diamond' | 'master' | 'legend';
+  tier: 'iron' | 'bronze' | 'silver' | 'gold' | 'platinum' | 'diamond' | 'master' | 'grandmaster' | 'legend';
   primary: string;
   secondary: string;
   shine: string;
@@ -36,13 +36,16 @@ function divisionPips(rawName: string, division?: string | null) {
 }
 
 export function rankEmblemForLeague(league: LeagueLike): RankEmblemVisual {
-  const rawName = typeof league === 'string' ? league : league?.name || league?.league || 'Rookie';
+  const rawName = typeof league === 'string' ? league : league?.name || league?.league || 'Iron III';
   const rawLeague = typeof league === 'string' ? league : league?.league || rawName;
   const division = typeof league === 'string' ? null : league?.division;
   const key = rawLeague.toLowerCase();
   const pips = divisionPips(rawName, division);
   if (key.includes('legend')) {
     return { shortLabel: 'LG', label: rawName, borderColor: '#F8D36A', backgroundColor: '#21162C', textColor: '#FFF0C2', tier: 'legend', primary: '#8B5CFF', secondary: '#FFCC66', shine: '#FFF0C2', glow: '#D9B8FF', pips };
+  }
+  if (key.includes('grandmaster')) {
+    return { shortLabel: 'GM', label: rawName, borderColor: '#FFC9F3', backgroundColor: '#241434', textColor: '#FFE8FA', tier: 'grandmaster', primary: '#FF5ED7', secondary: '#5D6BFF', shine: '#FFF1FC', glow: '#FFC9F3', pips };
   }
   if (key.includes('master')) {
     return { shortLabel: 'M', label: rawName, borderColor: '#9BE7FF', backgroundColor: '#102838', textColor: '#D8F3FF', tier: 'master', primary: '#3BE7FF', secondary: '#A56BFF', shine: '#EAF8FF', glow: '#9BE7FF', pips };
@@ -62,7 +65,7 @@ export function rankEmblemForLeague(league: LeagueLike): RankEmblemVisual {
   if (key.includes('bronze')) {
     return { shortLabel: division ? `B${division}` : 'B', label: rawName, borderColor: '#C58B5A', backgroundColor: '#2B1D17', textColor: '#FFD6B0', tier: 'bronze', primary: '#C58B5A', secondary: '#6D3F26', shine: '#FFD6B0', glow: '#C58B5A', pips };
   }
-  return { shortLabel: 'R', label: rawName || 'Rookie', borderColor: '#52E5A7', backgroundColor: '#123B32', textColor: '#CFFBE8', tier: 'rookie', primary: '#52E5A7', secondary: '#177A63', shine: '#CFFBE8', glow: '#52E5A7', pips };
+  return { shortLabel: division ? `I${division}` : 'I', label: rawName || 'Iron III', borderColor: '#AAB3C2', backgroundColor: '#141A24', textColor: '#E3E8F0', tier: 'iron', primary: '#AAB3C2', secondary: '#39465A', shine: '#F2F5FA', glow: '#AAB3C2', pips };
 }
 
 export function RankEmblem({
@@ -80,7 +83,7 @@ export function RankEmblem({
   const gradientId = `rank-${emblem.tier}-${size}`;
   const shineId = `rank-shine-${emblem.tier}-${size}`;
   const pipStart = 32 - (emblem.pips - 1) * 4;
-  const isElite = emblem.tier === 'diamond' || emblem.tier === 'master' || emblem.tier === 'legend';
+  const isElite = emblem.tier === 'diamond' || emblem.tier === 'master' || emblem.tier === 'grandmaster' || emblem.tier === 'legend';
   const isLegend = emblem.tier === 'legend';
   return (
     <View style={[{ width: size, height: size }, style]}>
@@ -96,7 +99,9 @@ export function RankEmblem({
             <Stop offset="1" stopColor="#FFFFFF" stopOpacity="0" />
           </SvgLinearGradient>
         </Defs>
-        <Circle cx="32" cy="32" r="29" fill={emblem.backgroundColor} opacity="0.92" />
+        <Circle cx="32" cy="32" r="30.5" fill={emblem.glow} opacity={isElite ? '0.24' : '0.14'} />
+        <Circle cx="32" cy="32" r="29" fill={emblem.backgroundColor} opacity="0.94" stroke={emblem.borderColor} strokeWidth="1.2" />
+        <Polygon points="32,2 39,10 50,9 53,20 62,27 58,38 61,49 49,53 42,62 32,58 22,62 15,53 3,49 6,38 2,27 11,20 14,9 25,10" fill={emblem.glow} opacity={isElite ? '0.24' : '0.1'} />
         <Path
           d="M32 4 L53 13 L50 35 C48 47 40 56 32 61 C24 56 16 47 14 35 L11 13 Z"
           fill={`url(#${gradientId})`}

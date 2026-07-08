@@ -1,27 +1,28 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SEASON_LENGTH_MS = 90 * DAY_MS;
 const RANKED_PLAYER_COUNTS = [2, 3, 4];
-export const BASE_MMR = 1000;
+export const BASE_MMR = 0;
 export const PLACEMENT_MATCHES_REQUIRED = 5;
 
 export const SEASON_REWARDS = [
-  { id: 's1-bronze-frame-reward', name: 'Bronze Contender Frame', league: 'Bronze', minMmr: 0, cosmeticId: 's1-bronze-frame' },
-  { id: 's1-silver-title-reward', name: 'Silver Climber Title', league: 'Silver', minMmr: 1000, cosmeticId: 's1-silver-title' },
-  { id: 's1-gold-card-back-reward', name: 'Gold Run Card Back', league: 'Gold', minMmr: 2000, cosmeticId: 's1-gold-card-back' },
-  { id: 's1-platinum-table-reward', name: 'Platinum Table Theme', league: 'Platinum', minMmr: 3000, cosmeticId: 's1-platinum-table-theme' },
+  { id: 's1-bronze-frame-reward', name: 'Bronze Contender Frame', league: 'Bronze', minMmr: 800, cosmeticId: 's1-bronze-frame' },
+  { id: 's1-silver-title-reward', name: 'Silver Climber Title', league: 'Silver', minMmr: 1600, cosmeticId: 's1-silver-title' },
+  { id: 's1-gold-card-back-reward', name: 'Gold Run Card Back', league: 'Gold', minMmr: 2400, cosmeticId: 's1-gold-card-back' },
+  { id: 's1-platinum-table-reward', name: 'Platinum Table Theme', league: 'Platinum', minMmr: 3200, cosmeticId: 's1-platinum-table-theme' },
   { id: 's1-diamond-frame-reward', name: 'Diamond Frame', league: 'Diamond', minMmr: 4000, cosmeticId: 's1-diamond-frame' },
-  { id: 's1-master-card-back-reward', name: 'Master Card Back', league: 'Master', minMmr: 5000, cosmeticId: 's1-master-card-back' },
+  { id: 's1-master-card-back-reward', name: 'Master Card Back', league: 'Master', minMmr: 4800, cosmeticId: 's1-master-card-back' },
   { id: 's1-legend-title-reward', name: 'Legend Title', league: 'Legend', minMmr: 6000, cosmeticId: 's1-legend-title' },
 ];
 
 export const DEFAULT_LEAGUE_BANDS = [
-  { league: 'Bronze', min: 0, max: 999, divisions: ['III', 'II', 'I'] },
-  { league: 'Silver', min: 1000, max: 1999, divisions: ['III', 'II', 'I'] },
-  { league: 'Gold', min: 2000, max: 2999, divisions: ['III', 'II', 'I'] },
-  { league: 'Platinum', min: 3000, max: 3999, divisions: ['III', 'II', 'I'] },
-  { league: 'Diamond', min: 4000, max: 4999, divisions: ['III', 'II', 'I'] },
-  { league: 'Master', min: 5000, max: 5499, divisions: [] },
-  { league: 'Grandmaster', min: 5500, max: 5999, divisions: [] },
+  { league: 'Iron', min: 0, max: 799, divisions: ['III', 'II', 'I'] },
+  { league: 'Bronze', min: 800, max: 1599, divisions: ['III', 'II', 'I'] },
+  { league: 'Silver', min: 1600, max: 2399, divisions: ['III', 'II', 'I'] },
+  { league: 'Gold', min: 2400, max: 3199, divisions: ['III', 'II', 'I'] },
+  { league: 'Platinum', min: 3200, max: 3999, divisions: ['III', 'II', 'I'] },
+  { league: 'Diamond', min: 4000, max: 4799, divisions: ['III', 'II', 'I'] },
+  { league: 'Master', min: 4800, max: 5399, divisions: [] },
+  { league: 'Grandmaster', min: 5400, max: 5999, divisions: [] },
   { league: 'Legend', min: 6000, max: Infinity, divisions: [] },
 ];
 
@@ -44,7 +45,7 @@ export const DEFAULT_MATCHMAKING = {
 export const DEFAULT_SOFT_RESET = {
   anchorMmr: BASE_MMR,
   multiplier: 0.55,
-  floor: 750,
+  floor: BASE_MMR,
 };
 
 function clamp(value, min, max) {
@@ -77,6 +78,16 @@ function rewardsFor(config) {
   return Array.isArray(config?.rewards) && config.rewards.length ? config.rewards : SEASON_REWARDS;
 }
 
+function isLegacyDefaultRewards(rewards) {
+  if (!Array.isArray(rewards) || rewards.length < 7) return false;
+  const byId = new Map(rewards.map(reward => [reward?.id, reward]));
+  return byId.get('s1-bronze-frame-reward')?.minMmr === 0
+    && byId.get('s1-silver-title-reward')?.minMmr === 1000
+    && byId.get('s1-gold-card-back-reward')?.minMmr === 2000
+    && byId.get('s1-platinum-table-reward')?.minMmr === 3000
+    && byId.get('s1-master-card-back-reward')?.minMmr === 5000;
+}
+
 function seasonIdFromStart(startsAt) {
   return `season-${new Date(startsAt).toISOString().slice(0, 10)}`;
 }
@@ -85,12 +96,13 @@ export function normalizeRankedSeason(input = null, now = Date.now(), config = n
   const seasonLengthMs = Math.max(DAY_MS, safeInteger(config?.seasonLengthDays, 90) * DAY_MS);
   const rewards = rewardsFor(config);
   if (input?.id && input.startsAt && input.endsAt && now < input.endsAt) {
+    const existingRewards = Array.isArray(input.rewards) && input.rewards.length ? input.rewards : rewards;
     return {
       id: String(input.id),
       name: input.name || 'Season 1',
       startsAt: Number(input.startsAt),
       endsAt: Number(input.endsAt),
-      rewards: Array.isArray(input.rewards) && input.rewards.length ? input.rewards : rewards,
+      rewards: isLegacyDefaultRewards(existingRewards) ? rewards : existingRewards,
     };
   }
 

@@ -21,12 +21,14 @@ function user(overrides = {}) {
 }
 
 test('league thresholds and divisions match the ranked plan', () => {
-  assert.equal(leagueForMmr(0).name, 'Bronze III');
-  assert.equal(leagueForMmr(999).name, 'Bronze I');
-  assert.equal(leagueForMmr(1000).name, 'Silver III');
-  assert.equal(leagueForMmr(2999).name, 'Gold I');
-  assert.equal(leagueForMmr(5000).name, 'Master');
-  assert.equal(leagueForMmr(5500).name, 'Grandmaster');
+  assert.equal(leagueForMmr(0).name, 'Iron III');
+  assert.equal(leagueForMmr(799).name, 'Iron I');
+  assert.equal(leagueForMmr(800).name, 'Bronze III');
+  assert.equal(leagueForMmr(1599).name, 'Bronze I');
+  assert.equal(leagueForMmr(1600).name, 'Silver III');
+  assert.equal(leagueForMmr(3199).name, 'Gold I');
+  assert.equal(leagueForMmr(4800).name, 'Master');
+  assert.equal(leagueForMmr(5400).name, 'Grandmaster');
   assert.equal(leagueForMmr(6000).name, 'Legend');
 });
 
@@ -35,10 +37,10 @@ test('legacy profiles receive default ranked state', () => {
   const account = user();
   normalizeCompetitiveState(account, season);
 
-  assert.equal(account.competitive.mmr, 1000);
+  assert.equal(account.competitive.mmr, 0);
   assert.equal(account.competitive.placementsPlayed, 0);
   assert.equal(account.competitive.placementMatchesRequired, 5);
-  assert.equal(account.competitive.league.name, 'Silver III');
+  assert.equal(account.competitive.league.name, 'Iron III');
   assert.equal(account.competitive.seasonId, 's1');
 });
 
@@ -72,7 +74,7 @@ test('new ranked seasons soft reset instead of hard reset', () => {
   const account = user({ competitive: { seasonId: 's1', mmr: 3000, seasonBestMmr: 3500, placementsPlayed: 5, claimedSeasonRewards: ['old'], matchHistory: [{ matchId: 'old' }] } });
   normalizeCompetitiveState(account, nextSeason);
 
-  assert.equal(account.competitive.mmr, 2100);
+  assert.equal(account.competitive.mmr, 1650);
   assert.equal(account.competitive.placementsPlayed, 0);
   assert.deepEqual(account.competitive.claimedSeasonRewards, []);
   assert.deepEqual(account.competitive.matchHistory, []);
@@ -91,7 +93,7 @@ test('ranked match result updates MMR, placement progress, and history once per 
     columnClears: 2,
   }, season, 3000);
 
-  assert.equal(result.mmrBefore, 1000);
+  assert.equal(result.mmrBefore, 0);
   assert.equal(account.competitive.rankedGames, 1);
   assert.equal(account.competitive.wins, 1);
   assert.equal(account.competitive.placementsPlayed, 1);
@@ -125,7 +127,7 @@ test('ranked ladders are separate by player count', () => {
 
   assert.equal(account.competitiveByPlayers['2'].mmr, twoPlayer.mmrAfter);
   assert.equal(account.competitiveByPlayers['4'].mmr, fourPlayer.mmrAfter);
-  assert.equal(account.competitiveByPlayers['3'].mmr, 1000);
+  assert.equal(account.competitiveByPlayers['3'].mmr, 0);
   assert.notEqual(account.competitiveByPlayers['2'].mmr, account.competitiveByPlayers['4'].mmr);
 });
 
@@ -138,7 +140,7 @@ test('matchmaking range expands with queue time', () => {
 
 test('season reward claim unlocks ranked shop eligibility without granting cosmetics', () => {
   const season = normalizeRankedSeason({ id: 's1', name: 'Season 1', startsAt: 1000, endsAt: 1000 + 90 * 24 * 60 * 60 * 1000 }, 2000);
-  const account = user({ competitive: { seasonId: 's1', mmr: 2100, seasonBestMmr: 2100, placementsPlayed: 5, claimedSeasonRewards: [], matchHistory: [] } });
+  const account = user({ competitive: { seasonId: 's1', mmr: 2500, seasonBestMmr: 2500, placementsPlayed: 5, claimedSeasonRewards: [], matchHistory: [] } });
   normalizeCompetitiveState(account, season);
 
   const first = claimSeasonRewards(account, season);
