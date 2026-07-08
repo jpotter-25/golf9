@@ -8,6 +8,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
+import { CoinClaimBurst, type CoinClaimBurstState } from '../components/CoinClaimBurst';
 import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'OnlineMenu'>;
@@ -37,6 +38,7 @@ export default function OnlineMenuScreen({ navigation }: Props) {
   const [wagerRooms, setWagerRooms] = useState<api.RoomSummary[]>([]);
   const [bonusBusy, setBonusBusy] = useState(false);
   const [busyRoomCode, setBusyRoomCode] = useState<string | null>(null);
+  const [coinBurst, setCoinBurst] = useState<CoinClaimBurstState>(null);
   const [wagerTables, setWagerTables] = useState<api.WagerTable[]>([
     { id: 'casual-50', label: 'Casual', buyIn: 50, description: 'Light coin table.' },
     { id: 'competitive-100', label: 'Standard', buyIn: 100, description: 'Standard wager table.' },
@@ -92,9 +94,9 @@ export default function OnlineMenuScreen({ navigation }: Props) {
     setBonusBusy(true);
     try {
       const response = await api.claimDailyBonus(token);
+      setCoinBurst({ id: Date.now(), reward: response.reward });
       setEconomy(response.economy);
       await refreshProfile();
-      Alert.alert('Daily Table Bonus', `+${response.reward} coins added to your stack.`);
     } catch (error) {
       Alert.alert('Bonus unavailable', error instanceof Error ? error.message : 'Try again later.');
     } finally {
@@ -122,6 +124,7 @@ export default function OnlineMenuScreen({ navigation }: Props) {
 
   return (
     <ScreenShell scroll>
+      <CoinClaimBurst burst={coinBurst} top={104} right={18} />
       <ScreenHeader
         eyebrow="Online Multiplayer"
         title="Open Online Tables"

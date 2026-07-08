@@ -84,32 +84,33 @@ function normalizeCurrency(user) {
   user.currency.coins = Math.max(0, safeInteger(user.currency.coins, 0));
   user.currency.lifetimeCoins = Math.max(user.currency.coins, safeInteger(user.currency.lifetimeCoins, user.currency.coins));
   user.currency.dailyBonus ||= {};
-  user.currency.dailyBonus.lastClaimedAt = safeInteger(user.currency.dailyBonus.lastClaimedAt, 0) || null;
-  user.currency.dailyBonus.lastClaimDay = safeInteger(user.currency.dailyBonus.lastClaimDay, 0) || null;
+  const storedClaimedAt = safeInteger(user.currency.dailyBonus.lastClaimedAt, 0) || null;
+  const storedClaimDay = safeInteger(user.currency.dailyBonus.lastClaimDay, 0) || null;
+  user.currency.dailyBonus.lastClaimedAt = storedClaimedAt || storedClaimDay || null;
+  user.currency.dailyBonus.lastClaimDay = storedClaimedAt ? utcDayStart(storedClaimedAt) : storedClaimDay;
   user.currency.dailyBonus.streak = Math.max(0, safeInteger(user.currency.dailyBonus.streak, 0));
   return user.currency;
 }
 
 export function publicDailyBonus(user, now = Date.now()) {
   const currency = normalizeCurrency(user);
-  const today = utcDayStart(now);
-  const tomorrow = today + DAY_MS;
-  const lastClaimDay = currency.dailyBonus.lastClaimDay || null;
-  const claimedToday = lastClaimDay === today;
-  const consecutive = lastClaimDay === today - DAY_MS;
-  const nextStreak = claimedToday ? currency.dailyBonus.streak : consecutive ? currency.dailyBonus.streak + 1 : 1;
+  const lastClaimedAt = currency.dailyBonus.lastClaimedAt || null;
+  const nextAvailableAt = lastClaimedAt ? lastClaimedAt + DAY_MS : now;
+  const canClaim = !lastClaimedAt || now >= nextAvailableAt;
+  const consecutive = !!lastClaimedAt && now - lastClaimedAt <= DAY_MS * 2;
+  const nextStreak = canClaim ? (lastClaimedAt ? (consecutive ? currency.dailyBonus.streak + 1 : 1) : 1) : currency.dailyBonus.streak;
   const baseReward = currency.coins < LOW_BALANCE_THRESHOLD ? DAILY_TABLE_BONUS_LOW_BALANCE : DAILY_TABLE_BONUS_BASE;
   const streakBonus = Math.min(Math.max(0, nextStreak - 1) * DAILY_TABLE_BONUS_STREAK_STEP, DAILY_TABLE_BONUS_STREAK_MAX);
   return {
-    canClaim: !claimedToday,
-    reward: claimedToday ? 0 : baseReward + streakBonus,
+    canClaim,
+    reward: canClaim ? baseReward + streakBonus : 0,
     baseReward,
-    streakBonus: claimedToday ? 0 : streakBonus,
+    streakBonus: canClaim ? streakBonus : 0,
     streak: currency.dailyBonus.streak,
     nextStreak,
     lowBalanceBoost: currency.coins < LOW_BALANCE_THRESHOLD,
-    lastClaimedAt: currency.dailyBonus.lastClaimedAt,
-    nextAvailableAt: claimedToday ? tomorrow : now,
+    lastClaimedAt,
+    nextAvailableAt: canClaim ? now : nextAvailableAt,
   };
 }
 
@@ -136,7 +137,7 @@ export function publicEconomyCatalog(user = null, config = null) {
     wagerTables: economyConfig.wagerTables,
     rankedFees: [],
     coinSources: [
-      { id: 'daily-table-bonus', title: 'Daily Table Bonus', description: 'Claim free coins once per day, with a boost when your balance is low.' },
+      { id: 'daily-table-bonus', title: 'Daily Table Bonus', description: 'Claim free coins every 24 hours, with a boost when your balance is low.' },
       { id: 'free-play', title: 'Free Play', description: 'Play free online matches to earn modest coins without risking your stack.' },
       { id: 'daily-challenges', title: 'Daily Challenges', description: 'Complete daily goals for XP and coin rewards.' },
       { id: 'weekly-challenges', title: 'Weekly Challenges', description: 'Build bigger weekly payouts through steady play.' },

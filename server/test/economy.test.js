@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { calculatePayouts, claimDailyTableBonus, normalizeBuyIn, normalizeEconomyConfigStore, payoutSlotsFor, publicEconomyCatalog, rankedBuyInForMmr } from '../economy.js';
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 test('payout slots follow wager table rules', () => {
   assert.deepEqual(payoutSlotsFor(2, 100), [200, 0]);
   assert.deepEqual(payoutSlotsFor(3, 100), [250, 50, 0]);
@@ -37,14 +39,18 @@ test('ranked entry fee is free across all MMR bands', () => {
   assert.equal(rankedBuyInForMmr(3000), 0);
 });
 
-test('daily table bonus recovers low-balance players once per day', () => {
+test('daily table bonus recovers low-balance players on a rolling 24-hour clock', () => {
   const account = { currency: { coins: 0, lifetimeCoins: 0 } };
-  const first = claimDailyTableBonus(account, Date.UTC(2026, 0, 1, 12));
-  const duplicate = claimDailyTableBonus(account, Date.UTC(2026, 0, 1, 18));
-  const second = claimDailyTableBonus(account, Date.UTC(2026, 0, 2, 12));
+  const firstClaimAt = Date.UTC(2026, 0, 1, 12);
+  const first = claimDailyTableBonus(account, firstClaimAt);
+  const duplicate = claimDailyTableBonus(account, firstClaimAt + (6 * 60 * 60 * 1000));
+  const nextMorning = claimDailyTableBonus(account, Date.UTC(2026, 0, 2, 8));
+  const second = claimDailyTableBonus(account, firstClaimAt + DAY_MS);
 
   assert.equal(first.reward, 150);
   assert.equal(duplicate.error, 'Daily Table Bonus already claimed.');
+  assert.equal(duplicate.dailyBonus.nextAvailableAt, firstClaimAt + DAY_MS);
+  assert.equal(nextMorning.error, 'Daily Table Bonus already claimed.');
   assert.equal(second.reward, 125);
   assert.equal(account.currency.coins, 275);
   assert.equal(account.currency.dailyBonus.streak, 2);

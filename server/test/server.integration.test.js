@@ -9,6 +9,7 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { io } = require('socket.io-client');
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function port() {
   return 4300 + Math.floor(Math.random() * 1000);
@@ -1077,7 +1078,7 @@ test('records local match progression and reward summary', async () => {
   });
 });
 
-test('daily table bonus endpoint lets broke players rebuild once per day', async () => {
+test('daily table bonus endpoint lets broke players rebuild on a rolling 24-hour clock', async () => {
   await withServer(async (baseUrl) => {
     const account = await signup(baseUrl, `Bonus${Date.now()}`);
     const claimed = await json(await fetch(`${baseUrl}/economy/daily-bonus/claim`, {
@@ -1087,6 +1088,10 @@ test('daily table bonus endpoint lets broke players rebuild once per day', async
     assert.equal(claimed.reward, 150);
     assert.equal(claimed.user.currency.coins, 150);
     assert.equal(claimed.economy.dailyBonus.canClaim, false);
+    assert.equal(
+      claimed.economy.dailyBonus.nextAvailableAt - claimed.economy.dailyBonus.lastClaimedAt,
+      DAY_MS
+    );
 
     const duplicate = await fetch(`${baseUrl}/economy/daily-bonus/claim`, {
       method: 'POST',

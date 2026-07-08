@@ -9,6 +9,7 @@ import { Check, ChevronDown, ChevronLeft, ChevronRight, Coins, Gift, Lock, Shopp
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
+import { CoinClaimBurst, type CoinClaimBurstState } from '../components/CoinClaimBurst';
 import { getAvatarAccessoryVisual, getAvatarFrameVisual, getCardBackVisual, getTableThemeVisual } from '../theme/cosmetics';
 import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
 
@@ -35,6 +36,7 @@ export function ShopContent({
   const [cosmetics, setCosmetics] = useState<api.CosmeticItem[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openCategoryKeys, setOpenCategoryKeys] = useState<string[]>([]);
+  const [coinBurst, setCoinBurst] = useState<CoinClaimBurstState>(null);
 
   const loadShop = useCallback(async () => {
     await refreshProfile().catch(() => {});
@@ -59,8 +61,8 @@ export function ShopContent({
     setBusyId('daily-bonus');
     try {
       const response = await api.claimDailyBonus(token);
+      setCoinBurst({ id: Date.now(), reward: response.reward });
       await loadShop();
-      Alert.alert('Daily Table Bonus', `+${response.reward} coins added to your stack.`);
     } catch (error) {
       Alert.alert('Bonus unavailable', error instanceof Error ? error.message : 'Try again later.');
     } finally {
@@ -123,7 +125,8 @@ export function ShopContent({
   const grouped = groupCosmeticsByType(sortCosmetics(cosmetics));
 
   return (
-    <View style={embedded ? styles.embeddedContent : undefined}>
+    <View style={[styles.contentRoot, embedded && styles.embeddedContent]}>
+      <CoinClaimBurst burst={coinBurst} top={embedded ? 82 : 108} right={18} />
       <ScreenHeader
         eyebrow="Storefront"
         title="Shop"
@@ -376,6 +379,7 @@ function categoryLabel(category: string) {
 }
 
 const styles = StyleSheet.create({
+  contentRoot: { position: 'relative' },
   embeddedContent: { paddingBottom: 8 },
   earnPanel: { gap: 14 },
   earnHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },

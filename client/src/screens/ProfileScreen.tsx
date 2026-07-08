@@ -11,6 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
 import { isProviderConfigured } from '../services/socialAuth';
 import { ActionButton, PremiumPanel, ProgressBar, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
+import { CoinClaimBurst, type CoinClaimBurstState } from '../components/CoinClaimBurst';
 import { PlayerAvatar } from '../components/PlayerAvatar';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Profile'>;
@@ -41,6 +42,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const [results, setResults] = useState<api.GameResult[]>([]);
   const [cosmetics, setCosmetics] = useState<api.CosmeticItem[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [coinBurst, setCoinBurst] = useState<CoinClaimBurstState>(null);
 
   useFocusEffect(useCallback(() => {
     refreshProfile().catch(() => {});
@@ -76,8 +78,8 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
     setBusyId('daily-bonus');
     try {
       const response = await api.claimDailyBonus(token);
+      setCoinBurst({ id: Date.now(), reward: response.reward });
       await reloadBits();
-      Alert.alert('Daily Table Bonus', `+${response.reward} coins added to your stack.`);
     } catch (error) {
       Alert.alert('Bonus unavailable', error instanceof Error ? error.message : 'Try again later.');
     } finally {
@@ -129,6 +131,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
 
   return (
     <ScreenShell scroll>
+      <CoinClaimBurst burst={coinBurst} top={104} right={18} />
       <ScreenHeader
         eyebrow="Player Profile"
         title={user?.displayName ?? 'Player'}
@@ -193,7 +196,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
             <View style={styles.cardHeader}>
               <View>
                 <Text style={styles.sectionTitle}>Daily Bonus</Text>
-                <Text style={styles.sectionMeta}>Claim once per day to rebuild your stack.</Text>
+                <Text style={styles.sectionMeta}>Claim every 24 hours to rebuild your stack.</Text>
               </View>
               <Gift size={24} color={ui.palette.gold} strokeWidth={2.6} />
             </View>
