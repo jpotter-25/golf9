@@ -17,6 +17,10 @@ type RoundCount = 5 | 9;
 
 const PLAYER_OPTIONS: PlayerCount[] = [2, 3, 4];
 const ROUND_OPTIONS: RoundCount[] = [5, 9];
+const WAGER_STEP_WIDTH = 78;
+const WAGER_STEP_GAP = 8;
+const WAGER_TRACK_SIDE_PADDING = 10;
+const WAGER_SNAP_INTERVAL = WAGER_STEP_WIDTH + WAGER_STEP_GAP;
 
 export default function OnlineMenuScreen({ navigation }: Props) {
   const { token, user, refreshProfile } = useAuth();
@@ -271,20 +275,30 @@ function WagerSlider({
   waitingByBuyIn: Map<number, api.RoomSummary[]>;
 }) {
   const scrollRef = useRef<ScrollView | null>(null);
-  const itemWidth = 78;
-  const selected = tables[selectedIndex];
+  const tablesKey = tables.map(table => `${table.id}:${table.buyIn}`).join('|');
+  const lastTablesKey = useRef('');
+  const clampedSelectedIndex = Math.max(0, Math.min(tables.length - 1, selectedIndex));
+  const selected = tables[clampedSelectedIndex];
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ x: Math.max(0, selectedIndex * itemWidth - itemWidth), animated: true });
-  }, [selectedIndex, itemWidth]);
+    if (lastTablesKey.current === tablesKey) return;
+    lastTablesKey.current = tablesKey;
+    scrollRef.current?.scrollTo({ x: Math.max(0, clampedSelectedIndex * WAGER_SNAP_INTERVAL), animated: false });
+  }, [clampedSelectedIndex, tablesKey]);
 
   if (!selected) return <Text style={styles.emptyText}>Wager tables are not configured yet.</Text>;
   const waiting = waitingByBuyIn.get(selected.buyIn)?.length ?? 0;
   const canAfford = balance >= selected.buyIn;
 
+  const selectIndex = (index: number, animated = true) => {
+    const next = Math.max(0, Math.min(tables.length - 1, index));
+    onSelect(next);
+    scrollRef.current?.scrollTo({ x: next * WAGER_SNAP_INTERVAL, animated });
+  };
+
   const onScrollEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const index = Math.max(0, Math.min(tables.length - 1, Math.round(event.nativeEvent.contentOffset.x / itemWidth)));
-    if (index !== selectedIndex) onSelect(index);
+    const index = Math.max(0, Math.min(tables.length - 1, Math.round(event.nativeEvent.contentOffset.x / WAGER_SNAP_INTERVAL)));
+    if (index !== clampedSelectedIndex) onSelect(index);
   };
 
   return (
@@ -300,7 +314,7 @@ function WagerSlider({
         ref={scrollRef}
         horizontal
         showsHorizontalScrollIndicator={false}
-        snapToInterval={itemWidth}
+        snapToInterval={WAGER_SNAP_INTERVAL}
         decelerationRate="fast"
         onMomentumScrollEnd={onScrollEnd}
         onScrollEndDrag={onScrollEnd}
@@ -309,13 +323,13 @@ function WagerSlider({
         keyboardShouldPersistTaps="handled"
       >
         {tables.map((table, index) => {
-          const active = index === selectedIndex;
+          const active = index === clampedSelectedIndex;
           const affordable = balance >= table.buyIn;
           return (
             <Pressable
               key={table.id}
-              style={[styles.wagerStepTouch, { width: itemWidth }, active && styles.wagerStepTouchActive, !affordable && styles.wagerStepLocked]}
-              onPress={() => onSelect(index)}
+              style={[styles.wagerStepTouch, { width: WAGER_STEP_WIDTH }, active && styles.wagerStepTouchActive, !affordable && styles.wagerStepLocked]}
+              onPress={() => selectIndex(index)}
             >
               <Text style={[styles.wagerStepText, active && styles.wagerStepTextActive]} numberOfLines={1}>
                 {table.buyIn >= 1000 ? `${table.buyIn / 1000}k` : table.buyIn}
@@ -634,8 +648,8 @@ const styles = StyleSheet.create({
     minHeight: 70,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 10,
+    gap: WAGER_STEP_GAP,
+    paddingHorizontal: WAGER_TRACK_SIDE_PADDING,
   },
   wagerStepTouch: {
     minHeight: 50,
