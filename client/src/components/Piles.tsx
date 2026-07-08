@@ -80,7 +80,7 @@ const Piles: React.FC<PilesProps> = ({
   const cardW = metrics ? metrics.cardW : 60;
   const cardH = metrics ? metrics.cardH : 90;
   const margin = metrics ? metrics.gap / 2 : 4;
-  const drawCard = activeSource === 'draw' ? held : pileCount > 0 ? DRAW_PILE_BACK : null;
+  const drawCard = activeSource === 'draw' ? (held ?? DRAW_PILE_BACK) : pileCount > 0 ? DRAW_PILE_BACK : null;
   const discardCard = activeSource === 'discard' && held ? held : topDiscard;
   const discardIsActive = activeSource === 'discard' || !!discardFlashKey;
   const flashScale = discardFlash.interpolate({ inputRange: [0, 1], outputRange: [0.75, 1] });
@@ -97,6 +97,7 @@ const Piles: React.FC<PilesProps> = ({
           selected={activeSource === 'draw'}
           disabled={disableDraw && activeSource !== 'draw'}
           cardBackId={cardBackId}
+          animateReveal={activeSource === 'draw'}
         />
         <Text style={styles.count}>{pileCount}</Text>
       </Pressable>
@@ -113,6 +114,7 @@ const Piles: React.FC<PilesProps> = ({
             margin={margin}
             selected={discardIsActive}
             disabled={disableTake && activeSource !== 'discard'}
+            animateReveal={activeSource === 'discard'}
           />
           {discardFlashKey && discardFlashCount > 0 ? (
             <Animated.View

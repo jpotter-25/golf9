@@ -3,8 +3,8 @@
 // as separate <Text> nodes to avoid clipping at small sizes (4-player layout).
 // Also supports optional width/height/margin inputs from metrics.
 
-import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { Animated, View, Text, Pressable, StyleSheet } from 'react-native';
 import type { Card as GameCard } from '../game/types';
 import { getCardBackVisual } from '../theme/cosmetics';
 
@@ -17,13 +17,16 @@ export type CardProps = {
   selected?: boolean;
   disabled?: boolean;
   cardBackId?: string;
+  animateReveal?: boolean;
 };
 
-const Card: React.FC<CardProps> = ({ card, onPress, width, height, margin, selected = false, disabled = false, cardBackId }) => {
+const Card: React.FC<CardProps> = ({ card, onPress, width, height, margin, selected = false, disabled = false, cardBackId, animateReveal = false }) => {
   const cleared = !card;
   const faceUp = card?.faceUp ?? false;
   const zeroed = card?.zeroed ?? false;
   const cardBack = getCardBackVisual(cardBackId);
+  const revealAnim = useRef(new Animated.Value(1)).current;
+  const lastRevealKey = useRef<string | null>(null);
 
   // Fallback default size, overridden by props for scaled boards
   const W = typeof width === 'number' ? width : 60;
@@ -33,6 +36,32 @@ const Card: React.FC<CardProps> = ({ card, onPress, width, height, margin, selec
   const rankSize = Math.max(10, Math.round(H * 0.32));
   const suitSize = Math.max(10, Math.round(H * 0.28));
   const lineSp = Math.round(rankSize * 1.1);
+  const revealKey = card && faceUp ? `${card.id}:${card.rank}:${card.suit}` : null;
+
+  useEffect(() => {
+    if (!animateReveal || !revealKey || lastRevealKey.current === revealKey) {
+      if (revealKey) lastRevealKey.current = revealKey;
+      return;
+    }
+    lastRevealKey.current = revealKey;
+    revealAnim.setValue(0);
+    Animated.spring(revealAnim, {
+      toValue: 1,
+      speed: 20,
+      bounciness: 7,
+      useNativeDriver: true,
+    }).start();
+  }, [animateReveal, revealAnim, revealKey]);
+
+  const animatedStyle = animateReveal && faceUp
+    ? {
+        opacity: revealAnim.interpolate({ inputRange: [0, 1], outputRange: [0.72, 1] }),
+        transform: [
+          { scaleX: revealAnim.interpolate({ inputRange: [0, 1], outputRange: [0.72, 1] }) },
+          { scale: revealAnim.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
+        ],
+      }
+    : null;
 
   return (
     <Pressable
@@ -52,6 +81,7 @@ const Card: React.FC<CardProps> = ({ card, onPress, width, height, margin, selec
         typeof margin === 'number' ? { margin } : null,
       ]}
     >
+      <Animated.View style={[styles.content, animatedStyle]}>
       {cleared ? (
         <View style={styles.clearedMark} />
       ) : faceUp && card ? (
@@ -93,6 +123,7 @@ const Card: React.FC<CardProps> = ({ card, onPress, width, height, margin, selec
           {cardBack.mark}
         </Text>
       )}
+      </Animated.View>
     </Pressable>
   );
 };
@@ -139,6 +170,10 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.55,
+  },
+  content: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   faceContainer: {
     alignItems: 'center',
