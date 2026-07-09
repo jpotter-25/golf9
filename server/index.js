@@ -4501,10 +4501,9 @@ io.on('connection', (socket) => {
     if (type === 'replace' || type === 'discard') {
       const heldCard = room.held.get(userId);
       const heldSource = room.heldSource.get(userId);
-      const heldMustReplace = room.heldMustReplace.get(userId) || false;
       const heldCanDiscard = room.heldCanDiscard.get(userId) || false;
       if (!heldCard) return cb({ error: 'Draw or take a card first.' });
-      if (type === 'discard' && heldSource === 'discard' && (!room.game.pendingDecision || heldMustReplace)) {
+      if (type === 'discard' && heldSource === 'discard' && !room.game.pendingDecision) {
         return cb({ error: 'Cards taken from the discard pile must be played to your grid.' });
       }
       if (type === 'discard' && heldSource === 'draw' && !heldCanDiscard && !room.game.pendingDecision) {

@@ -19,8 +19,15 @@ import {
 
 export { initGrid, isRoundOver, scoreGrid as computeScore, startTurns };
 
-export function deal(players: number, identities?: PlayerIdentity[]): GameState {
-  return dealLocal(players, identities) as GameState;
+type LocalDealOptions = {
+  round?: number;
+  totalRounds?: number;
+  totals?: number[];
+  simultaneousPeek?: boolean;
+};
+
+export function deal(players: number, identities?: PlayerIdentity[], options?: LocalDealOptions): GameState {
+  return dealLocal(players, identities, options) as GameState;
 }
 
 export function flipForPeek(state: GameState, r: number, c: number): GameState {

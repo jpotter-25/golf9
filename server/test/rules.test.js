@@ -370,6 +370,48 @@ test('final pass reveals hidden cards before advancing to next round', () => {
   assert.deepEqual(next.state.lastRoundTotals, result.state.lastRoundTotals);
 });
 
+test('final pass completes when the selected total round is reached', () => {
+  let state = createGameState([
+    { userId: 'u1', displayName: 'One' },
+    { userId: 'u2', displayName: 'Two' },
+  ], { totalRounds: 5 });
+  state = startTurns(state);
+  state.currentPlayerIndex = 0;
+  state.round = 5;
+  state.totalRounds = 5;
+  state.totals = [30, 40];
+  state.sweepActive = true;
+  state.sweepStarterIndex = 1;
+
+  state.players[0].grid = [
+    [card('9'), card('2'), card('3')],
+    [card('4'), card('5'), card('6')],
+    [card('7'), card('8'), card('10')],
+  ];
+  state.players[1].grid = [
+    [card('8', { faceUp: false }), card('2'), card('3')],
+    [card('4'), card('K', { faceUp: false }), card('6')],
+    [card('7'), card('8'), card('10')],
+  ];
+
+  const result = replaceGridCard(state, 0, 0, 0, card('3'));
+  assert.equal(result.error, undefined);
+  assert.equal(result.state.phase, 'roundReveal');
+  assert.equal(result.state.lastRoundNumber, 5);
+
+  result.state.roundRevealEndsAt = Date.now() - 1;
+  const completed = resolveExpiredTimers(result.state);
+  assert.equal(completed.phase, 'roundEnd');
+  assert.equal(completed.completed, true);
+  assert.equal(completed.round, 5);
+  assert.equal(completed.totalRounds, 5);
+  assert.deepEqual(completed.lastRoundTotals, completed.totals);
+
+  const next = continueAfterRoundSummary(completed);
+  assert.equal(next.error, 'Round summary is not active.');
+  assert.equal(next.state.round, 5);
+});
+
 test('publicGameState exposes viewer held card while masking draw pile', () => {
   const state = createGameState([
     { userId: 'u1', displayName: 'One' },

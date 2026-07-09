@@ -189,7 +189,11 @@ export default function GameScreen({ route, navigation }: Props) {
   );
 
   // -------- Core game / UI state --------
-  const [state, setState] = useState<GameState>(() => deal(players, localPlayerIdentities));
+  const [state, setState] = useState<GameState>(() => deal(players, localPlayerIdentities, {
+    round: 1,
+    totalRounds: TOTAL_ROUNDS,
+    totals,
+  }));
   const [held, setHeld] = useState<Card | null>(null);
   const [activeSource, setActiveSource] = useState<'draw'|'discard'|null>(null);
   const [heldMustReplace, setHeldMustReplace] = useState(false);
@@ -231,6 +235,8 @@ export default function GameScreen({ route, navigation }: Props) {
   const soloAiPeekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const soloAiPeekKey = useRef<string | null>(null);
   const localRoundRevealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const localEndingRound = useRef<number | null>(null);
+  const recordedLocalRoundKey = useRef<string | null>(null);
   const chatOpenRef = useRef(false);
   const chatScrollRef = useRef<ScrollView | null>(null);
   const socialBurstTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -762,11 +768,11 @@ export default function GameScreen({ route, navigation }: Props) {
   }, [state, sweepActive, isOnline, locked]);
 
   // ===== Scoring & round transition =====
-  async function recordLocalMatchCompletion(
+  const recordLocalMatchCompletion = useCallback(async (
     revealedState: GameState,
     finalTotals: number[],
     finalRoundScores: number[]
-  ): Promise<api.MatchProgressionSummary | null> {
+  ): Promise<api.MatchProgressionSummary | null> => {
     if (!token) return null;
     const winningTotal = Math.min(...finalTotals);
     const accountRoundScores = [...localRoundScores.current, finalRoundScores[0] ?? 0];
@@ -788,21 +794,31 @@ export default function GameScreen({ route, navigation }: Props) {
     } catch {
       return null;
     }
-  }
+  }, [TOTAL_ROUNDS, isSolo, refreshProfile, token, user?.displayName]);
 
   function endRoundAndMaybeContinue() {
+    const roundNumber = Math.min(round, TOTAL_ROUNDS);
+    if (localEndingRound.current === roundNumber) return;
+    localEndingRound.current = roundNumber;
     setLocked(true);
-    const revealedState = revealHiddenForDisplay(state);
+    const revealedState = revealHiddenForDisplay({
+      ...state,
+      round: roundNumber,
+      totalRounds: TOTAL_ROUNDS,
+      totals,
+    });
     setState(revealedState);
     const roundScores = revealedState.players.map(p => scoreGrid(p.grid));
-    setTotals(prev => prev.map((t, i) => t + roundScores[i]));
+    const nextTotals = totals.map((t, i) => t + (roundScores[i] ?? 0));
+    setTotals(nextTotals);
     const prettyRound = roundScores.map((sc, i) => `Player ${i + 1}: ${sc}`).join('\n');
     setTimeout(async () => {
-      if (round < TOTAL_ROUNDS) {
+      if (roundNumber < TOTAL_ROUNDS) {
         localRoundScores.current.push(roundScores[0] ?? 0);
+        const nextRound = roundNumber + 1;
         Alert.alert(
-          `Round ${round} complete`,
-          prettyRound + `\n\nTap "Next" for Round ${round + 1}.`,
+          `Round ${roundNumber} complete`,
+          prettyRound + `\n\nTap "Next" for Round ${nextRound}.`,
           [
             {
               text: 'Next',
@@ -816,8 +832,13 @@ export default function GameScreen({ route, navigation }: Props) {
                 setHeldMustReplace(false);
                 setHeldCanDiscard(false);
                 setDismissedPeekPromptKey(null);
-                setState(deal(players, localPlayerIdentities));
-                setRound(r => r + 1);
+                setState(deal(players, localPlayerIdentities, {
+                  round: nextRound,
+                  totalRounds: TOTAL_ROUNDS,
+                  totals: nextTotals,
+                }));
+                setRound(nextRound);
+                localEndingRound.current = null;
                 setLocked(false);
               },
             },
@@ -825,7 +846,7 @@ export default function GameScreen({ route, navigation }: Props) {
           { cancelable: false }
         );
       } else {
-        const finalTotals = revealedState.players.map((_, i) => totals[i] + roundScores[i]);
+        const finalTotals = nextTotals;
         const progression = await recordLocalMatchCompletion(revealedState, finalTotals, roundScores);
         const finalLines = revealedState.players
           .map((_, i) => `Player ${i + 1}: ${finalTotals[i]}`)
@@ -840,6 +861,32 @@ export default function GameScreen({ route, navigation }: Props) {
       }
     }, ROUND_REVEAL_DURATION);
   }
+
+  useEffect(() => {
+    if (isOnline || !state.lastRoundNumber || !state.lastRoundScores?.length) return;
+    if (state.phase !== 'roundSummary' && state.phase !== 'roundEnd') return;
+    const key = `${state.id}:${state.lastRoundNumber}:${state.lastRoundScores.join(',')}:${state.lastRoundTotals?.join(',') ?? ''}`;
+    if (recordedLocalRoundKey.current === key) return;
+    recordedLocalRoundKey.current = key;
+    if (state.completed || state.phase === 'roundEnd') {
+      const finalTotals = state.lastRoundTotals ?? state.totals ?? totals;
+      recordLocalMatchCompletion(state, finalTotals, state.lastRoundScores).catch(() => {});
+    } else {
+      localRoundScores.current.push(state.lastRoundScores[0] ?? 0);
+    }
+  }, [
+    isOnline,
+    state,
+    state.completed,
+    state.id,
+    state.lastRoundNumber,
+    state.lastRoundScores,
+    state.lastRoundTotals,
+    state.phase,
+    state.totals,
+    totals,
+    recordLocalMatchCompletion,
+  ]);
 
   // ===== Visual Countdown Timer (UI) =====
   useEffect(() => {
@@ -995,8 +1042,8 @@ export default function GameScreen({ route, navigation }: Props) {
     if (pendingForBottom && held) {
       return {
         phase: 'decision',
-        primaryLabel: heldMustReplace ? 'Keep drawn' : 'Choose which card stays',
-        secondaryLabel: heldMustReplace ? undefined : 'Keep revealed',
+        primaryLabel: 'Choose which card stays',
+        secondaryLabel: 'Keep revealed',
         selectedSource: activeSource,
         selectedCard: held,
         canUsePiles: false,
@@ -1405,10 +1452,6 @@ export default function GameScreen({ route, navigation }: Props) {
   const onKeepRevealed = () => {
     if (!isHumanTurn || !held || !pending) return;
     if (pending.playerIndex !== bottomIndex) return;
-    if (heldMustReplace) {
-      Alert.alert('Play this card', 'Cards taken from the discard pile must be played to your grid.');
-      return;
-    }
     if (isOnline && token && roomCode) {
       sendGameIntent(token, roomCode, 'discard', { card: held }).catch(error => handleOnlineActionError('Discard rejected', error));
     } else {
@@ -1782,11 +1825,9 @@ export default function GameScreen({ route, navigation }: Props) {
       }]}>
         {pendingForBottom && held ? (
           <View style={styles.decisionButtons}>
-            {!heldMustReplace ? (
-              <Pressable style={styles.altBtn} onPress={onKeepRevealed}>
-                <DecisionButtonContent label="Keep Revealed" card={pendingRevealedCard} />
-              </Pressable>
-            ) : null}
+            <Pressable style={styles.altBtn} onPress={onKeepRevealed}>
+              <DecisionButtonContent label="Keep Revealed" card={pendingRevealedCard} />
+            </Pressable>
             <Pressable style={[styles.altBtn, styles.altBtnPrimary]} onPress={onKeepDrawn}>
               <DecisionButtonContent label="Keep Drawn" card={held} primary />
             </Pressable>
