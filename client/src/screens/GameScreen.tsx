@@ -8,7 +8,7 @@ import { Audio } from 'expo-av';
 import { Bell, Gem, MessageCircle, Settings, ShoppingBag, Trophy, UserPlus, X } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
-import type { GameState, Card, Grid } from '../game/types';
+import type { GameState, Card, Grid, PlayerIdentity } from '../game/types';
 import { aiPlayTurn, chooseAiMove } from '../game/ai';
 import {
   deal,
@@ -132,8 +132,44 @@ async function playTurnChime() {
   }
 }
 
+function buildLocalPlayerIdentities({
+  players,
+  mode,
+  user,
+  localPlayerNames,
+  aiDifficulty,
+}: {
+  players: number;
+  mode: RootStackParamList['Game']['mode'];
+  user: api.UserProfile | null;
+  localPlayerNames?: string[];
+  aiDifficulty: 'easy' | 'hard';
+}): PlayerIdentity[] {
+  if (mode === 'online') return [];
+  return Array.from({ length: players }, (_, index) => {
+    if (index === 0) {
+      const displayName = user?.displayName ?? localPlayerNames?.[0] ?? 'Player 1';
+      return {
+        userId: user?.userId ?? 'local-1',
+        displayName,
+        avatarInitial: user?.avatarInitial ?? displayName.slice(0, 1).toUpperCase(),
+        cosmetics: user?.inventory.equipped,
+      };
+    }
+    const fallback = mode === 'solo'
+      ? `${aiDifficulty === 'hard' ? 'Hard' : 'Easy'} AI ${index}`
+      : `Player ${index + 1}`;
+    const displayName = String(localPlayerNames?.[index] || '').trim() || fallback;
+    return {
+      userId: `local-${index + 1}`,
+      displayName: displayName.slice(0, 12),
+      avatarInitial: displayName.slice(0, 1).toUpperCase(),
+    };
+  });
+}
+
 export default function GameScreen({ route, navigation }: Props) {
-  const { players, mode, rounds, roomCode, aiDifficulty = 'easy' } = route.params;
+  const { players, mode, rounds, roomCode, aiDifficulty = 'easy', localPlayerNames } = route.params;
   const TOTAL_ROUNDS: number = rounds;
   const { token, user, refreshProfile } = useAuth();
   const isOnline = mode === 'online' && !!roomCode && !!token;
@@ -141,6 +177,10 @@ export default function GameScreen({ route, navigation }: Props) {
 
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
+  const localPlayerIdentities = useMemo(
+    () => buildLocalPlayerIdentities({ players, mode, user, localPlayerNames, aiDifficulty }),
+    [aiDifficulty, localPlayerNames, mode, players, user]
+  );
 
   // -------- Round state --------
   const [round, setRound] = useState<number>(1);
@@ -149,7 +189,7 @@ export default function GameScreen({ route, navigation }: Props) {
   );
 
   // -------- Core game / UI state --------
-  const [state, setState] = useState<GameState>(() => deal(players));
+  const [state, setState] = useState<GameState>(() => deal(players, localPlayerIdentities));
   const [held, setHeld] = useState<Card | null>(null);
   const [activeSource, setActiveSource] = useState<'draw'|'discard'|null>(null);
   const [heldMustReplace, setHeldMustReplace] = useState(false);
@@ -177,6 +217,7 @@ export default function GameScreen({ route, navigation }: Props) {
   const [avatarHubCosmeticCatalog, setAvatarHubCosmeticCatalog] = useState<api.CosmeticItem[]>([]);
   const [avatarHubCosmeticsLoading, setAvatarHubCosmeticsLoading] = useState(false);
   const [turnNotice, setTurnNotice] = useState<TurnNotice | null>(null);
+  const [dismissedPeekPromptKey, setDismissedPeekPromptKey] = useState<string | null>(null);
   const [gameplayPrefs, setGameplayPrefs] = useState<GameplayPreferences>(getGameplayPreferences());
   const [matchProgression, setMatchProgression] = useState<api.MatchProgressionSummary | null>(null);
 
@@ -264,11 +305,13 @@ export default function GameScreen({ route, navigation }: Props) {
   }, []);
 
   const openAvatarHub = useCallback((userId?: string) => {
-    if (!isOnline || !userId) return;
+    if (!userId) return;
+    const isSelf = userId === user?.userId;
+    if (!isOnline && !isSelf) return;
     setAvatarHubUserId(userId);
     setAvatarHubProfile(null);
     setAvatarHubLoading(false);
-    if (userId === user?.userId) {
+    if (isSelf) {
       return;
     }
     if (!token) return;
@@ -772,7 +815,8 @@ export default function GameScreen({ route, navigation }: Props) {
                 setActiveSource(null);
                 setHeldMustReplace(false);
                 setHeldCanDiscard(false);
-                setState(deal(players));
+                setDismissedPeekPromptKey(null);
+                setState(deal(players, localPlayerIdentities));
                 setRound(r => r + 1);
                 setLocked(false);
               },
@@ -809,6 +853,7 @@ export default function GameScreen({ route, navigation }: Props) {
 
   // ===== UI helpers =====
   const showTimer = isOnline;
+  const showRoundChip = !showTimer;
   const secsLeft =
     locked
       ? 0
@@ -849,8 +894,14 @@ export default function GameScreen({ route, navigation }: Props) {
   const showRoundSummary = !!roundSummaryKey
     && dismissedSummaryKey !== roundSummaryKey
     && (state.phase === 'roundSummary' || state.phase === 'roundEnd');
-  const overlayFlips = !isSimultaneousPeek && (state.players[state.peekTurnIndex ?? 0]?.peekFlips ?? 0) >= 2;
-  const showPassOverlay = !isSolo && !isSimultaneousPeek && state.phase === 'peek' && overlayFlips;
+  const passPeekPlayerIndex = !isOnline && !isSolo && !isSimultaneousPeek && state.phase === 'peek'
+    ? (state.peekTurnIndex ?? 0)
+    : null;
+  const passPeekPromptKey = passPeekPlayerIndex == null
+    ? null
+    : `${state.id}:${state.round ?? round}:peek:${passPeekPlayerIndex}`;
+  const showPassOverlay = !!passPeekPromptKey && dismissedPeekPromptKey !== passPeekPromptKey;
+  const passPeekPlayer = passPeekPlayerIndex == null ? null : state.players[passPeekPlayerIndex] ?? null;
   const pendingForBottom = pending?.playerIndex === bottomIndex ? pending : null;
   const selectedForBottom = selectedCell?.playerIndex === bottomIndex ? selectedCell : null;
   const bottomActiveCell = selectedForBottom ?? pendingForBottom;
@@ -1506,10 +1557,14 @@ export default function GameScreen({ route, navigation }: Props) {
     ? user?.progression
     : avatarHubProfile?.progression ?? avatarHubRoomPlayer?.progression ?? null;
   const avatarHubLockerGroups = useMemo(() => {
-    const owned = avatarHubCosmeticCatalog.filter(item => item.owned && (item.type === 'avatarIcon' || item.type === 'cardBack'));
+    const owned = avatarHubCosmeticCatalog.filter(item => item.owned);
     return [
       { key: 'avatarIcon', title: 'Avatar Icons', empty: 'No owned avatar icons yet.', items: owned.filter(item => item.type === 'avatarIcon') },
       { key: 'cardBack', title: 'Card Backs', empty: 'No owned card backs yet.', items: owned.filter(item => item.type === 'cardBack') },
+      { key: 'avatarFrame', title: 'Avatar Frames', empty: 'No owned avatar frames yet.', items: owned.filter(item => item.type === 'avatarFrame') },
+      { key: 'avatarAccessory', title: 'Accessories', empty: 'No owned accessories yet.', items: owned.filter(item => item.type === 'avatarAccessory') },
+      { key: 'title', title: 'Titles', empty: 'No owned titles yet.', items: owned.filter(item => item.type === 'title') },
+      { key: 'tableTheme', title: 'Table Themes', empty: 'No owned table themes yet.', items: owned.filter(item => item.type === 'tableTheme') },
     ];
   }, [avatarHubCosmeticCatalog]);
   const bottomActiveGift = avatarGifts[bottomPlayer.userId]?.type === 'gift' ? avatarGifts[bottomPlayer.userId] : null;
@@ -1552,7 +1607,7 @@ export default function GameScreen({ route, navigation }: Props) {
             connectionState={connected ? 'online' : 'offline'}
             onPress={() => openAvatarHub(p.userId)}
             onGiftPress={() => openAvatarHub(p.userId)}
-            disabled={!isOnline}
+            disabled={!isOnline && p.userId !== user?.userId}
           />
           <View style={styles.inlineScores}>
             <Text style={styles.scoreNow}>Now {visibleRoundScores[i] ?? 0}</Text>
@@ -1621,6 +1676,12 @@ export default function GameScreen({ route, navigation }: Props) {
             <Text style={styles.roundText}>R{round}/{TOTAL_ROUNDS}</Text>
           </View>
         ) : null}
+        {showRoundChip ? (
+          <View style={styles.roundChip}>
+            <Text style={styles.roundChipLabel}>Round</Text>
+            <Text style={styles.roundChipText}>{round}/{TOTAL_ROUNDS}</Text>
+          </View>
+        ) : null}
       </View>
 
       {/* Table/Base Layer */}
@@ -1680,7 +1741,7 @@ export default function GameScreen({ route, navigation }: Props) {
               giftAccent={bottomActiveGiftOption?.accent ?? null}
               connectionState={bottomConnected ? 'online' : 'offline'}
               onPress={() => openAvatarHub(bottomPlayer.userId ?? user?.userId)}
-              disabled={!isOnline || !(bottomPlayer.userId ?? user?.userId)}
+              disabled={!(bottomPlayer.userId ?? user?.userId) || (!isOnline && (bottomPlayer.userId ?? user?.userId) !== user?.userId)}
             />
             <View style={styles.localTitlePressable}>
               <Text
@@ -2060,14 +2121,22 @@ export default function GameScreen({ route, navigation }: Props) {
         </View>
       </Modal>
 
-      {/* Pass overlay (hidden in Solo mode) */}
+      {/* Pass-and-play peek handoff */}
       <Modal transparent visible={isFocused && showPassOverlay} animationType="fade">
-        <Pressable style={styles.overlay} onPress={() => setState(s => advancePeek(s))}>
+        <View style={styles.overlay}>
           <View style={styles.overlayCard}>
-            <Text style={styles.overlayTitle}>{getNextPeekLabel(state)}</Text>
-            <Text style={[styles.timerText, { marginTop: 12 }]}>Tap anywhere to continue</Text>
+            <Text style={styles.overlayTitle}>{passPeekPlayer?.name ?? 'Player'}'s Peek</Text>
+            <Text style={styles.overlayBody}>Pass the device. Flip two cards, then hand it to the next player.</Text>
+            <Pressable
+              style={styles.overlayButton}
+              onPress={() => {
+                if (passPeekPromptKey) setDismissedPeekPromptKey(passPeekPromptKey);
+              }}
+            >
+              <Text style={styles.overlayButtonText}>OK</Text>
+            </Pressable>
           </View>
-        </Pressable>
+        </View>
       </Modal>
 
       <Modal transparent visible={isFocused && showRoundSummary} animationType="fade">
@@ -2342,16 +2411,6 @@ function formatProgressionSummary(progression: api.MatchProgressionSummary | nul
   return lines.join('\n');
 }
 
-function getNextPeekLabel(s: GameState): string {
-  if (s.phase !== 'peek' || s.peekTurnIndex == null) return '';
-  let idx = s.peekTurnIndex;
-  for (let marched = 0; marched < s.players.length; marched++) {
-    idx = (idx + 1) % s.players.length;
-    if ((s.players[idx]?.peekFlips ?? 2) < 2) return `Pass to ${s.players[idx].name}`;
-  }
-  return 'All set! Tap to start the round';
-}
-
 function value(card: Card): number {
   return cardValue(card);
 }
@@ -2459,6 +2518,20 @@ const styles = StyleSheet.create({
   },
   timerText: { color: '#E8ECF1', fontSize: 17, fontWeight: '900', fontVariant: ['tabular-nums'] },
   roundText: { color: '#9BA3C7', fontSize: 11, fontWeight: '800', marginTop: 1 },
+  roundChip: {
+    minWidth: 58,
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#121737',
+    borderWidth: 1,
+    borderColor: '#2A2F57',
+  },
+  roundChipLabel: { color: '#9BA3C7', fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
+  roundChipText: { color: '#E8ECF1', fontSize: 15, fontWeight: '900', marginTop: 1, fontVariant: ['tabular-nums'] },
   chatButton: {
     width: 42,
     height: 42,
@@ -3031,8 +3104,20 @@ const styles = StyleSheet.create({
   cancelBtnText: { color: '#FF6B6B', fontWeight: '900', fontSize: 14 },
 
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
-  overlayCard: { padding: 20, borderRadius: 16, backgroundColor: '#121737', borderWidth: 1, borderColor: '#2A2F57', width: '75%', alignItems: 'center' },
+  overlayCard: { padding: 20, borderRadius: 16, backgroundColor: '#121737', borderWidth: 1, borderColor: '#2A2F57', width: '78%', alignItems: 'center' },
   overlayTitle: { color: '#E8ECF1', fontSize: 20, fontWeight: '800', textAlign: 'center' },
+  overlayBody: { color: '#C8CEE8', fontSize: 14, fontWeight: '800', lineHeight: 20, textAlign: 'center', marginTop: 10 },
+  overlayButton: {
+    minWidth: 136,
+    minHeight: 44,
+    marginTop: 18,
+    borderRadius: 10,
+    backgroundColor: '#52E5A7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  overlayButtonText: { color: '#0B1023', fontSize: 15, fontWeight: '900' },
   summaryLine: { color: '#E8ECF1', fontSize: 15, marginTop: 10, textAlign: 'center' },
   rewardBlock: {
     alignSelf: 'stretch',

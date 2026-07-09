@@ -25,6 +25,15 @@ const COLOR_PAIRS = ['emerald', 'gold', 'sky', 'crimson', 'violet'] as const;
 const BADGE_SHAPES = ['shield', 'crest', 'diamond', 'circle'] as const;
 const BANNER_STYLES = ['classic', 'night', 'fairway', 'champion'] as const;
 const QUICK_CHATS = ['Nice play!', 'Good luck!', 'Huge clear!', 'Good game!'];
+const DEFAULT_CLUB_CONFIG: api.ClubEconomyConfig = {
+  minJoinLevel: 10,
+  minCreateLevel: 10,
+  createCost: 5000,
+  prestigeTiers: [
+    { tier: 1, name: 'Founding Club', treasuryCost: 5000, memberCap: 15, minClubLevel: 1, minMembers: 1, minWeeklyMatches: 0, minSeasonMatches: 0, perks: ['Club tag', 'Club chat', '15 member seats'] },
+    { tier: 2, name: 'Growing Club', treasuryCost: 10000, memberCap: 20, minClubLevel: 3, minMembers: 5, minWeeklyMatches: 10, minSeasonMatches: 0, perks: ['20 member seats'] },
+  ],
+};
 
 const BRAND_COLORS: Record<string, { accent: string; background: string; soft: string }> = {
   emerald: { accent: '#52E5A7', background: '#123B32', soft: '#163C33' },
@@ -35,8 +44,9 @@ const BRAND_COLORS: Record<string, { accent: string; background: string; soft: s
 };
 
 export default function ClubScreen({ navigation }: Props) {
-  const { token, refreshProfile } = useAuth();
+  const { token, user, refreshProfile } = useAuth();
   const [club, setClub] = useState<api.ClubProfile | null>(null);
+  const [economy, setEconomy] = useState<api.EconomyCatalog | null>(null);
   const [applications, setApplications] = useState<api.ClubApplication[]>([]);
   const [recommended, setRecommended] = useState<api.ClubSummary[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -53,10 +63,16 @@ export default function ClubScreen({ navigation }: Props) {
   const [announcementText, setAnnouncementText] = useState('');
   const [chatInput, setChatInput] = useState('');
   const [chat, setChat] = useState<api.ClubChatMessage[]>([]);
+  const [donationAmount, setDonationAmount] = useState('500');
+  const clubConfig = economy?.clubConfig || DEFAULT_CLUB_CONFIG;
 
   const loadClub = useCallback(async () => {
     if (!token) return;
-    const response = await api.clubMe(token);
+    const [response, economyResponse] = await Promise.all([
+      api.clubMe(token),
+      api.economyCatalog(token),
+    ]);
+    setEconomy(economyResponse);
     setClub(response.club);
     setApplications(response.applications);
     setRecommended(response.recommended ?? []);
@@ -145,6 +161,19 @@ export default function ClubScreen({ navigation }: Props) {
     await refreshProfile();
   });
 
+  const donate = (amount: number) => runAction(`donate:${amount}`, async () => {
+    if (!club) return;
+    const response = await api.donateToClub(token!, club.clubId, amount);
+    setClub(response.club);
+    await refreshProfile();
+  });
+
+  const buyPrestige = () => runAction('prestige', async () => {
+    if (!club) return;
+    const response = await api.purchaseClubPrestige(token!, club.clubId);
+    setClub(response.club);
+  });
+
   const apply = (target: api.ClubSummary) => runAction(`apply:${target.clubId}`, async () => {
     await api.requestJoinClub(token!, target.clubId);
     await loadClub();
@@ -219,10 +248,15 @@ export default function ClubScreen({ navigation }: Props) {
           busyId={busyId}
           announcementText={announcementText}
           chatInput={chatInput}
+          donationAmount={donationAmount}
+          viewerCoins={user?.currency.coins || 0}
           setAnnouncementText={setAnnouncementText}
           setChatInput={setChatInput}
+          setDonationAmount={setDonationAmount}
           postAnnouncement={postAnnouncement}
           sendChat={sendChat}
+          donate={donate}
+          buyPrestige={buyPrestige}
           claimReward={claimReward}
           acceptRequest={acceptRequest}
           rejectRequest={rejectRequest}
@@ -240,6 +274,8 @@ export default function ClubScreen({ navigation }: Props) {
           tag={tag}
           motto={motto}
           branding={branding}
+          user={user}
+          clubConfig={clubConfig}
           busyId={busyId}
           setSearchQuery={setSearchQuery}
           setName={setName}
@@ -263,6 +299,8 @@ function NoClub({
   tag,
   motto,
   branding,
+  user,
+  clubConfig,
   busyId,
   setSearchQuery,
   setName,
@@ -280,6 +318,8 @@ function NoClub({
   tag: string;
   motto: string;
   branding: api.ClubBranding;
+  user: api.UserProfile | null;
+  clubConfig: api.ClubEconomyConfig;
   busyId: string | null;
   setSearchQuery: (value: string) => void;
   setName: (value: string) => void;
@@ -290,16 +330,42 @@ function NoClub({
   apply: (club: api.ClubSummary) => void;
 }) {
   const clubsToShow = searchQuery.trim().length >= 2 ? searchResults : recommended;
+  const level = user?.progression.level || 1;
+  const coins = user?.currency.coins || 0;
+  const joinLocked = level < clubConfig.minJoinLevel;
+  const createLocked = level < clubConfig.minCreateLevel;
+  const canAffordCreate = coins >= clubConfig.createCost;
+  if (joinLocked) {
+    return (
+      <Panel title="Clubhouse Locked">
+        <Text style={styles.lockTitle}>Reach Level {clubConfig.minJoinLevel} to join clubs.</Text>
+        <Text style={styles.metaText}>You are Level {level}. Clubs are meant to be earned into, then built with players who are already active at the tables.</Text>
+        <View style={styles.statGrid}>
+          <StatTile label="Your Level" value={`Lv ${level}`} />
+          <StatTile label="Join Clubs" value={`Lv ${clubConfig.minJoinLevel}`} />
+          <StatTile label="Create Clubs" value={`Lv ${clubConfig.minCreateLevel}`} />
+          <StatTile label="Create Cost" value={formatCoins(clubConfig.createCost)} />
+        </View>
+      </Panel>
+    );
+  }
   return (
     <>
       <Panel title="Create Club">
+        <View style={styles.costStrip}>
+          <Text style={styles.metaText}>Creation cost</Text>
+          <Text style={styles.costText}>{formatCoins(clubConfig.createCost)}</Text>
+          <Text style={styles.metaText}>Your balance: {formatCoins(coins)}</Text>
+        </View>
         <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Club name" placeholderTextColor="#9BA3C7" />
         <TextInput style={styles.input} value={tag} onChangeText={text => setTag(text.toUpperCase())} placeholder="Tag" placeholderTextColor="#9BA3C7" autoCapitalize="characters" maxLength={5} />
         <TextInput style={styles.input} value={motto} onChangeText={setMotto} placeholder="Motto" placeholderTextColor="#9BA3C7" maxLength={80} />
         <PresetRow label="Color" items={COLOR_PAIRS} selected={branding.colorPair} onSelect={colorPair => setBranding({ ...branding, colorPair })} />
         <PresetRow label="Badge" items={BADGE_SHAPES} selected={branding.badgeShape} onSelect={badgeShape => setBranding({ ...branding, badgeShape })} />
         <PresetRow label="Banner" items={BANNER_STYLES} selected={branding.bannerStyle} onSelect={bannerStyle => setBranding({ ...branding, bannerStyle })} />
-        <PrimaryButton label={busyId === 'create' ? 'Creating...' : 'Create Club'} disabled={busyId === 'create'} onPress={create} />
+        {createLocked ? <Text style={styles.warningText}>Reach Level {clubConfig.minCreateLevel} before creating a club.</Text> : null}
+        {!canAffordCreate ? <Text style={styles.warningText}>You need {formatCoins(clubConfig.createCost - coins)} more to create a club.</Text> : null}
+        <PrimaryButton label={busyId === 'create' ? 'Creating...' : 'Create Club'} disabled={busyId === 'create' || createLocked || !canAffordCreate} onPress={create} />
       </Panel>
 
       {applications.length ? (
@@ -333,10 +399,15 @@ function JoinedClub({
   busyId,
   announcementText,
   chatInput,
+  donationAmount,
+  viewerCoins,
   setAnnouncementText,
   setChatInput,
+  setDonationAmount,
   postAnnouncement,
   sendChat,
+  donate,
+  buyPrestige,
   claimReward,
   acceptRequest,
   rejectRequest,
@@ -350,10 +421,15 @@ function JoinedClub({
   busyId: string | null;
   announcementText: string;
   chatInput: string;
+  donationAmount: string;
+  viewerCoins: number;
   setAnnouncementText: (value: string) => void;
   setChatInput: (value: string) => void;
+  setDonationAmount: (value: string) => void;
   postAnnouncement: () => void;
   sendChat: (type: api.ClubChatMessage['type'], text: string) => void;
+  donate: (amount: number) => void;
+  buyPrestige: () => void;
   claimReward: (reward: api.ClubReward) => void;
   acceptRequest: (request: api.ClubJoinRequest) => void;
   rejectRequest: (request: api.ClubJoinRequest) => void;
@@ -377,6 +453,57 @@ function JoinedClub({
       <Panel title="Club Progress">
         <ProgressBar progress={club.progression.levelProgress} color={activeColors.accent} />
         <Text style={styles.metaText}>{club.progression.currentLevelXp} / {club.progression.nextLevelXp} XP toward Level {club.level + 1}</Text>
+      </Panel>
+
+      <Panel title="Club Treasury">
+        <View style={styles.statGrid}>
+          <StatTile label="Treasury" value={formatCoins(club.treasury.balance)} />
+          <StatTile label="Lifetime" value={formatCoins(club.treasury.lifetimeDonated)} />
+          <StatTile label="You Donated" value={formatCoins(club.donationStats.viewerDonated)} />
+          <StatTile label="Your Coins" value={formatCoins(viewerCoins)} />
+        </View>
+        <View style={styles.quickRow}>
+          {[100, 500, 1000].map(amount => (
+            <Pressable key={amount} style={[styles.quickChip, viewerCoins < amount && styles.disabled]} disabled={viewerCoins < amount} onPress={() => donate(amount)}>
+              <Text style={styles.quickChipText}>Donate {amount}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <View style={styles.inlineForm}>
+          <TextInput
+            style={[styles.input, styles.inlineInput]}
+            value={donationAmount}
+            onChangeText={text => setDonationAmount(text.replace(/[^0-9]/g, '').slice(0, 7))}
+            placeholder="Amount"
+            keyboardType="number-pad"
+            placeholderTextColor="#9BA3C7"
+          />
+          <SmallButton label="Donate" busy={busyId === `donate:${Number(donationAmount || 0)}`} disabled={!Number(donationAmount || 0)} onPress={() => donate(Number(donationAmount || 0))} />
+        </View>
+        {club.donationStats.topDonors.length ? club.donationStats.topDonors.slice(0, 5).map((donor, index) => (
+          <Text key={donor.userId} style={styles.metaText}>{index + 1}. {donor.displayName} - {formatCoins(donor.amount)}</Text>
+        )) : <Empty text="No donations yet. Treasury starts with members pitching in." />}
+      </Panel>
+
+      <Panel title="Prestige">
+        <Text style={styles.rowTitle}>{club.prestige.name} - Tier {club.prestige.tier}</Text>
+        <Text style={styles.metaText}>{club.memberCount}/{club.memberCap} member seats unlocked. Purchased perks never decay.</Text>
+        {club.nextPrestige ? (
+          <>
+            <View style={styles.nextPrestigeCard}>
+              <Text style={styles.rowTitle}>Next: {club.nextPrestige.name}</Text>
+              <Text style={styles.metaText}>{formatCoins(club.nextPrestige.treasuryCost)} treasury cost - {club.nextPrestige.memberCap} member seats</Text>
+              {club.nextPrestige.perks.map(perk => <Text key={perk} style={styles.metaText}>+ {perk}</Text>)}
+            </View>
+            {club.nextPrestige.requirements.map(requirement => (
+              <View key={requirement.id} style={styles.requirementRow}>
+                <Text style={styles.metaText}>{requirement.complete ? 'Ready' : 'Needed'} - {requirement.label}</Text>
+                <Text style={styles.metaText}>{requirement.current}/{requirement.target}</Text>
+              </View>
+            ))}
+            <PrimaryButton label={busyId === 'prestige' ? 'Buying...' : 'Buy Prestige'} disabled={!club.canPrestige || busyId === 'prestige'} onPress={buyPrestige} />
+          </>
+        ) : <Empty text="This club is already at the highest prestige tier." />}
       </Panel>
 
       <Panel title="Weekly Goals">
@@ -472,7 +599,7 @@ function ClubSearchRow({ club, busy, pending, onApply }: { club: api.ClubSummary
       </View>
       <View style={styles.flex}>
         <Text style={styles.rowTitle}>{club.name}</Text>
-        <Text style={styles.metaText}>Level {club.level} - {club.memberCount}/{club.memberCap} members</Text>
+        <Text style={styles.metaText}>Level {club.level} - Tier {club.prestige?.tier || 1} - {club.memberCount}/{club.memberCap} members</Text>
       </View>
       <SmallButton label={pending ? 'Pending' : 'Apply'} busy={busy} disabled={pending} onPress={onApply} />
     </View>
@@ -501,7 +628,7 @@ function MemberRow({
       </View>
       <View style={styles.flex}>
         <Text style={styles.rowTitle}>{member.displayName}</Text>
-        <Text style={styles.metaText}>{member.role} - {member.contributionXp} club XP</Text>
+        <Text style={styles.metaText}>{member.role} - {member.contributionXp} club XP - {formatCoins(member.coinContribution || 0)} donated</Text>
       </View>
       {canManage ? (
         <View style={styles.memberActions}>
@@ -602,6 +729,19 @@ function Empty({ text }: { text: string }) {
   return <Text style={styles.emptyText}>{text}</Text>;
 }
 
+function StatTile({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.statTile}>
+      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function formatCoins(value: number) {
+  return `${Math.max(0, Math.floor(Number(value) || 0)).toLocaleString()} coins`;
+}
+
 function colorsFor(colorPair?: string) {
   return BRAND_COLORS[colorPair || 'emerald'] || BRAND_COLORS.emerald;
 }
@@ -654,6 +794,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   panelTitle: { color: '#E8ECF1', fontSize: 18, fontWeight: '900', marginBottom: 10 },
+  lockTitle: { color: '#E8ECF1', fontSize: 22, fontWeight: '900', marginBottom: 8 },
   input: {
     backgroundColor: '#0F1430',
     borderColor: '#2A2F57',
@@ -696,6 +837,49 @@ const styles = StyleSheet.create({
   quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   quickChip: { borderWidth: 1, borderColor: '#4DA3FF', borderRadius: 8, paddingVertical: 7, paddingHorizontal: 9 },
   quickChipText: { color: '#BFD9FF', fontWeight: '900', fontSize: 12 },
+  costStrip: {
+    borderWidth: 1,
+    borderColor: '#3A3F73',
+    borderRadius: 8,
+    backgroundColor: '#0F1430',
+    padding: 12,
+    marginBottom: 10,
+  },
+  costText: { color: '#FFCC66', fontSize: 22, fontWeight: '900', marginVertical: 2 },
+  warningText: { color: '#FF9A9A', fontSize: 12, fontWeight: '900', marginBottom: 8 },
+  statGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 10,
+  },
+  statTile: {
+    flexGrow: 1,
+    minWidth: '45%',
+    borderWidth: 1,
+    borderColor: '#2A2F57',
+    borderRadius: 8,
+    backgroundColor: '#0F1430',
+    padding: 10,
+  },
+  statValue: { color: '#E8ECF1', fontSize: 15, fontWeight: '900' },
+  statLabel: { color: '#9BA3C7', fontSize: 11, fontWeight: '800', marginTop: 2 },
+  nextPrestigeCard: {
+    borderWidth: 1,
+    borderColor: '#FFCC66',
+    borderRadius: 8,
+    backgroundColor: '#2B2515',
+    padding: 10,
+    marginVertical: 10,
+  },
+  requirementRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#2A2F57',
+    paddingVertical: 8,
+  },
   chatLine: { color: '#E8ECF1', fontSize: 13, fontWeight: '700', paddingVertical: 4 },
   chatName: { color: '#52E5A7', fontWeight: '900' },
   rewardRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#2A2F57' },

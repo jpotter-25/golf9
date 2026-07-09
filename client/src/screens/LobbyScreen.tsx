@@ -2,12 +2,13 @@
 // Purpose: Premium mode-first home hub for local, solo, and online play.
 
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Bot, ChevronLeft, Play, Users, Wifi } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
+import { useAuth } from '../context/AuthContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Lobby'>;
 type ModeChoice = 'passplay' | 'solo' | 'online';
@@ -19,13 +20,22 @@ const MODE_META: Record<ModeChoice, { title: string; subtitle: string; Icon: Luc
 };
 
 export default function LobbyScreen({ navigation }: Props) {
+  const { user } = useAuth();
   const [selectedMode, setSelectedMode] = useState<ModeChoice | null>(null);
   const [players, setPlayers] = useState<2 | 3 | 4>(4);
   const [rounds, setRounds] = useState<5 | 9>(9);
   const [aiDifficulty, setAiDifficulty] = useState<'easy' | 'hard'>('easy');
+  const [passPlayerNames, setPassPlayerNames] = useState<string[]>(['', '', '', '']);
 
   const startSelectedMode = () => {
-    if (selectedMode === 'passplay') navigation.replace('Game', { players, mode: 'passplay', rounds });
+    if (selectedMode === 'passplay') {
+      const localPlayerNames = Array.from({ length: players }, (_, index) => (
+        index === 0
+          ? user?.displayName ?? 'Player 1'
+          : cleanSeatName(passPlayerNames[index], `Player ${index + 1}`)
+      ));
+      navigation.replace('Game', { players, mode: 'passplay', rounds, localPlayerNames });
+    }
     else if (selectedMode === 'solo') navigation.replace('Game', { players, mode: 'solo', rounds, aiDifficulty });
   };
 
@@ -85,6 +95,42 @@ export default function LobbyScreen({ navigation }: Props) {
             onSelect={value => setAiDifficulty(value as 'easy' | 'hard')}
             labels={{ easy: 'Easy', hard: 'Hard' }}
           />
+        </PremiumPanel>
+      ) : null}
+
+      {selectedMode === 'passplay' ? (
+        <PremiumPanel>
+          <PickerLabel label="Seats" value={`${players}`} />
+          <View style={styles.seatRow}>
+            <View style={styles.seatNumber}>
+              <Text style={styles.seatNumberText}>1</Text>
+            </View>
+            <View style={styles.seatCopy}>
+              <Text style={styles.seatLabel}>Signed-in player</Text>
+              <Text style={styles.seatName} numberOfLines={1}>{user?.displayName ?? 'Player 1'}</Text>
+            </View>
+          </View>
+          {Array.from({ length: players - 1 }, (_, offset) => offset + 1).map(index => (
+            <View key={index} style={styles.seatRow}>
+              <View style={styles.seatNumber}>
+                <Text style={styles.seatNumberText}>{index + 1}</Text>
+              </View>
+              <TextInput
+                value={passPlayerNames[index] ?? ''}
+                onChangeText={text => {
+                  const next = [...passPlayerNames];
+                  next[index] = text;
+                  setPassPlayerNames(next);
+                }}
+                placeholder={`Player ${index + 1}`}
+                placeholderTextColor={ui.text.muted}
+                maxLength={12}
+                autoCapitalize="words"
+                autoCorrect={false}
+                style={styles.seatInput}
+              />
+            </View>
+          ))}
         </PremiumPanel>
       ) : null}
 
@@ -172,6 +218,11 @@ function toneColor(tone: 'emerald' | 'sky' | 'gold') {
   return ui.palette.emerald;
 }
 
+function cleanSeatName(value: string | undefined, fallback: string) {
+  const trimmed = String(value || '').trim().replace(/\s+/g, ' ');
+  return trimmed ? trimmed.slice(0, 12) : fallback;
+}
+
 const styles = StyleSheet.create({
   modeCard: {
     minHeight: 96,
@@ -232,4 +283,37 @@ const styles = StyleSheet.create({
   segmentText: { color: ui.text.secondary, fontSize: 15, fontWeight: '900' },
   segmentTextActive: { color: ui.text.inverse },
   startButton: { marginBottom: 10 },
+  seatRow: {
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 10,
+  },
+  seatNumber: {
+    width: 38,
+    height: 38,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: ui.border.soft,
+    backgroundColor: ui.surface.base,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  seatNumberText: { color: ui.palette.emerald, fontSize: 15, fontWeight: '900' },
+  seatCopy: { flex: 1, minWidth: 0 },
+  seatLabel: { color: ui.text.muted, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
+  seatName: { color: ui.text.primary, fontSize: 17, fontWeight: '900', marginTop: 2 },
+  seatInput: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: ui.border.soft,
+    backgroundColor: ui.surface.base,
+    color: ui.text.primary,
+    fontSize: 16,
+    fontWeight: '900',
+    paddingHorizontal: 12,
+  },
 });

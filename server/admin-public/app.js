@@ -8,6 +8,7 @@ let catalogLive = [];
 let selectedClub = null;
 let competitiveConfig = null;
 let economyWagerTables = [];
+let economyClubConfig = null;
 let notificationConfig = null;
 
 const NOTIFICATION_LABELS = {
@@ -79,6 +80,7 @@ function bindConsoleActions() {
   document.querySelector('#loadTickets').addEventListener('click', loadTickets);
   document.querySelector('#loadEconomy').addEventListener('click', loadEconomy);
   document.querySelector('#addWagerTable').addEventListener('click', addWagerTable);
+  document.querySelector('#addClubPrestigeTier').addEventListener('click', addClubPrestigeTier);
   document.querySelector('#economyConfigEditor').addEventListener('submit', saveEconomyConfig);
   document.querySelector('#loadNotifications').addEventListener('click', loadNotifications);
   document.querySelector('#notificationConfigEditor').addEventListener('submit', saveNotificationConfig);
@@ -306,7 +308,9 @@ async function loadEconomy() {
   const data = await api('/economy');
   economyWagerTables = [...(data.config?.wagerTables || data.economy?.catalog?.wagerTables || [])]
     .sort((a, b) => Number(a.buyIn || 0) - Number(b.buyIn || 0));
+  economyClubConfig = normalizeClubConfigDraft(data.config?.clubConfig || data.economy?.catalog?.clubConfig || {});
   renderWagerTables();
+  renderClubConfig();
   renderEconomyOutput(data.economy, data.config);
 }
 
@@ -314,6 +318,7 @@ async function saveEconomyConfig(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const wagerTables = collectWagerTables();
+  const clubConfig = collectClubConfig();
   const reason = form.reason.value.trim();
   if (!reason) {
     alert('Reason is required.');
@@ -321,19 +326,22 @@ async function saveEconomyConfig(event) {
   }
   const data = await api('/economy/config', {
     method: 'PATCH',
-    body: JSON.stringify({ reason, config: { wagerTables } }),
+    body: JSON.stringify({ reason, config: { wagerTables, clubConfig } }),
   });
   form.reason.value = '';
   economyWagerTables = [...(data.config?.wagerTables || data.economy?.catalog?.wagerTables || [])]
     .sort((a, b) => Number(a.buyIn || 0) - Number(b.buyIn || 0));
+  economyClubConfig = normalizeClubConfigDraft(data.config?.clubConfig || data.economy?.catalog?.clubConfig || {});
   renderWagerTables();
+  renderClubConfig();
   renderEconomyOutput(data.economy, data.config);
-  status('Wager options saved.', 'ok');
+  status('Economy settings saved.', 'ok');
 }
 
 function renderEconomyOutput(economy, config) {
   document.querySelector('#economyOutput').textContent = JSON.stringify({
     activeWagerBuyIns: (config?.wagerTables || economy?.catalog?.wagerTables || []).map(table => table.buyIn),
+    clubConfig: config?.clubConfig || economy?.catalog?.clubConfig,
     economy,
   }, null, 2);
 }
@@ -409,6 +417,116 @@ function addWagerTable() {
     },
   ];
   renderWagerTables();
+}
+
+function normalizeClubConfigDraft(input = {}) {
+  const tiers = Array.isArray(input.prestigeTiers) && input.prestigeTiers.length ? input.prestigeTiers : [
+    { tier: 1, name: 'Founding Club', treasuryCost: 5000, memberCap: 15, minClubLevel: 1, minMembers: 1, minWeeklyMatches: 0, minSeasonMatches: 0, perks: ['Club tag', 'Club chat', '15 member seats'] },
+    { tier: 2, name: 'Growing Club', treasuryCost: 10000, memberCap: 20, minClubLevel: 3, minMembers: 5, minWeeklyMatches: 10, minSeasonMatches: 0, perks: ['20 member seats'] },
+  ];
+  return {
+    minJoinLevel: Number(input.minJoinLevel || 10),
+    minCreateLevel: Number(input.minCreateLevel || 10),
+    createCost: Number(input.createCost || 5000),
+    prestigeTiers: tiers.map((tier, index) => ({
+      tier: Number(tier.tier || index + 1),
+      name: tier.name || `Tier ${index + 1}`,
+      treasuryCost: Number(tier.treasuryCost ?? tier.cost ?? 0),
+      memberCap: Number(tier.memberCap || 15),
+      minClubLevel: Number(tier.minClubLevel || 1),
+      minMembers: Number(tier.minMembers || 1),
+      minWeeklyMatches: Number(tier.minWeeklyMatches || 0),
+      minSeasonMatches: Number(tier.minSeasonMatches || 0),
+      perks: Array.isArray(tier.perks) ? tier.perks : [],
+    })).sort((a, b) => a.tier - b.tier),
+  };
+}
+
+function renderClubConfig() {
+  const form = document.querySelector('#economyConfigEditor');
+  const config = economyClubConfig || normalizeClubConfigDraft();
+  form.clubMinJoinLevel.value = config.minJoinLevel;
+  form.clubMinCreateLevel.value = config.minCreateLevel;
+  form.clubCreateCost.value = config.createCost;
+  const output = document.querySelector('#clubPrestigeRows');
+  output.replaceChildren(...config.prestigeTiers.map((tier, index) => {
+    const row = document.createElement('div');
+    row.className = 'card club-prestige-row';
+    row.dataset.index = String(index);
+    row.innerHTML = `
+      <div class="row three">
+        <label>Tier <input data-field="tier" type="number" min="1" value="${Number(tier.tier || index + 1)}" /></label>
+        <label>Name <input data-field="name" value="${escapeHtml(tier.name || '')}" /></label>
+        <label>Treasury cost <input data-field="treasuryCost" type="number" min="0" value="${Number(tier.treasuryCost || 0)}" /></label>
+      </div>
+      <div class="row three">
+        <label>Member cap <input data-field="memberCap" type="number" min="1" value="${Number(tier.memberCap || 15)}" /></label>
+        <label>Club level req <input data-field="minClubLevel" type="number" min="1" value="${Number(tier.minClubLevel || 1)}" /></label>
+        <label>Members req <input data-field="minMembers" type="number" min="1" value="${Number(tier.minMembers || 1)}" /></label>
+      </div>
+      <div class="row two">
+        <label>Weekly matches req <input data-field="minWeeklyMatches" type="number" min="0" value="${Number(tier.minWeeklyMatches || 0)}" /></label>
+        <label>Season matches req <input data-field="minSeasonMatches" type="number" min="0" value="${Number(tier.minSeasonMatches || 0)}" /></label>
+      </div>
+      <label>Perks <input data-field="perks" value="${escapeHtml((tier.perks || []).join(', '))}" placeholder="Comma-separated perks" /></label>
+      ${Number(tier.tier || index + 1) === 1 ? '<p class="muted">Tier 1 is the created club baseline.</p>' : `<button type="button" class="danger" data-remove-club-tier="${index}">Remove Tier</button>`}
+    `;
+    const remove = row.querySelector('[data-remove-club-tier]');
+    if (remove) remove.addEventListener('click', () => {
+      economyClubConfig = collectClubConfig();
+      economyClubConfig.prestigeTiers.splice(index, 1);
+      renderClubConfig();
+    });
+    return row;
+  }));
+}
+
+function collectClubConfig() {
+  const form = document.querySelector('#economyConfigEditor');
+  const rows = [...document.querySelectorAll('#clubPrestigeRows .club-prestige-row')];
+  const byTier = new Map();
+  for (const row of rows) {
+    const tier = Math.max(1, Math.floor(Number(row.querySelector('[data-field="tier"]').value || 1)));
+    const memberCap = Math.max(1, Math.floor(Number(row.querySelector('[data-field="memberCap"]').value || 15)));
+    byTier.set(tier, {
+      tier,
+      name: row.querySelector('[data-field="name"]').value.trim() || `Tier ${tier}`,
+      treasuryCost: Math.max(0, Math.floor(Number(row.querySelector('[data-field="treasuryCost"]').value || 0))),
+      memberCap,
+      minClubLevel: Math.max(1, Math.floor(Number(row.querySelector('[data-field="minClubLevel"]').value || 1))),
+      minMembers: Math.max(1, Math.min(memberCap, Math.floor(Number(row.querySelector('[data-field="minMembers"]').value || 1)))),
+      minWeeklyMatches: Math.max(0, Math.floor(Number(row.querySelector('[data-field="minWeeklyMatches"]').value || 0))),
+      minSeasonMatches: Math.max(0, Math.floor(Number(row.querySelector('[data-field="minSeasonMatches"]').value || 0))),
+      perks: row.querySelector('[data-field="perks"]').value.split(',').map(item => item.trim()).filter(Boolean),
+    });
+  }
+  if (!byTier.has(1)) {
+    byTier.set(1, { tier: 1, name: 'Founding Club', treasuryCost: 5000, memberCap: 15, minClubLevel: 1, minMembers: 1, minWeeklyMatches: 0, minSeasonMatches: 0, perks: ['Club tag', 'Club chat', '15 member seats'] });
+  }
+  return {
+    minJoinLevel: Math.max(1, Math.floor(Number(form.clubMinJoinLevel.value || 10))),
+    minCreateLevel: Math.max(1, Math.floor(Number(form.clubMinCreateLevel.value || 10))),
+    createCost: Math.max(0, Math.floor(Number(form.clubCreateCost.value || 5000))),
+    prestigeTiers: [...byTier.values()].sort((a, b) => a.tier - b.tier),
+  };
+}
+
+function addClubPrestigeTier() {
+  economyClubConfig = collectClubConfig();
+  const highest = economyClubConfig.prestigeTiers.reduce((max, tier) => Math.max(max, Number(tier.tier || 0)), 0);
+  const previous = economyClubConfig.prestigeTiers.find(tier => tier.tier === highest) || economyClubConfig.prestigeTiers.at(-1) || {};
+  economyClubConfig.prestigeTiers.push({
+    tier: highest + 1,
+    name: `Prestige ${highest + 1}`,
+    treasuryCost: Math.max(10000, Number(previous.treasuryCost || 5000) * 2),
+    memberCap: Number(previous.memberCap || 15) + 10,
+    minClubLevel: Number(previous.minClubLevel || 1) + 3,
+    minMembers: Math.max(1, Number(previous.minMembers || 1) + 5),
+    minWeeklyMatches: 0,
+    minSeasonMatches: Number(previous.minSeasonMatches || previous.minWeeklyMatches || 0) + 25,
+    perks: [`${Number(previous.memberCap || 15) + 10} member seats`],
+  });
+  renderClubConfig();
 }
 
 async function loadNotifications() {

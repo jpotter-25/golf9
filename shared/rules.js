@@ -152,8 +152,13 @@ function bumpTurnSerial(state) {
   if (state.phase === 'turn') state.turnSerial = (state.turnSerial || 0) + 1;
 }
 
-export function dealLocal(players) {
-  return createGameState(Array.from({ length: players }, (_, i) => ({ userId: `local-${i + 1}`, displayName: `Player ${i + 1}` })));
+export function dealLocal(players, identities = []) {
+  return createGameState(Array.from({ length: players }, (_, i) => ({
+    userId: identities[i]?.userId || `local-${i + 1}`,
+    displayName: identities[i]?.displayName || identities[i]?.name || `Player ${i + 1}`,
+    avatarInitial: identities[i]?.avatarInitial,
+    cosmetics: identities[i]?.cosmetics,
+  })));
 }
 
 function allPeeked(state) {

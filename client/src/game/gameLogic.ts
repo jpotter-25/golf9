@@ -1,7 +1,7 @@
 // client/src/game/gameLogic.ts
 // Purpose: Local-play wrappers around the shared authoritative Golf 9 rules.
 
-import type { Card, GameState, Grid } from './types';
+import type { Card, GameState, Grid, PlayerIdentity } from './types';
 import {
   advancePeek as sharedAdvancePeek,
   autoCompleteCurrentPeek as sharedAutoCompleteCurrentPeek,
@@ -19,8 +19,8 @@ import {
 
 export { initGrid, isRoundOver, scoreGrid as computeScore, startTurns };
 
-export function deal(players: number): GameState {
-  return dealLocal(players) as GameState;
+export function deal(players: number, identities?: PlayerIdentity[]): GameState {
+  return dealLocal(players, identities) as GameState;
 }
 
 export function flipForPeek(state: GameState, r: number, c: number): GameState {

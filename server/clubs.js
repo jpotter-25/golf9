@@ -1,6 +1,9 @@
 // clubs.js
 // Purpose: Club persistence helpers, permissions, progression, goals, events, and rewards.
 
+import crypto from 'crypto';
+import { DEFAULT_CLUB_CONFIG, normalizeClubConfig } from './economy.js';
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CLUB_LEVEL_THRESHOLDS = [
   0, 1500, 3500, 6500, 10000, 14500, 19500, 25000, 31500, 39000, 47500, 57000,
@@ -8,6 +11,7 @@ const CLUB_LEVEL_THRESHOLDS = [
 const CLUB_CHAT_HISTORY_LIMIT = 80;
 const CLUB_ANNOUNCEMENT_LIMIT = 20;
 const CLUB_PROCESSED_RESULT_LIMIT = 500;
+const CLUB_DONATION_LEDGER_LIMIT = 200;
 
 export const CLUB_ROLES = ['owner', 'officer', 'member', 'rookie'];
 
@@ -49,6 +53,11 @@ export const CLUB_REWARD_CATALOG = [
 
 function clampText(value, maxLength) {
   return String(value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+
+function safeInteger(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.floor(number) : fallback;
 }
 
 export function normalizeClubTag(value) {
@@ -103,7 +112,7 @@ export function memberCapForLevel(level = 1) {
   return 15;
 }
 
-export function clubProgressionSnapshot(totalXp = 0) {
+export function clubProgressionSnapshot(totalXp = 0, memberCapOverride = null) {
   const xp = Math.max(0, Math.floor(Number(totalXp) || 0));
   const level = clubLevelForXp(xp);
   const index = Math.min(level - 1, CLUB_LEVEL_THRESHOLDS.length - 1);
@@ -115,7 +124,57 @@ export function clubProgressionSnapshot(totalXp = 0) {
     currentLevelXp: Math.max(0, xp - currentLevelXp),
     nextLevelXp: Math.max(1, nextLevelXp - currentLevelXp),
     levelProgress: Math.max(0, Math.min(1, (xp - currentLevelXp) / Math.max(1, nextLevelXp - currentLevelXp))),
-    memberCap: memberCapForLevel(level),
+    memberCap: Math.max(1, Math.floor(Number(memberCapOverride ?? memberCapForLevel(level)) || 15)),
+  };
+}
+
+function prestigeTierFor(clubConfig, tier = 1) {
+  const config = normalizeClubConfig(clubConfig || DEFAULT_CLUB_CONFIG);
+  const safeTier = Math.max(1, safeInteger(tier, 1));
+  const exact = config.prestigeTiers.find(item => item.tier === safeTier);
+  if (exact) return exact;
+  const previous = config.prestigeTiers.filter(item => item.tier <= safeTier).at(-1);
+  return previous || config.prestigeTiers[0];
+}
+
+function nextPrestigeTierFor(club, clubConfig) {
+  const config = normalizeClubConfig(clubConfig || DEFAULT_CLUB_CONFIG);
+  const currentTier = Math.max(1, safeInteger(club?.prestige?.tier, 1));
+  return config.prestigeTiers.find(item => item.tier > currentTier) || null;
+}
+
+function normalizeClubPrestige(club, now = Date.now()) {
+  const tier = Math.max(1, safeInteger(club.prestige?.tier ?? club.prestigeTier, 1));
+  const history = Array.isArray(club.prestige?.history) ? club.prestige.history : [];
+  return {
+    tier,
+    purchasedAt: safeInteger(club.prestige?.purchasedAt ?? club.createdAt, now) || now,
+    history: history
+      .filter(item => item && safeInteger(item.tier, 0) > 0)
+      .map(item => ({
+        tier: Math.max(1, safeInteger(item.tier, 1)),
+        purchasedAt: safeInteger(item.purchasedAt, now) || now,
+        purchasedBy: item.purchasedBy ? String(item.purchasedBy) : null,
+        treasuryCost: Math.max(0, safeInteger(item.treasuryCost ?? item.cost, 0)),
+      }))
+      .slice(-20),
+  };
+}
+
+function normalizeClubTreasury(club, now = Date.now()) {
+  const donations = Array.isArray(club.treasury?.donations) ? club.treasury.donations : [];
+  return {
+    balance: Math.max(0, safeInteger(club.treasury?.balance, 0)),
+    lifetimeDonated: Math.max(0, safeInteger(club.treasury?.lifetimeDonated, 0)),
+    donations: donations
+      .filter(item => item?.userId && safeInteger(item.amount, 0) > 0)
+      .map(item => ({
+        id: String(item.id || crypto.randomUUID()),
+        userId: String(item.userId),
+        amount: Math.max(1, safeInteger(item.amount, 1)),
+        createdAt: safeInteger(item.createdAt, now) || now,
+      }))
+      .slice(-CLUB_DONATION_LEDGER_LIMIT),
   };
 }
 
@@ -187,9 +246,8 @@ function normalizeClubEvent(club, now = Date.now()) {
   };
 }
 
-export function normalizeClubRecord(club, now = Date.now(), rankedSeason = null) {
-  const progression = clubProgressionSnapshot(club.progression?.totalXp ?? club.totalXp ?? 0);
-  const memberCap = progression.memberCap;
+export function normalizeClubRecord(club, now = Date.now(), rankedSeason = null, clubConfig = DEFAULT_CLUB_CONFIG) {
+  const config = normalizeClubConfig(clubConfig || DEFAULT_CLUB_CONFIG);
   club.clubId = String(club.clubId || club.id || '');
   club.name = clampText(club.name, 28) || 'Golf Club';
   club.tag = normalizeClubTag(club.tag) || 'CLUB';
@@ -198,6 +256,11 @@ export function normalizeClubRecord(club, now = Date.now(), rankedSeason = null)
   club.branding = normalizeClubBranding(club.branding);
   club.createdAt = Number(club.createdAt || now) || now;
   club.updatedAt = Number(club.updatedAt || club.createdAt) || club.createdAt;
+  club.prestige = normalizeClubPrestige(club, now);
+  club.treasury = normalizeClubTreasury(club, now);
+  const activePrestigeTier = prestigeTierFor(config, club.prestige.tier);
+  const progression = clubProgressionSnapshot(club.progression?.totalXp ?? club.totalXp ?? 0, activePrestigeTier.memberCap);
+  const memberCap = progression.memberCap;
   club.progression = progression;
   club.members = Array.isArray(club.members) ? club.members : [];
   club.members = club.members
@@ -207,6 +270,7 @@ export function normalizeClubRecord(club, now = Date.now(), rankedSeason = null)
       role: CLUB_ROLES.includes(member.role) ? member.role : 'rookie',
       joinedAt: Number(member.joinedAt || now) || now,
       contributionXp: Math.max(0, Math.floor(Number(member.contributionXp ?? 0) || 0)),
+      coinContribution: Math.max(0, Math.floor(Number(member.coinContribution ?? 0) || 0)),
       contribution: {
         matches: Math.max(0, Math.floor(Number(member.contribution?.matches ?? 0) || 0)),
         wins: Math.max(0, Math.floor(Number(member.contribution?.wins ?? 0) || 0)),
@@ -233,7 +297,7 @@ export function normalizeClubRecord(club, now = Date.now(), rankedSeason = null)
   return club;
 }
 
-export function createClubRecord(owner, payload, now = Date.now()) {
+export function createClubRecord(owner, payload, now = Date.now(), clubConfig = DEFAULT_CLUB_CONFIG) {
   const name = clampText(payload?.name, 28);
   const tag = normalizeClubTag(payload?.tag);
   if (name.length < 3) return { error: 'Club name must be at least 3 characters.' };
@@ -247,12 +311,24 @@ export function createClubRecord(owner, payload, now = Date.now()) {
     visibility: 'public_apply',
     createdAt: now,
     updatedAt: now,
+    prestige: {
+      tier: 1,
+      purchasedAt: now,
+      history: [{
+        tier: 1,
+        purchasedAt: now,
+        purchasedBy: owner.userId,
+        treasuryCost: Math.max(0, safeInteger(normalizeClubConfig(clubConfig).createCost, 0)),
+      }],
+    },
+    treasury: { balance: 0, lifetimeDonated: 0, donations: [] },
     progression: { totalXp: 0 },
     members: [{
       userId: owner.userId,
       role: 'owner',
       joinedAt: now,
       contributionXp: 0,
+      coinContribution: 0,
       contribution: { matches: 0, wins: 0, columnClears: 0, rankedOrWager: 0 },
     }],
     joinRequests: [],
@@ -263,7 +339,7 @@ export function createClubRecord(owner, payload, now = Date.now()) {
     goals: {},
     events: {},
     rewards: { unlocked: [], memberClaims: {} },
-  }, now);
+  }, now, null, clubConfig);
   return { club };
 }
 
@@ -302,9 +378,85 @@ export function canManageMember(actorRole, targetRole, nextRole = targetRole) {
   return false;
 }
 
-export function publicClubSummary(club, viewerUserId = null, now = Date.now(), rankedSeason = null) {
-  const normalized = normalizeClubRecord(club, now, rankedSeason);
+function clubActivitySnapshot(club) {
+  const weeklyMatches = Number(club.goals?.weekly?.items?.find(item => item.metric === 'matches')?.progress ?? 0) || 0;
+  const seasonMatches = Number(club.goals?.season?.items?.find(item => item.metric === 'matches')?.progress ?? 0) || 0;
+  return {
+    weeklyMatches: Math.max(0, Math.floor(weeklyMatches)),
+    seasonMatches: Math.max(0, Math.floor(seasonMatches)),
+  };
+}
+
+export function publicClubPrestigeStatus(club, clubConfig = DEFAULT_CLUB_CONFIG) {
+  const config = normalizeClubConfig(clubConfig || DEFAULT_CLUB_CONFIG);
+  const current = prestigeTierFor(config, club.prestige?.tier || 1);
+  const next = nextPrestigeTierFor(club, config);
+  const activity = clubActivitySnapshot(club);
+  if (!next) {
+    return {
+      current,
+      next: null,
+      maxed: true,
+      eligible: false,
+      treasuryNeeded: 0,
+      requirements: [],
+    };
+  }
+  const requirements = [
+    {
+      id: 'treasury',
+      label: 'Treasury',
+      current: club.treasury?.balance || 0,
+      target: next.treasuryCost,
+      complete: (club.treasury?.balance || 0) >= next.treasuryCost,
+    },
+    {
+      id: 'clubLevel',
+      label: 'Club level',
+      current: club.progression?.level || 1,
+      target: next.minClubLevel,
+      complete: (club.progression?.level || 1) >= next.minClubLevel,
+    },
+    {
+      id: 'members',
+      label: 'Members',
+      current: club.members?.length || 0,
+      target: next.minMembers,
+      complete: (club.members?.length || 0) >= next.minMembers,
+    },
+  ];
+  if (next.minWeeklyMatches > 0) {
+    requirements.push({
+      id: 'weeklyMatches',
+      label: 'Weekly activity',
+      current: activity.weeklyMatches,
+      target: next.minWeeklyMatches,
+      complete: activity.weeklyMatches >= next.minWeeklyMatches,
+    });
+  }
+  if (next.minSeasonMatches > 0) {
+    requirements.push({
+      id: 'seasonMatches',
+      label: 'Season activity',
+      current: activity.seasonMatches,
+      target: next.minSeasonMatches,
+      complete: activity.seasonMatches >= next.minSeasonMatches,
+    });
+  }
+  return {
+    current,
+    next,
+    maxed: false,
+    eligible: requirements.every(item => item.complete),
+    treasuryNeeded: Math.max(0, next.treasuryCost - (club.treasury?.balance || 0)),
+    requirements,
+  };
+}
+
+export function publicClubSummary(club, viewerUserId = null, now = Date.now(), rankedSeason = null, clubConfig = DEFAULT_CLUB_CONFIG) {
+  const normalized = normalizeClubRecord(club, now, rankedSeason, clubConfig);
   const member = viewerUserId ? findClubMember(normalized, viewerUserId) : null;
+  const prestige = publicClubPrestigeStatus(normalized, clubConfig);
   return {
     clubId: normalized.clubId,
     name: normalized.name,
@@ -314,6 +466,11 @@ export function publicClubSummary(club, viewerUserId = null, now = Date.now(), r
     memberCount: normalized.members.length,
     memberCap: normalized.progression.memberCap,
     role: member?.role ?? null,
+    prestige: {
+      tier: normalized.prestige.tier,
+      name: prestige.current.name,
+      memberCap: prestige.current.memberCap,
+    },
     branding: normalized.branding,
     badge: {
       colorPair: normalized.branding.colorPair,
@@ -350,6 +507,7 @@ function publicMember(club, users, member) {
     role: member.role,
     joinedAt: member.joinedAt,
     contributionXp: member.contributionXp,
+    coinContribution: member.coinContribution || 0,
     contribution: member.contribution,
   };
 }
@@ -383,15 +541,56 @@ export function publicClubRewards(club, viewerUserId = null) {
   });
 }
 
-export function publicClubProfile(club, users, viewerUserId, rankedSeason = null, now = Date.now()) {
-  normalizeClubRecord(club, now, rankedSeason);
+function publicDonationStats(club, users, viewerUserId = null) {
+  const topDonors = club.members
+    .filter(member => (member.coinContribution || 0) > 0)
+    .map(member => ({
+      userId: member.userId,
+      displayName: users.get(member.userId)?.displayName || 'Unknown Player',
+      amount: member.coinContribution || 0,
+    }))
+    .sort((a, b) => b.amount - a.amount || a.displayName.localeCompare(b.displayName))
+    .slice(0, 10);
+  return {
+    topDonors,
+    viewerDonated: viewerUserId ? findClubMember(club, viewerUserId)?.coinContribution || 0 : 0,
+    recent: (club.treasury?.donations || []).slice(-10).reverse().map(item => ({
+      id: item.id,
+      userId: item.userId,
+      displayName: users.get(item.userId)?.displayName || 'Unknown Player',
+      amount: item.amount,
+      createdAt: item.createdAt,
+    })),
+  };
+}
+
+export function publicClubProfile(club, users, viewerUserId, rankedSeason = null, now = Date.now(), clubConfig = DEFAULT_CLUB_CONFIG) {
+  normalizeClubRecord(club, now, rankedSeason, clubConfig);
   const viewerMember = findClubMember(club, viewerUserId);
   const viewerRole = viewerMember?.role ?? null;
+  const prestige = publicClubPrestigeStatus(club, clubConfig);
+  const canPrestige = canManageRequests(viewerRole) && prestige.eligible && !prestige.maxed;
   return {
-    ...publicClubSummary(club, viewerUserId, now, rankedSeason),
+    ...publicClubSummary(club, viewerUserId, now, rankedSeason, clubConfig),
     createdAt: club.createdAt,
     updatedAt: club.updatedAt,
     progression: club.progression,
+    treasury: {
+      balance: club.treasury.balance,
+      lifetimeDonated: club.treasury.lifetimeDonated,
+    },
+    donationStats: publicDonationStats(club, users, viewerUserId),
+    nextPrestige: prestige.maxed ? null : {
+      tier: prestige.next.tier,
+      name: prestige.next.name,
+      treasuryCost: prestige.next.treasuryCost,
+      memberCap: prestige.next.memberCap,
+      perks: prestige.next.perks,
+      requirements: prestige.requirements,
+      treasuryNeeded: prestige.treasuryNeeded,
+      eligible: prestige.eligible,
+    },
+    canPrestige,
     members: club.members.map(member => publicMember(club, users, member)),
     joinRequests: canManageRequests(viewerRole) ? club.joinRequests.map(request => publicJoinRequest(users, request)) : [],
     invites: canManageRequests(viewerRole) ? club.invites.map(invite => publicJoinRequest(users, invite)) : [],
@@ -411,6 +610,7 @@ export function publicClubProfile(club, users, viewerUserId, rankedSeason = null
       canManageRequests: canManageRequests(viewerRole),
       canPostAnnouncement: canPostAnnouncement(viewerRole),
       canManageMembers: roleRank(viewerRole) >= roleRank('officer'),
+      canPrestige,
     },
   };
 }
@@ -516,6 +716,58 @@ export function appendClubChatMessage(club, message) {
   club.chat ||= [];
   club.chat.push(message);
   if (club.chat.length > CLUB_CHAT_HISTORY_LIMIT) club.chat.splice(0, club.chat.length - CLUB_CHAT_HISTORY_LIMIT);
+}
+
+export function donateToClubTreasury(user, club, amount, now = Date.now(), clubConfig = DEFAULT_CLUB_CONFIG) {
+  normalizeClubRecord(club, now, null, clubConfig);
+  const member = findClubMember(club, user.userId);
+  if (!member) return { error: 'Join this club before donating.' };
+  const safeAmount = Math.max(0, safeInteger(amount, 0));
+  if (!safeAmount) return { error: 'Donation amount is required.' };
+  user.currency ||= { coins: 0, lifetimeCoins: 0 };
+  user.currency.coins = Math.max(0, safeInteger(user.currency.coins, 0));
+  if (user.currency.coins < safeAmount) return { error: 'Not enough coins to donate.' };
+  user.currency.coins -= safeAmount;
+  club.treasury.balance += safeAmount;
+  club.treasury.lifetimeDonated += safeAmount;
+  member.coinContribution = (member.coinContribution || 0) + safeAmount;
+  const donation = {
+    id: crypto.randomUUID(),
+    userId: user.userId,
+    amount: safeAmount,
+    createdAt: now,
+  };
+  club.treasury.donations.push(donation);
+  club.treasury.donations = club.treasury.donations.slice(-CLUB_DONATION_LEDGER_LIMIT);
+  club.updatedAt = now;
+  return { donation, treasury: club.treasury };
+}
+
+export function purchaseClubPrestige(user, club, clubConfig = DEFAULT_CLUB_CONFIG, now = Date.now()) {
+  normalizeClubRecord(club, now, null, clubConfig);
+  const member = findClubMember(club, user.userId);
+  if (!member) return { error: 'Join this club before buying prestige.' };
+  if (!canManageRequests(member.role)) return { error: 'Only club owners and officers can buy prestige.' };
+  const status = publicClubPrestigeStatus(club, clubConfig);
+  if (status.maxed) return { error: 'Club is already at the highest prestige tier.' };
+  if (!status.eligible) {
+    const missing = status.requirements.filter(item => !item.complete).map(item => item.label).join(', ');
+    return { error: `Prestige requirements are not met yet: ${missing}.`, nextPrestige: status };
+  }
+  if (club.treasury.balance < status.next.treasuryCost) return { error: 'Club treasury does not have enough coins yet.', nextPrestige: status };
+  club.treasury.balance -= status.next.treasuryCost;
+  club.prestige.tier = status.next.tier;
+  club.prestige.purchasedAt = now;
+  club.prestige.history.push({
+    tier: status.next.tier,
+    purchasedAt: now,
+    purchasedBy: user.userId,
+    treasuryCost: status.next.treasuryCost,
+  });
+  club.prestige.history = club.prestige.history.slice(-20);
+  club.updatedAt = now;
+  normalizeClubRecord(club, now, null, clubConfig);
+  return { prestige: club.prestige, treasury: club.treasury };
 }
 
 export function claimClubReward(user, club, rewardId, now = Date.now()) {

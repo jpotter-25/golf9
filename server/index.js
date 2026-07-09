@@ -93,12 +93,14 @@ import {
   claimClubReward,
   CLUB_ROLES,
   createClubRecord,
+  donateToClubTreasury,
   findClubMember,
   normalizeClubBranding,
   normalizeClubRecord,
   normalizeClubTag,
-  publicClubProfile,
-  publicClubSummary,
+  publicClubProfile as buildPublicClubProfile,
+  publicClubSummary as buildPublicClubSummary,
+  purchaseClubPrestige,
 } from './clubs.js';
 import {
   devTestAccountForDisplayName,
@@ -384,6 +386,22 @@ function publicRankedCatalog() {
 
 function economyConfig() {
   return normalizeEconomyConfigStore(economyStore);
+}
+
+function clubConfig() {
+  return economyConfig().clubConfig;
+}
+
+function normalizeClub(club, now = Date.now(), season = rankedSeason) {
+  return normalizeClubRecord(club, now, season, clubConfig());
+}
+
+function publicClubSummary(club, viewerUserId = null, now = Date.now(), season = rankedSeason) {
+  return buildPublicClubSummary(club, viewerUserId, now, season, clubConfig());
+}
+
+function publicClubProfile(club, clubUsers, viewerUserId, season = rankedSeason, now = Date.now()) {
+  return buildPublicClubProfile(club, clubUsers, viewerUserId, season, now, clubConfig());
 }
 
 function uniqueByUserId(items) {
@@ -713,7 +731,7 @@ function normalizeUserRecord(user, now = Date.now()) {
 }
 
 function reconcileClubMemberships(now = Date.now()) {
-  for (const club of clubs.values()) normalizeClubRecord(club, now, rankedSeason);
+  for (const club of clubs.values()) normalizeClub(club, now, rankedSeason);
   for (const user of users.values()) normalizeUserClub(user);
 
   const ownerlessClubs = [];
@@ -758,7 +776,7 @@ function applyStoreState(parsed = {}) {
   normalizeCompetitiveConfigStore(Object.assign(competitiveStore, parsed.competitiveConfig || {}));
   rankedSeason = normalizeRankedSeason(parsed.rankedSeason, Date.now(), rankedConfig());
   for (const club of parsed.clubs || []) {
-    const normalized = normalizeClubRecord(club, Date.now(), rankedSeason);
+    const normalized = normalizeClub(club, Date.now(), rankedSeason);
     if (normalized.clubId) clubs.set(normalized.clubId, normalized);
   }
   for (const user of parsed.users || []) users.set(user.userId, normalizeUserRecord(user));
@@ -788,7 +806,7 @@ function storeSnapshot() {
   rankedSeason = normalizeRankedSeason(rankedSeason, Date.now(), rankedConfig());
   reconcileClubMemberships();
   for (const user of users.values()) normalizeUserRecord(user);
-  for (const club of clubs.values()) normalizeClubRecord(club, Date.now(), rankedSeason);
+  for (const club of clubs.values()) normalizeClub(club, Date.now(), rankedSeason);
   return {
     users: [...users.values()],
     sessions: [...sessions.values()],
@@ -1001,7 +1019,7 @@ function cosmeticsFor(user) {
 }
 
 function adminClubDetail(club) {
-  normalizeClubRecord(club, Date.now(), rankedSeason);
+  normalizeClub(club, Date.now(), rankedSeason);
   const owner = club.members.find(member => member.role === 'owner');
   return {
     ...publicClubProfile(club, users, owner?.userId || null, rankedSeason),
@@ -1036,7 +1054,7 @@ function adminClubSummaries(query = '') {
     .filter(club => !needle || club.name.toLowerCase().includes(needle) || club.tag.toLowerCase().includes(needle) || club.clubId.toLowerCase().includes(needle))
     .slice(0, 100)
     .map(club => {
-      normalizeClubRecord(club, Date.now(), rankedSeason);
+      normalizeClub(club, Date.now(), rankedSeason);
       const owner = club.members.find(member => member.role === 'owner');
       return {
         ...publicClubSummary(club, null, Date.now(), rankedSeason),
@@ -1426,6 +1444,24 @@ function clubById(clubId) {
 
 function currentClubRole(user, club) {
   return findClubMember(club, user.userId)?.role || null;
+}
+
+function clubAccessError(user, action = 'join') {
+  normalizeUserRecord(user);
+  const config = clubConfig();
+  const requiredLevel = action === 'create' ? config.minCreateLevel : config.minJoinLevel;
+  const level = Number(user.progression?.level || 1);
+  if (level < requiredLevel) {
+    return {
+      status: 403,
+      error: action === 'create'
+        ? `Reach Level ${requiredLevel} before creating a club.`
+        : `Reach Level ${requiredLevel} before joining clubs.`,
+      requiredLevel,
+      level,
+    };
+  }
+  return null;
 }
 
 function clubNameOrTagTaken(name, tag, exceptClubId = null) {
@@ -2211,7 +2247,7 @@ function applyClubContributions(room, result) {
   }
 
   for (const { club, players } of byClub.values()) {
-    normalizeClubRecord(club, result.completedAt, rankedSeason);
+    normalizeClub(club, result.completedAt, rankedSeason);
     if (club.processedResultIds.includes(result.resultId)) continue;
     const summaries = [];
     for (const { player } of players) {
@@ -2236,7 +2272,7 @@ function applyClubContributions(room, result) {
     }
     club.processedResultIds.push(result.resultId);
     club.updatedAt = result.completedAt;
-    normalizeClubRecord(club, result.completedAt, rankedSeason);
+    normalizeClub(club, result.completedAt, rankedSeason);
     emitClubUpdate(club.clubId);
     if (summaries.some(summary => summary.completedGoals?.length)) {
       for (const { player } of players) {
@@ -3048,7 +3084,7 @@ app.patch('/admin/api/clubs/:clubId', requireAdmin(adminStore, 'clubs:write'), (
   if (req.body?.motto !== undefined) club.motto = String(req.body.motto);
   if (req.body?.branding !== undefined) club.branding = normalizeClubBranding(req.body.branding);
   club.updatedAt = Date.now();
-  normalizeClubRecord(club, Date.now(), rankedSeason);
+  normalizeClub(club, Date.now(), rankedSeason);
   writeAudit(adminStore, req, req.admin.admin, 'admin.clubs.update', { clubId: club.clubId }, { reason, before, after: { name: club.name, tag: club.tag, motto: club.motto, branding: club.branding } });
   saveStore();
   return res.json({ club: adminClubDetail(club) });
@@ -3074,7 +3110,7 @@ app.patch('/admin/api/clubs/:clubId/members/:userId', requireAdmin(adminStore, '
   }
   if (req.body?.contributionXp !== undefined) member.contributionXp = Math.max(0, Math.floor(Number(req.body.contributionXp) || 0));
   club.updatedAt = Date.now();
-  normalizeClubRecord(club, Date.now(), rankedSeason);
+  normalizeClub(club, Date.now(), rankedSeason);
   writeAudit(adminStore, req, req.admin.admin, 'admin.clubs.member.update', { clubId: club.clubId, userId: member.userId }, { reason, before, after: { role: member.role, contributionXp: member.contributionXp } });
   saveStore();
   return res.json({ club: adminClubDetail(club) });
@@ -3092,7 +3128,7 @@ app.delete('/admin/api/clubs/:clubId/members/:userId', requireAdmin(adminStore, 
   const user = users.get(member.userId);
   if (user?.clubId === club.clubId) user.clubId = null;
   club.updatedAt = Date.now();
-  normalizeClubRecord(club, Date.now(), rankedSeason);
+  normalizeClub(club, Date.now(), rankedSeason);
   writeAudit(adminStore, req, req.admin.admin, 'admin.clubs.member.remove', { clubId: club.clubId, userId: member.userId }, { reason, role: member.role });
   saveStore();
   return res.json({ club: adminClubDetail(club) });
@@ -3108,7 +3144,7 @@ app.post('/admin/api/clubs/:clubId/xp/adjust', requireAdmin(adminStore, 'clubs:w
   const before = club.progression?.totalXp || 0;
   club.progression.totalXp = Math.max(0, before + amount);
   club.updatedAt = Date.now();
-  normalizeClubRecord(club, Date.now(), rankedSeason);
+  normalizeClub(club, Date.now(), rankedSeason);
   writeAudit(adminStore, req, req.admin.admin, 'admin.clubs.xp.adjust', { clubId: club.clubId }, { reason, amount, before, after: club.progression.totalXp });
   saveStore();
   return res.json({ club: adminClubDetail(club) });
@@ -3158,7 +3194,7 @@ app.post('/admin/api/clubs/:clubId/announcements', requireAdmin(adminStore, 'clu
   };
   club.announcements.push(announcement);
   club.updatedAt = Date.now();
-  normalizeClubRecord(club, Date.now(), rankedSeason);
+  normalizeClub(club, Date.now(), rankedSeason);
   writeAudit(adminStore, req, req.admin.admin, 'admin.clubs.announcement', { clubId: club.clubId, announcementId: announcement.id }, { reason });
   saveStore();
   return res.json({ announcement, club: adminClubDetail(club) });
@@ -3483,6 +3519,17 @@ app.get('/clubs/me', requireAuth, (req, res) => {
 
 app.post('/clubs', requireAuth, (req, res) => {
   if (req.auth.user.clubId && clubs.has(req.auth.user.clubId)) return res.status(409).json({ error: 'You are already in a club.' });
+  const access = clubAccessError(req.auth.user, 'create');
+  if (access) return res.status(access.status).json(access);
+  const config = clubConfig();
+  normalizeUserRecord(req.auth.user);
+  if (req.auth.user.currency.coins < config.createCost) {
+    return res.status(402).json({
+      error: `Creating a club costs ${config.createCost.toLocaleString('en-US')} coins.`,
+      requiredCoins: config.createCost,
+      coins: req.auth.user.currency.coins,
+    });
+  }
   const name = String(req.body?.name || '').trim();
   const tag = normalizeClubTag(req.body?.tag);
   if (clubNameOrTagTaken(name, tag)) return res.status(409).json({ error: 'Club name or tag is already taken.' });
@@ -3492,12 +3539,13 @@ app.post('/clubs', requireAuth, (req, res) => {
     tag,
     motto: req.body?.motto,
     branding: req.body?.branding,
-  });
+  }, Date.now(), config);
   if (created.error) return res.status(400).json({ error: created.error });
+  req.auth.user.currency.coins -= config.createCost;
   clubs.set(created.club.clubId, created.club);
   req.auth.user.clubId = created.club.clubId;
   saveStore();
-  return res.json({ club: publicClubProfile(created.club, users, req.auth.user.userId, rankedSeason) });
+  return res.json({ club: publicClubProfile(created.club, users, req.auth.user.userId, rankedSeason), user: safeUser(req.auth.user) });
 });
 
 app.get('/clubs/search', requireAuth, (req, res) => {
@@ -3547,6 +3595,9 @@ app.post('/clubs/:clubId/requests', requireAuth, (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   if (frozenClubResponse(club, res)) return;
+  normalizeClub(club);
+  const access = clubAccessError(req.auth.user, 'join');
+  if (access) return res.status(access.status).json(access);
   if (req.auth.user.clubId && clubs.has(req.auth.user.clubId)) return res.status(409).json({ error: 'Leave your current club before joining another.' });
   if (club.members.length >= club.progression.memberCap) return res.status(409).json({ error: 'Club is full.' });
   if (club.joinRequests.some(request => request.userId === req.auth.user.userId)) return res.status(409).json({ error: 'Request already sent.' });
@@ -3567,11 +3618,14 @@ app.post('/clubs/:clubId/requests/:requestId/accept', requireAuth, (req, res) =>
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   if (frozenClubResponse(club, res)) return;
+  normalizeClub(club);
   const role = currentClubRole(req.auth.user, club);
   if (!canManageRequests(role)) return res.status(403).json({ error: 'Only owners and officers can approve requests.' });
   const request = club.joinRequests.find(item => item.id === req.params.requestId);
   const target = request ? users.get(request.userId) : null;
   if (!request || !target) return res.status(404).json({ error: 'Request not found.' });
+  const access = clubAccessError(target, 'join');
+  if (access) return res.status(access.status).json({ ...access, error: `That player must reach Level ${access.requiredLevel} before joining clubs.` });
   if (target.clubId && clubs.has(target.clubId)) return res.status(409).json({ error: 'That player is already in a club.' });
   if (club.members.length >= club.progression.memberCap) return res.status(409).json({ error: 'Club is full.' });
   club.joinRequests = club.joinRequests.filter(item => item.id !== request.id);
@@ -3580,6 +3634,7 @@ app.post('/clubs/:clubId/requests/:requestId/accept', requireAuth, (req, res) =>
     role: 'rookie',
     joinedAt: Date.now(),
     contributionXp: 0,
+    coinContribution: 0,
     contribution: { matches: 0, wins: 0, columnClears: 0, rankedOrWager: 0 },
   });
   target.clubId = club.clubId;
@@ -3609,10 +3664,13 @@ app.post('/clubs/:clubId/invites', requireAuth, (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   if (frozenClubResponse(club, res)) return;
+  normalizeClub(club);
   const role = currentClubRole(req.auth.user, club);
   if (!canManageRequests(role)) return res.status(403).json({ error: 'Only owners and officers can invite players.' });
   const target = findUserByIdentifier(req.body?.userId || req.body?.displayName);
   if (!target) return res.status(404).json({ error: 'Player not found.' });
+  const access = clubAccessError(target, 'join');
+  if (access) return res.status(access.status).json({ ...access, error: `That player must reach Level ${access.requiredLevel} before joining clubs.` });
   if (target.clubId && clubs.has(target.clubId)) return res.status(409).json({ error: 'That player is already in a club.' });
   if (club.members.length >= club.progression.memberCap) return res.status(409).json({ error: 'Club is full.' });
   const existing = club.invites.find(invite => invite.userId === target.userId);
@@ -3623,6 +3681,35 @@ app.post('/clubs/:clubId/invites', requireAuth, (req, res) => {
   emitClubUpdate(club.clubId);
   emitSocialUpdate(target.userId);
   return res.json({ invite, club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason) });
+});
+
+app.post('/clubs/:clubId/donate', requireAuth, (req, res) => {
+  const club = clubById(req.params.clubId);
+  if (!club) return res.status(404).json({ error: 'Club not found.' });
+  if (frozenClubResponse(club, res)) return;
+  const result = donateToClubTreasury(req.auth.user, club, req.body?.amount, Date.now(), clubConfig());
+  if (result.error) return res.status(400).json({ error: result.error });
+  saveStore();
+  emitClubUpdate(club.clubId);
+  return res.json({
+    ...result,
+    club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason),
+    user: safeUser(req.auth.user),
+  });
+});
+
+app.post('/clubs/:clubId/prestige', requireAuth, (req, res) => {
+  const club = clubById(req.params.clubId);
+  if (!club) return res.status(404).json({ error: 'Club not found.' });
+  if (frozenClubResponse(club, res)) return;
+  const result = purchaseClubPrestige(req.auth.user, club, clubConfig(), Date.now());
+  if (result.error) return res.status(400).json({ error: result.error, nextPrestige: result.nextPrestige || null });
+  saveStore();
+  emitClubUpdate(club.clubId);
+  return res.json({
+    ...result,
+    club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason),
+  });
 });
 
 app.post('/clubs/:clubId/leave', requireAuth, (req, res) => {

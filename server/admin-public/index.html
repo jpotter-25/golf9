@@ -94,12 +94,23 @@
               <button id="loadEconomy">Refresh Economy</button>
             </div>
             <form id="economyConfigEditor" class="editor">
+              <h3>Wager Tables</h3>
               <div class="toolbar">
                 <button id="addWagerTable" type="button" class="ghost">Add Wager Option</button>
               </div>
               <div id="wagerTableRows" class="list"></div>
+              <h3>Club Economy</h3>
+              <div class="row three">
+                <label>Minimum level to join <input name="clubMinJoinLevel" type="number" min="1" /></label>
+                <label>Minimum level to create <input name="clubMinCreateLevel" type="number" min="1" /></label>
+                <label>Club creation cost <input name="clubCreateCost" type="number" min="0" step="1" /></label>
+              </div>
+              <div class="toolbar">
+                <button id="addClubPrestigeTier" type="button" class="ghost">Add Prestige Tier</button>
+              </div>
+              <div id="clubPrestigeRows" class="list"></div>
               <label>Reason <input name="reason" placeholder="Required audit reason" /></label>
-              <button type="submit">Save Wager Options</button>
+              <button type="submit">Save Economy Settings</button>
             </form>
             <pre id="economyOutput" class="muted"></pre>
           </div>

@@ -32,7 +32,7 @@ export function initGrid(): Grid;
 export function cloneState<T>(state: T): T;
 export function scoreGrid(grid: Grid): number;
 export function createGameState(playerIdentities: PlayerIdentity[], options?: { round?: number; totalRounds?: number; totals?: number[]; simultaneousPeek?: boolean }): GameState;
-export function dealLocal(players: number): GameState;
+export function dealLocal(players: number, identities?: PlayerIdentity[]): GameState;
 export function startTurns(state: GameState): GameState;
 export function advancePeek(state: GameState): GameState;
 export function flipForPeek(state: GameState, playerIndex: number, r: number, c: number): { state: GameState; error?: string };

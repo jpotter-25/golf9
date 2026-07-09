@@ -7,6 +7,7 @@ export type {
   Card,
   Grid,
   Player,
+  PlayerIdentity,
   GameState,
 } from '../../../shared/rules';
 

@@ -99,6 +99,34 @@ async function earnFreeCoins(baseUrl, token) {
   }));
 }
 
+async function earnClubLevel(baseUrl, token) {
+  return json(await fetch(`${baseUrl}/results/local`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({
+      mode: 'solo',
+      totalRounds: 5,
+      roundScores: [0, 1, 2, 3, 4],
+      columnClears: 150,
+      players: [
+        { displayName: 'Player 1', total: 0 },
+        { displayName: 'Player 2', total: 55 },
+      ],
+    }),
+  }));
+}
+
+async function adminAdjustCoins(baseUrl, admin, userId, amount) {
+  return json(await fetch(`${baseUrl}/admin/api/users/${encodeURIComponent(userId)}/coins/adjust`, {
+    method: 'POST',
+    headers: {
+      ...authHeaders(admin.token),
+      Cookie: admin.cookie,
+    },
+    body: JSON.stringify({ amount, reason: 'Test club economy funding.' }),
+  }));
+}
+
 async function withServer(fn, extraEnv = {}) {
   const serverPort = port();
   const dataDir = await mkdtemp(path.join(tmpdir(), 'golf9-server-test-'));
@@ -1525,9 +1553,22 @@ test('clubs create, search, request, approve, chat, and ignore local matches', a
     const owner = await signup(baseUrl, `ClubOwner${Date.now()}`);
     const member = await signup(baseUrl, `ClubMember${Date.now()}`);
     const outsider = await signup(baseUrl, `ClubNope${Date.now()}`);
+    const admin = await adminLogin(baseUrl);
 
     const legacyDefault = await json(await fetch(`${baseUrl}/auth/me`, { headers: authHeaders(owner.token) }));
     assert.equal(legacyDefault.user.club, null);
+
+    const lockedCreate = await fetch(`${baseUrl}/clubs`, {
+      method: 'POST',
+      headers: authHeaders(owner.token),
+      body: JSON.stringify({ name: 'Too Soon Crew', tag: 'SOON' }),
+    });
+    assert.equal(lockedCreate.status, 403);
+
+    await earnClubLevel(baseUrl, owner.token);
+    await earnClubLevel(baseUrl, member.token);
+    await earnClubLevel(baseUrl, outsider.token);
+    await adminAdjustCoins(baseUrl, admin, owner.user.userId, 5000);
 
     const created = await json(await fetch(`${baseUrl}/clubs`, {
       method: 'POST',
@@ -1542,6 +1583,9 @@ test('clubs create, search, request, approve, chat, and ignore local matches', a
     assert.equal(created.club.name, 'Fairway Crew');
     assert.equal(created.club.role, 'owner');
     assert.equal(created.club.memberCount, 1);
+    assert.equal(created.club.prestige.tier, 1);
+    assert.equal(created.club.progression.memberCap, 15);
+    assert.equal(created.user.currency.coins >= 0, true);
 
     const searched = await json(await fetch(`${baseUrl}/clubs/search?q=Fairway`, { headers: authHeaders(member.token) }));
     assert.equal(searched.clubs.some(club => club.clubId === created.club.clubId), true);

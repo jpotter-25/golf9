@@ -14,6 +14,71 @@ export const DEFAULT_WAGER_TABLES = [
 
 export const WAGER_TABLES = DEFAULT_WAGER_TABLES;
 
+export const DEFAULT_CLUB_PRESTIGE_TIERS = [
+  {
+    tier: 1,
+    name: 'Founding Club',
+    treasuryCost: 5000,
+    memberCap: 15,
+    minClubLevel: 1,
+    minMembers: 1,
+    minWeeklyMatches: 0,
+    minSeasonMatches: 0,
+    perks: ['Club tag', 'Club chat', '15 member seats'],
+  },
+  {
+    tier: 2,
+    name: 'Growing Club',
+    treasuryCost: 10000,
+    memberCap: 20,
+    minClubLevel: 3,
+    minMembers: 5,
+    minWeeklyMatches: 10,
+    minSeasonMatches: 0,
+    perks: ['20 member seats', 'Expanded weekly goals'],
+  },
+  {
+    tier: 3,
+    name: 'Established Club',
+    treasuryCost: 20000,
+    memberCap: 30,
+    minClubLevel: 5,
+    minMembers: 10,
+    minWeeklyMatches: 25,
+    minSeasonMatches: 0,
+    perks: ['30 member seats', 'Prestige badge accent'],
+  },
+  {
+    tier: 4,
+    name: 'Elite Club',
+    treasuryCost: 40000,
+    memberCap: 40,
+    minClubLevel: 8,
+    minMembers: 18,
+    minWeeklyMatches: 0,
+    minSeasonMatches: 50,
+    perks: ['40 member seats', 'Season prestige marker'],
+  },
+  {
+    tier: 5,
+    name: 'Legend Club',
+    treasuryCost: 80000,
+    memberCap: 50,
+    minClubLevel: 12,
+    minMembers: 25,
+    minWeeklyMatches: 0,
+    minSeasonMatches: 100,
+    perks: ['50 member seats', 'Legend club presence'],
+  },
+];
+
+export const DEFAULT_CLUB_CONFIG = {
+  minJoinLevel: 10,
+  minCreateLevel: 10,
+  createCost: 5000,
+  prestigeTiers: DEFAULT_CLUB_PRESTIGE_TIERS,
+};
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAILY_TABLE_BONUS_BASE = 100;
 const DAILY_TABLE_BONUS_LOW_BALANCE = 150;
@@ -65,10 +130,52 @@ export function normalizeWagerTables(input = DEFAULT_WAGER_TABLES) {
     .sort((a, b) => a.buyIn - b.buyIn || a.label.localeCompare(b.label));
 }
 
+function normalizeClubPrestigeTier(input = {}, index = 0) {
+  const fallback = DEFAULT_CLUB_PRESTIGE_TIERS[Math.min(index, DEFAULT_CLUB_PRESTIGE_TIERS.length - 1)] || DEFAULT_CLUB_PRESTIGE_TIERS[0];
+  const tier = Math.max(1, safeInteger(input.tier, fallback.tier || index + 1));
+  const name = cleanText(input.name || fallback.name || `Tier ${tier}`, 48) || `Tier ${tier}`;
+  const memberCap = Math.max(1, safeInteger(input.memberCap, fallback.memberCap || 15));
+  return {
+    tier,
+    name,
+    treasuryCost: Math.max(0, safeInteger(input.treasuryCost ?? input.cost, fallback.treasuryCost || 0)),
+    memberCap,
+    minClubLevel: Math.max(1, safeInteger(input.minClubLevel, fallback.minClubLevel || 1)),
+    minMembers: Math.max(1, Math.min(memberCap, safeInteger(input.minMembers, fallback.minMembers || 1))),
+    minWeeklyMatches: Math.max(0, safeInteger(input.minWeeklyMatches, fallback.minWeeklyMatches || 0)),
+    minSeasonMatches: Math.max(0, safeInteger(input.minSeasonMatches, fallback.minSeasonMatches || 0)),
+    perks: (Array.isArray(input.perks) && input.perks.length ? input.perks : fallback.perks || [])
+      .map(item => cleanText(item, 80))
+      .filter(Boolean)
+      .slice(0, 8),
+  };
+}
+
+export function normalizeClubConfig(input = DEFAULT_CLUB_CONFIG) {
+  const source = input && typeof input === 'object' ? input : {};
+  const sourceTiers = Array.isArray(source.prestigeTiers) && source.prestigeTiers.length
+    ? source.prestigeTiers
+    : DEFAULT_CLUB_PRESTIGE_TIERS;
+  const byTier = new Map();
+  sourceTiers.forEach((item, index) => {
+    const tier = normalizeClubPrestigeTier(item, index);
+    byTier.set(tier.tier, tier);
+  });
+  if (!byTier.has(1)) byTier.set(1, normalizeClubPrestigeTier(DEFAULT_CLUB_PRESTIGE_TIERS[0], 0));
+  const prestigeTiers = [...byTier.values()].sort((a, b) => a.tier - b.tier);
+  return {
+    minJoinLevel: Math.max(1, safeInteger(source.minJoinLevel, DEFAULT_CLUB_CONFIG.minJoinLevel)),
+    minCreateLevel: Math.max(1, safeInteger(source.minCreateLevel, DEFAULT_CLUB_CONFIG.minCreateLevel)),
+    createCost: Math.max(0, safeInteger(source.createCost, DEFAULT_CLUB_CONFIG.createCost)),
+    prestigeTiers,
+  };
+}
+
 export function normalizeEconomyConfigStore(input = {}) {
   const config = input && typeof input === 'object' ? input : {};
   return {
     wagerTables: normalizeWagerTables(config.wagerTables),
+    clubConfig: normalizeClubConfig(config.clubConfig),
     updatedAt: safeInteger(config.updatedAt, 0) || null,
     updatedBy: cleanText(config.updatedBy || '', 80) || null,
   };
@@ -135,6 +242,7 @@ export function publicEconomyCatalog(user = null, config = null) {
   const economyConfig = normalizeEconomyConfigStore(config || {});
   return {
     wagerTables: economyConfig.wagerTables,
+    clubConfig: economyConfig.clubConfig,
     rankedFees: [],
     coinSources: [
       { id: 'daily-table-bonus', title: 'Daily Table Bonus', description: 'Claim free coins every 24 hours, with a boost when your balance is low.' },

@@ -5,9 +5,11 @@ import {
   claimClubReward,
   clubProgressionSnapshot,
   createClubRecord,
+  donateToClubTreasury,
   findClubMember,
   memberCapForLevel,
   normalizeClubRecord,
+  purchaseClubPrestige,
 } from '../clubs.js';
 
 test('club levels and member caps scale at planned thresholds', () => {
@@ -92,4 +94,44 @@ test('club reward claim grants member cosmetics once', () => {
 
   const duplicate = claimClubReward(user, club, 'club-crest-card-back', 4000);
   assert.equal(duplicate.error, 'Member reward already claimed.');
+});
+
+test('club donations fund treasury and prestige purchases persist member cap', () => {
+  const config = {
+    minJoinLevel: 10,
+    minCreateLevel: 10,
+    createCost: 5000,
+    prestigeTiers: [
+      { tier: 1, name: 'Founding Club', treasuryCost: 5000, memberCap: 15, minClubLevel: 1, minMembers: 1 },
+      { tier: 2, name: 'Growing Club', treasuryCost: 100, memberCap: 20, minClubLevel: 3, minMembers: 1, minWeeklyMatches: 2 },
+    ],
+  };
+  const owner = {
+    userId: 'owner-1',
+    displayName: 'Owner',
+    currency: { coins: 250, lifetimeCoins: 250 },
+  };
+  const { club } = createClubRecord(owner, { clubId: 'club-1', name: 'Prestige Club', tag: 'PRG' }, 1000, config);
+
+  const donated = donateToClubTreasury(owner, club, 150, 2000, config);
+  assert.equal(donated.error, undefined);
+  assert.equal(owner.currency.coins, 100);
+  assert.equal(club.treasury.balance, 150);
+  assert.equal(findClubMember(club, owner.userId).coinContribution, 150);
+
+  const blocked = purchaseClubPrestige(owner, club, config, 2500);
+  assert.match(blocked.error, /requirements/);
+
+  club.progression.totalXp = 3500;
+  normalizeClubRecord(club, 3000, null, config);
+  club.goals.weekly.items.find(item => item.metric === 'matches').progress = 2;
+  const purchased = purchaseClubPrestige(owner, club, config, 3500);
+  assert.equal(purchased.error, undefined);
+  assert.equal(club.prestige.tier, 2);
+  assert.equal(club.treasury.balance, 50);
+  assert.equal(club.progression.memberCap, 20);
+
+  club.progression.totalXp = 0;
+  normalizeClubRecord(club, 4000, null, config);
+  assert.equal(club.progression.memberCap, 20);
 });

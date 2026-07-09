@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculatePayouts, claimDailyTableBonus, normalizeBuyIn, normalizeEconomyConfigStore, payoutSlotsFor, publicEconomyCatalog, rankedBuyInForMmr } from '../economy.js';
+import { calculatePayouts, claimDailyTableBonus, normalizeBuyIn, normalizeClubConfig, normalizeEconomyConfigStore, payoutSlotsFor, publicEconomyCatalog, rankedBuyInForMmr } from '../economy.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -78,4 +78,26 @@ test('configured wager steps feed the public economy catalog and buy-in validati
   assert.deepEqual(catalog.wagerTables.map(table => table.buyIn), [0, 50, 1000, 50000, 100000]);
   assert.equal(normalizeBuyIn(100000, config), 100000);
   assert.equal(normalizeBuyIn(750, config), 0);
+});
+
+test('club economy config defaults and admin-configured prestige tiers normalize safely', () => {
+  const config = normalizeEconomyConfigStore({
+    clubConfig: {
+      minJoinLevel: 12,
+      minCreateLevel: 14,
+      createCost: 7500,
+      prestigeTiers: [
+        { tier: 1, name: 'Starter', treasuryCost: 7500, memberCap: 12, minClubLevel: 1, minMembers: 1 },
+        { tier: 2, name: 'Big Club', treasuryCost: 15000, memberCap: 24, minClubLevel: 4, minMembers: 8, minWeeklyMatches: 20 },
+      ],
+    },
+  });
+  assert.equal(config.clubConfig.minJoinLevel, 12);
+  assert.equal(config.clubConfig.minCreateLevel, 14);
+  assert.equal(config.clubConfig.createCost, 7500);
+  assert.deepEqual(config.clubConfig.prestigeTiers.map(tier => tier.memberCap), [12, 24]);
+
+  const catalog = publicEconomyCatalog(null, config);
+  assert.equal(catalog.clubConfig.prestigeTiers[1].name, 'Big Club');
+  assert.equal(normalizeClubConfig({}).minJoinLevel, 10);
 });

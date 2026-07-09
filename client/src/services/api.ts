@@ -105,6 +105,7 @@ export type ClubSummary = {
   memberCount: number;
   memberCap: number;
   role: ClubRole | null;
+  prestige: ClubPrestigeSummary;
   branding: ClubBranding;
   badge: { colorPair: string; shape: string; bannerStyle: string };
 };
@@ -323,6 +324,7 @@ export type CoinSource = {
 
 export type EconomyCatalog = {
   wagerTables: WagerTable[];
+  clubConfig: ClubEconomyConfig;
   rankedFees: RankedFee[];
   coinSources: CoinSource[];
   dailyBonus: DailyBonus | null;
@@ -462,6 +464,61 @@ export type OpenRoomFilters = {
 
 export type ClubProgression = ProgressionState & { memberCap: number };
 
+export type ClubPrestigeTier = {
+  tier: number;
+  name: string;
+  treasuryCost: number;
+  memberCap: number;
+  minClubLevel: number;
+  minMembers: number;
+  minWeeklyMatches: number;
+  minSeasonMatches: number;
+  perks: string[];
+};
+
+export type ClubEconomyConfig = {
+  minJoinLevel: number;
+  minCreateLevel: number;
+  createCost: number;
+  prestigeTiers: ClubPrestigeTier[];
+};
+
+export type ClubPrestigeSummary = {
+  tier: number;
+  name: string;
+  memberCap: number;
+};
+
+export type ClubPrestigeRequirement = {
+  id: string;
+  label: string;
+  current: number;
+  target: number;
+  complete: boolean;
+};
+
+export type ClubNextPrestige = {
+  tier: number;
+  name: string;
+  treasuryCost: number;
+  memberCap: number;
+  perks: string[];
+  requirements: ClubPrestigeRequirement[];
+  treasuryNeeded: number;
+  eligible: boolean;
+};
+
+export type ClubTreasury = {
+  balance: number;
+  lifetimeDonated: number;
+};
+
+export type ClubDonationStats = {
+  topDonors: Array<{ userId: string; displayName: string; amount: number }>;
+  viewerDonated: number;
+  recent: Array<{ id: string; userId: string; displayName: string; amount: number; createdAt: number }>;
+};
+
 export type ClubMember = {
   userId: string;
   displayName: string;
@@ -469,6 +526,7 @@ export type ClubMember = {
   role: ClubRole;
   joinedAt: number;
   contributionXp: number;
+  coinContribution: number;
   contribution: { matches: number; wins: number; columnClears: number; rankedOrWager: number };
 };
 
@@ -548,6 +606,10 @@ export type ClubProfile = ClubSummary & {
   createdAt: number;
   updatedAt: number;
   progression: ClubProgression;
+  treasury: ClubTreasury;
+  donationStats: ClubDonationStats;
+  nextPrestige: ClubNextPrestige | null;
+  canPrestige: boolean;
   members: ClubMember[];
   joinRequests: ClubJoinRequest[];
   invites: ClubJoinRequest[];
@@ -561,6 +623,7 @@ export type ClubProfile = ClubSummary & {
     canManageRequests: boolean;
     canPostAnnouncement: boolean;
     canManageMembers: boolean;
+    canPrestige: boolean;
   };
 };
 
@@ -742,6 +805,22 @@ export function inviteToClub(token: string, clubId: string, userId: string): Pro
 
 export function leaveClub(token: string, clubId: string): Promise<{ ok: boolean; club: null }> {
   return request<{ ok: boolean; club: null }>(`/clubs/${encodeURIComponent(clubId)}/leave`, { method: 'POST' }, token);
+}
+
+export function donateToClub(token: string, clubId: string, amount: number): Promise<{ donation: { id: string; userId: string; amount: number; createdAt: number }; club: ClubProfile; user: UserProfile }> {
+  return request<{ donation: { id: string; userId: string; amount: number; createdAt: number }; club: ClubProfile; user: UserProfile }>(
+    `/clubs/${encodeURIComponent(clubId)}/donate`,
+    { method: 'POST', body: JSON.stringify({ amount }) },
+    token
+  );
+}
+
+export function purchaseClubPrestige(token: string, clubId: string): Promise<{ prestige: { tier: number; purchasedAt: number }; treasury: ClubTreasury; club: ClubProfile }> {
+  return request<{ prestige: { tier: number; purchasedAt: number }; treasury: ClubTreasury; club: ClubProfile }>(
+    `/clubs/${encodeURIComponent(clubId)}/prestige`,
+    { method: 'POST' },
+    token
+  );
 }
 
 export function updateClubMember(token: string, clubId: string, userId: string, role: ClubRole): Promise<{ club: ClubProfile }> {
