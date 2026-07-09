@@ -669,6 +669,106 @@ test('admin console supports MFA login, audited player ops, support tickets, and
   }, { SEED_ADMIN_ACCOUNT: '1' });
 });
 
+test('owner admins can manage admin accounts and email recovery unlocks password reset', async () => {
+  await withServer(async (baseUrl) => {
+    const owner = await adminLogin(baseUrl);
+
+    const created = await json(await fetch(`${baseUrl}/admin/api/admins`, {
+      method: 'POST',
+      headers: adminHeaders(owner),
+      body: JSON.stringify({
+        displayName: 'Ops Admin',
+        email: 'ops-admin@example.com',
+        role: 'support',
+        temporaryPassword: 'StrongPass9!',
+        mfaCode: '123456',
+        reason: 'Automated admin management test.',
+      }),
+    }));
+    assert.equal(created.admin.role, 'support');
+    assert.equal(created.admin.email, 'ops-admin@example.com');
+    assert.equal(created.temporaryPassword, null);
+
+    const supportLoginRes = await fetch(`${baseUrl}/admin/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'Ops Admin', password: 'StrongPass9!' }),
+    });
+    const supportLogin = await json(supportLoginRes);
+    const supportCookie = supportLoginRes.headers.get('set-cookie').split(';')[0];
+    assert.equal(supportLogin.mfaRequired, true);
+    await json(await fetch(`${baseUrl}/admin/api/auth/mfa/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: supportCookie },
+      body: JSON.stringify({ code: '123456' }),
+    }));
+
+    const forbidden = await fetch(`${baseUrl}/admin/api/admins`, { headers: { Cookie: supportCookie } });
+    assert.equal(forbidden.status, 403);
+
+    const reset = await json(await fetch(`${baseUrl}/admin/api/admins/${created.admin.adminId}/password-reset`, {
+      method: 'POST',
+      headers: adminHeaders(owner),
+      body: JSON.stringify({ temporaryPassword: 'ResetPass9!ok', reason: 'Force a reset before lockout test.' }),
+    }));
+    assert.equal(reset.temporaryPassword, null);
+
+    for (let index = 0; index < 5; index += 1) {
+      const failed = await fetch(`${baseUrl}/admin/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: 'Ops Admin', password: 'wrong-password' }),
+      });
+      assert.ok(failed.status === 401 || failed.status === 429);
+    }
+    const locked = await fetch(`${baseUrl}/admin/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'Ops Admin', password: 'ResetPass9!ok' }),
+    });
+    assert.equal(locked.status, 429);
+
+    const requestRecovery = await json(await fetch(`${baseUrl}/admin/api/auth/recovery/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: 'ops-admin@example.com' }),
+    }));
+    assert.equal(requestRecovery.ok, true);
+
+    const outbox = await json(await fetch(`${baseUrl}/admin/api/auth/recovery/test-outbox`, { headers: adminHeaders(owner) }));
+    const message = outbox.messages.find(item => item.to === 'ops-admin@example.com');
+    assert.ok(message?.code);
+
+    await json(await fetch(`${baseUrl}/admin/api/auth/recovery/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        identifier: 'ops-admin@example.com',
+        code: message.code,
+        newPassword: 'RecoveredPass9!',
+      }),
+    }));
+
+    const recoveredLoginRes = await fetch(`${baseUrl}/admin/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'Ops Admin', password: 'RecoveredPass9!' }),
+    });
+    const recoveredLogin = await json(recoveredLoginRes);
+    const recoveredCookie = recoveredLoginRes.headers.get('set-cookie').split(';')[0];
+    await json(await fetch(`${baseUrl}/admin/api/auth/mfa/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: recoveredCookie },
+      body: JSON.stringify({ code: '123456' }),
+    }));
+    assert.equal(recoveredLogin.admin.displayName, 'Ops Admin');
+
+    const audit = await json(await fetch(`${baseUrl}/admin/api/audit`, { headers: adminHeaders(owner) }));
+    assert.ok(audit.audit.some(entry => entry.action === 'admin.admins.create'));
+    assert.ok(audit.audit.some(entry => entry.action === 'admin.password_recovery.completed'));
+  }, { SEED_ADMIN_ACCOUNT: '1', ADMIN_EMAIL_TEST_MODE: '1' });
+});
+
 test('admin competitive operations manage config, players, and ranked queues', async () => {
   await withServer(async (baseUrl) => {
     const player = await signup(baseUrl, `RankOps${Date.now()}`);

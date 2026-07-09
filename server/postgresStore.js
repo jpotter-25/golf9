@@ -11,6 +11,7 @@ const COLLECTION_TABLES = [
   ['admins', 'admin_id'],
   ['admin_sessions', 'token'],
   ['admin_audit', 'audit_id'],
+  ['admin_recovery_requests', 'request_id'],
   ['support_tickets', 'ticket_id'],
   ['bans', 'ban_id'],
   ['invite_codes', 'invite_id'],
@@ -29,6 +30,7 @@ function itemId(item, key) {
   if (key === 'version_id') return item.versionId;
   if (key === 'admin_id') return item.adminId;
   if (key === 'audit_id') return item.auditId;
+  if (key === 'request_id') return item.requestId;
   if (key === 'ticket_id') return item.ticketId;
   if (key === 'ban_id') return item.banId;
   if (key === 'invite_id') return item.inviteId;
@@ -87,6 +89,7 @@ export class PostgresStore {
       admins: [],
       adminSessions: [],
       adminAudit: [],
+      adminRecoveryRequests: [],
       supportTickets: [],
       bans: [],
       inviteCodes: [],
@@ -105,6 +108,7 @@ export class PostgresStore {
       else if (table === 'catalog_versions') state.catalog.versions = values;
       else if (table === 'admin_sessions') state.adminSessions = values;
       else if (table === 'admin_audit') state.adminAudit = values;
+      else if (table === 'admin_recovery_requests') state.adminRecoveryRequests = values;
       else if (table === 'support_tickets') state.supportTickets = values;
       else if (table === 'invite_codes') state.inviteCodes = values;
       else state[table] = values;
@@ -137,6 +141,7 @@ export class PostgresStore {
         admins: state.admins || [],
         admin_sessions: state.adminSessions || [],
         admin_audit: state.adminAudit || [],
+        admin_recovery_requests: state.adminRecoveryRequests || [],
         support_tickets: state.supportTickets || [],
         bans: state.bans || [],
         invite_codes: state.inviteCodes || [],

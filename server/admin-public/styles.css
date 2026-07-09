@@ -87,6 +87,16 @@ pre {
   color: var(--muted);
 }
 
+code {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.25rem 0.45rem;
+  background: rgba(6, 11, 24, 0.7);
+  color: var(--gold);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
 .shell {
   width: min(1180px, calc(100vw - 2rem));
   margin: 0 auto;
@@ -237,6 +247,14 @@ h2 {
   margin: 1rem 0;
 }
 
+.admin-create-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8rem;
+  margin-top: 1rem;
+  align-items: end;
+}
+
 .list {
   display: grid;
   gap: 0.8rem;
@@ -269,6 +287,10 @@ h2 {
   width: 100%;
   min-width: 1180px;
   border-collapse: collapse;
+}
+
+.admin-account-table {
+  min-width: 980px;
 }
 
 .admin-table th,
@@ -493,7 +515,7 @@ h2 {
 
 @media (max-width: 720px) {
   .row { grid-template-columns: 1fr; }
-  .row.two, .row.three, .toolbar, .workspace, .wager-row, .result-toolbar { grid-template-columns: 1fr; }
+  .row.two, .row.three, .toolbar, .workspace, .wager-row, .result-toolbar, .admin-create-grid { grid-template-columns: 1fr; }
   .result-toolbar .muted { text-align: left; }
   .split-header { flex-direction: column; }
   .topbar { align-items: flex-start; flex-direction: column; }

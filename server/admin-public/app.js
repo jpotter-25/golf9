@@ -12,6 +12,8 @@ let economyClubConfig = null;
 let notificationConfig = null;
 let playerSearchResults = [];
 let playerSort = { key: 'displayName', direction: 'asc' };
+let adminAccountsCache = [];
+let adminRolesCache = [];
 
 const NOTIFICATION_LABELS = {
   turn: 'Your Turn',
@@ -81,6 +83,7 @@ function bindTabs() {
       if (button.dataset.tab === 'economy') loadEconomy();
       if (button.dataset.tab === 'notifications') loadNotifications();
       if (button.dataset.tab === 'competitive') loadCompetitive();
+      if (button.dataset.tab === 'admins') loadAdmins();
     });
   });
 }
@@ -126,6 +129,8 @@ function bindConsoleActions() {
   document.querySelector('#clubSearch').addEventListener('keydown', event => {
     if (event.key === 'Enter') loadClubs();
   });
+  document.querySelector('#loadAdmins').addEventListener('click', loadAdmins);
+  document.querySelector('#adminCreateForm').addEventListener('submit', createAdmin);
   document.querySelector('#loadAudit').addEventListener('click', loadAudit);
 }
 
@@ -1431,6 +1436,167 @@ async function removeClubMember(userId) {
   await loadClub(selectedClub.clubId);
 }
 
+async function loadAdmins() {
+  const output = document.querySelector('#adminAccountsOutput');
+  try {
+    const { admins, roles, recovery } = await api('/admins');
+    adminAccountsCache = admins || [];
+    adminRolesCache = roles || [];
+    const banner = document.querySelector('#adminRecoveryBanner');
+    banner.innerHTML = `
+      <span class="chip ${recovery?.enabled ? 'ok-pill' : 'danger-chip'}">Email recovery ${recovery?.enabled ? 'configured' : 'not configured'}</span>
+      <span class="chip">Owner-only</span>
+      <span class="chip">${adminAccountsCache.length} admin${adminAccountsCache.length === 1 ? '' : 's'}</span>
+    `;
+    renderAdmins();
+  } catch (error) {
+    output.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderAdmins() {
+  const output = document.querySelector('#adminAccountsOutput');
+  if (!adminAccountsCache.length) {
+    output.innerHTML = '<div class="empty-state">No admin accounts loaded.</div>';
+    return;
+  }
+  output.innerHTML = `
+    <table class="admin-table admin-account-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Role</th>
+          <th>MFA</th>
+          <th>Status</th>
+          <th>Last Login</th>
+          <th>Created</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${adminAccountsCache.map(admin => `
+          <tr data-admin-id="${escapeHtml(admin.adminId)}" class="${admin.disabledAt ? 'dim' : ''}">
+            <td class="primary-cell"><strong>${escapeHtml(admin.displayName)}</strong><br /><span class="muted">${escapeHtml(admin.adminId)}</span></td>
+            <td>${escapeHtml(admin.email || '-')}</td>
+            <td>${escapeHtml(admin.role)}</td>
+            <td>${admin.mfaEnabled ? 'Required' : 'Off'}</td>
+            <td>${adminStatusMarkup(admin)}</td>
+            <td>${escapeHtml(admin.lastLoginAt ? new Date(admin.lastLoginAt).toLocaleString() : 'Never')}</td>
+            <td>${escapeHtml(new Date(admin.createdAt).toLocaleString())}</td>
+            <td>
+              <div class="actions-inline">
+                <button data-admin-action="edit" class="ghost">Edit</button>
+                <button data-admin-action="password" class="ghost">Reset Password</button>
+                <button data-admin-action="sessions" class="ghost">Revoke Sessions</button>
+                <button data-admin-action="${admin.disabledAt ? 'enable' : 'disable'}" class="${admin.disabledAt ? 'ghost' : 'danger'}">${admin.disabledAt ? 'Enable' : 'Disable'}</button>
+              </div>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+  output.querySelectorAll('[data-admin-action]').forEach(button => {
+    const row = button.closest('[data-admin-id]');
+    button.addEventListener('click', () => runAdminAction(row.dataset.adminId, button.dataset.adminAction));
+  });
+}
+
+function adminStatusMarkup(admin) {
+  if (admin.disabledAt) return '<span class="status-pill danger-pill">Disabled</span>';
+  if (admin.lockedUntil && admin.lockedUntil > Date.now()) return '<span class="status-pill danger-pill">Locked</span>';
+  return '<span class="status-pill ok-pill">Active</span>';
+}
+
+async function createAdmin(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = {
+    displayName: form.elements.displayName.value,
+    email: form.elements.email.value,
+    role: form.elements.role.value,
+    temporaryPassword: form.elements.temporaryPassword.value || undefined,
+    mfaCode: form.elements.mfaCode.value || undefined,
+    mfaEnabled: form.elements.mfaEnabled.checked,
+    reason: form.elements.reason.value,
+  };
+  const result = await api('/admins', { method: 'POST', body: JSON.stringify(payload) });
+  showAdminActionOutput(result, 'Admin account created.');
+  form.reset();
+  form.elements.mfaEnabled.checked = true;
+  await loadAdmins();
+}
+
+function showAdminActionOutput(result, title) {
+  const node = document.querySelector('#adminActionOutput');
+  node.classList.remove('hidden');
+  const lines = [];
+  if (result.temporaryPassword) lines.push(`<p><strong>Temporary password:</strong> <code>${escapeHtml(result.temporaryPassword)}</code></p>`);
+  if (result.mfaCode) lines.push(`<p><strong>Temporary MFA code:</strong> <code>${escapeHtml(result.mfaCode)}</code></p>`);
+  node.innerHTML = `
+    <strong>${escapeHtml(title)}</strong>
+    <p class="muted">Share any temporary credentials through a private channel. They are shown once here.</p>
+    ${lines.join('') || '<p class="muted">No one-time credentials were generated.</p>'}
+  `;
+}
+
+async function runAdminAction(adminId, action) {
+  const admin = adminAccountsCache.find(item => item.adminId === adminId);
+  if (!admin) return;
+  try {
+    if (action === 'edit') {
+      const displayName = prompt('Admin name', admin.displayName);
+      if (!displayName) return;
+      const email = prompt('Admin email', admin.email || '');
+      if (!email) return;
+      const role = prompt(`Role (${adminRolesCache.map(item => item.role).join(', ')})`, admin.role);
+      const mfaCode = prompt('New MFA code, or leave blank to keep current MFA code', '');
+      const mfaChoice = prompt('Require MFA? Type yes or no.', admin.mfaEnabled ? 'yes' : 'no');
+      if (mfaChoice == null) return;
+      const mfaEnabled = !/^no$/i.test(mfaChoice.trim());
+      const reason = prompt('Reason for audit log');
+      if (!reason) return;
+      await api(`/admins/${encodeURIComponent(adminId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ displayName, email, role, mfaCode: mfaCode || undefined, mfaEnabled, reason }),
+      });
+      status('Admin account updated.', 'ok');
+    }
+    if (action === 'password') {
+      const temporaryPassword = prompt('Temporary password, or leave blank to generate') || undefined;
+      const reason = prompt('Reason for audit log');
+      if (!reason) return;
+      const result = await api(`/admins/${encodeURIComponent(adminId)}/password-reset`, {
+        method: 'POST',
+        body: JSON.stringify({ temporaryPassword, reason }),
+      });
+      showAdminActionOutput(result, 'Admin password reset.');
+    }
+    if (action === 'sessions') {
+      const reason = prompt('Reason for audit log');
+      if (!reason) return;
+      await api(`/admins/${encodeURIComponent(adminId)}/sessions/revoke`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      });
+      status('Admin sessions revoked.', 'ok');
+    }
+    if (action === 'disable' || action === 'enable') {
+      const reason = prompt('Reason for audit log');
+      if (!reason) return;
+      await api(`/admins/${encodeURIComponent(adminId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ disabled: action === 'disable', reason }),
+      });
+      status(`Admin account ${action === 'disable' ? 'disabled' : 'enabled'}.`, 'ok');
+    }
+    await loadAdmins();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
 async function loadAudit() {
   const { audit } = await api('/audit');
   const output = document.querySelector('#auditOutput');
@@ -1460,6 +1626,65 @@ function escapeCss(value) {
   return String(value || '').replace(/[;"'(){}]/g, '');
 }
 
+async function loadRecoveryConfig() {
+  const statusNode = document.querySelector('#recoveryStatus');
+  const toggle = document.querySelector('#toggleRecovery');
+  try {
+    const { enabled } = await api('/auth/recovery/config');
+    statusNode.textContent = enabled
+      ? 'Email recovery is configured. Use it if an admin forgets their password.'
+      : 'Email recovery is not configured yet. Add SMTP settings in Railway to enable it.';
+    toggle.disabled = !enabled;
+    toggle.classList.toggle('dim', !enabled);
+  } catch {
+    statusNode.textContent = 'Could not check recovery email status.';
+    toggle.disabled = true;
+  }
+}
+
+function bindRecoveryControls() {
+  const toggle = document.querySelector('#toggleRecovery');
+  const panel = document.querySelector('#recoveryPanel');
+  const message = document.querySelector('#recoveryMessage');
+  toggle?.addEventListener('click', () => {
+    panel.classList.toggle('hidden');
+    toggle.textContent = panel.classList.contains('hidden') ? 'Open' : 'Close';
+  });
+  document.querySelector('#recoveryRequestForm')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    message.textContent = '';
+    try {
+      const form = new FormData(event.currentTarget);
+      const result = await api('/auth/recovery/request', {
+        method: 'POST',
+        body: JSON.stringify({ identifier: form.get('identifier') }),
+      });
+      message.textContent = result.message || 'If that admin account can recover by email, a code has been sent.';
+    } catch (error) {
+      message.textContent = error.message;
+    }
+  });
+  document.querySelector('#recoveryCompleteForm')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    message.textContent = '';
+    try {
+      const form = new FormData(event.currentTarget);
+      await api('/auth/recovery/complete', {
+        method: 'POST',
+        body: JSON.stringify({
+          identifier: form.get('identifier'),
+          code: form.get('code'),
+          newPassword: form.get('newPassword'),
+        }),
+      });
+      message.textContent = 'Password updated. Sign in with the new password.';
+      event.currentTarget.reset();
+    } catch (error) {
+      message.textContent = error.message;
+    }
+  });
+}
+
 document.querySelector('#loginForm')?.addEventListener('submit', async event => {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
@@ -1485,4 +1710,6 @@ document.querySelector('#loginForm')?.addEventListener('submit', async event => 
   }
 });
 
+bindRecoveryControls();
+loadRecoveryConfig();
 api('/auth/me').then(renderConsole).catch(() => null);

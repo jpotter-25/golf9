@@ -4,8 +4,13 @@ import { publicCosmeticCatalog, publicUserProfile } from './progression.js';
 
 const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 8;
 const ADMIN_MFA_TTL_MS = 1000 * 60 * 5;
+const ADMIN_LOGIN_LOCK_THRESHOLD = 5;
+const ADMIN_LOGIN_LOCK_MS = 1000 * 60 * 15;
+const ADMIN_RECOVERY_TTL_MS = 1000 * 60 * 15;
+const ADMIN_RECOVERY_MAX_ATTEMPTS = 5;
 const SUPPORT_TICKET_MAX_LENGTH = 1200;
 const ADMIN_REASON_MAX_LENGTH = 240;
+const ADMIN_PASSWORD_MIN_LENGTH = 12;
 
 const ROLE_PERMISSIONS = {
   owner: ['*'],
@@ -39,6 +44,7 @@ const VALID_ROLES = Object.keys(ROLE_PERMISSIONS);
 const VALID_TICKET_STATUSES = new Set(['open', 'in_review', 'waiting_on_player', 'resolved', 'closed']);
 const VALID_MODERATION_TYPES = new Set(['account_ban', 'device_ban', 'suspension', 'chat_mute']);
 const INVITE_CODE_MAX_LENGTH = 32;
+const ADMIN_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function now() {
   return Date.now();
@@ -46,6 +52,29 @@ function now() {
 
 function safeString(value, maxLength = 120) {
   return String(value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+
+function normalizeEmail(value) {
+  const email = safeString(value, 120).toLowerCase();
+  return email && ADMIN_EMAIL_PATTERN.test(email) ? email : '';
+}
+
+function generateTemporaryPassword() {
+  return `${crypto.randomBytes(9).toString('base64url')}Aa9!`;
+}
+
+function generateMfaCode() {
+  return String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+}
+
+function validateAdminPassword(password) {
+  const value = String(password || '');
+  if (value.length < ADMIN_PASSWORD_MIN_LENGTH) return `Admin passwords must be at least ${ADMIN_PASSWORD_MIN_LENGTH} characters.`;
+  if (!/[a-z]/.test(value)) return 'Admin passwords must include a lowercase letter.';
+  if (!/[A-Z]/.test(value)) return 'Admin passwords must include an uppercase letter.';
+  if (!/[0-9]/.test(value)) return 'Admin passwords must include a number.';
+  if (!/[^A-Za-z0-9]/.test(value)) return 'Admin passwords must include a symbol.';
+  return null;
 }
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
@@ -71,13 +100,23 @@ export function adminHasPermission(admin, permission) {
   return permissions.includes('*') || permissions.includes(permission);
 }
 
+export function adminRoleOptions() {
+  return VALID_ROLES.map(role => ({ role, permissions: rolePermissions(role) }));
+}
+
 function publicAdmin(admin) {
   return {
     adminId: admin.adminId,
     displayName: admin.displayName,
+    email: admin.email || null,
     role: admin.role,
+    mfaEnabled: admin.mfaEnabled !== false,
     createdAt: admin.createdAt,
     lastLoginAt: admin.lastLoginAt || null,
+    disabledAt: admin.disabledAt || null,
+    lockedUntil: admin.lockedUntil || null,
+    passwordChangedAt: admin.passwordChangedAt || null,
+    recoveryEnabled: !!admin.email,
     permissions: rolePermissions(admin.role),
   };
 }
@@ -91,6 +130,7 @@ export function normalizeAdminStore(store) {
   ensureArray(store, 'admins');
   ensureArray(store, 'adminSessions');
   ensureArray(store, 'adminAudit');
+  ensureArray(store, 'adminRecoveryRequests');
   ensureArray(store, 'supportTickets');
   ensureArray(store, 'bans');
   ensureArray(store, 'inviteCodes');
@@ -100,6 +140,7 @@ export function normalizeAdminStore(store) {
     .map(admin => ({
       adminId: String(admin.adminId),
       displayName: safeString(admin.displayName, 40),
+      email: normalizeEmail(admin.email),
       role: VALID_ROLES.includes(admin.role) ? admin.role : 'readOnly',
       salt: String(admin.salt || ''),
       passwordHash: String(admin.passwordHash || ''),
@@ -108,6 +149,10 @@ export function normalizeAdminStore(store) {
       createdAt: Number(admin.createdAt) || now(),
       lastLoginAt: Number(admin.lastLoginAt) || null,
       disabledAt: Number(admin.disabledAt) || null,
+      failedLoginCount: Math.max(0, Number(admin.failedLoginCount) || 0),
+      lastFailedLoginAt: Number(admin.lastFailedLoginAt) || null,
+      lockedUntil: Number(admin.lockedUntil) || null,
+      passwordChangedAt: Number(admin.passwordChangedAt) || null,
     }));
 
   store.adminSessions = store.adminSessions
@@ -125,6 +170,23 @@ export function normalizeAdminStore(store) {
   store.adminAudit = store.adminAudit
     .filter(entry => entry?.auditId)
     .slice(-2000);
+
+  store.adminRecoveryRequests = store.adminRecoveryRequests
+    .filter(request => request?.requestId && request?.adminId)
+    .map(request => ({
+      requestId: String(request.requestId),
+      adminId: String(request.adminId),
+      email: normalizeEmail(request.email),
+      codeHash: String(request.codeHash || ''),
+      createdAt: Number(request.createdAt) || now(),
+      expiresAt: Number(request.expiresAt) || now(),
+      attempts: Math.max(0, Number(request.attempts) || 0),
+      usedAt: Number(request.usedAt) || null,
+      ipHash: String(request.ipHash || ''),
+      userAgent: safeString(request.userAgent, 180),
+    }))
+    .filter(request => request.expiresAt > now() || request.usedAt)
+    .slice(-100);
 
   store.supportTickets = store.supportTickets
     .filter(ticket => ticket?.ticketId)
@@ -301,6 +363,7 @@ export function ensureBootstrapAdmin(store, env = process.env) {
   store.admins.push({
     adminId: 'admin-owner',
     displayName: username,
+    email: normalizeEmail(env.ADMIN_BOOTSTRAP_EMAIL),
     role: 'owner',
     salt: credentials.salt,
     passwordHash: credentials.passwordHash,
@@ -309,6 +372,10 @@ export function ensureBootstrapAdmin(store, env = process.env) {
     createdAt: now(),
     lastLoginAt: null,
     disabledAt: null,
+    failedLoginCount: 0,
+    lastFailedLoginAt: null,
+    lockedUntil: null,
+    passwordChangedAt: now(),
   });
   return true;
 }
@@ -320,6 +387,7 @@ export function seedDevelopmentAdmin(store, env = process.env) {
   store.admins.push({
     adminId: 'dev-admin-owner',
     displayName: 'admin',
+    email: normalizeEmail(env.ADMIN_BOOTSTRAP_EMAIL),
     role: 'owner',
     salt: credentials.salt,
     passwordHash: credentials.passwordHash,
@@ -328,6 +396,10 @@ export function seedDevelopmentAdmin(store, env = process.env) {
     createdAt: now(),
     lastLoginAt: null,
     disabledAt: null,
+    failedLoginCount: 0,
+    lastFailedLoginAt: null,
+    lockedUntil: null,
+    passwordChangedAt: now(),
   });
   return true;
 }
@@ -359,6 +431,152 @@ export function writeAudit(store, req, admin, action, target = {}, details = {})
   return entry;
 }
 
+function activeOwnerCount(store) {
+  return store.admins.filter(admin => admin.role === 'owner' && !admin.disabledAt).length;
+}
+
+function findAdmin(store, adminId) {
+  return store.admins.find(item => item.adminId === String(adminId || '') || item.displayName.toLowerCase() === safeString(adminId, 40).toLowerCase());
+}
+
+function assertAdminNameAvailable(store, displayName, currentAdminId = null) {
+  const name = safeString(displayName, 40);
+  if (name.length < 2) return { error: 'Admin name must be at least 2 characters.' };
+  if (!/^[A-Za-z0-9 _.-]+$/.test(name)) return { error: 'Admin name may use letters, numbers, spaces, periods, dashes, and underscores.' };
+  const exists = store.admins.some(admin => admin.adminId !== currentAdminId && admin.displayName.toLowerCase() === name.toLowerCase());
+  if (exists) return { error: 'Admin name is already in use.' };
+  return { displayName: name };
+}
+
+function assertAdminEmailAvailable(store, email, currentAdminId = null) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return { error: 'A valid admin email is required.' };
+  const exists = store.admins.some(admin => admin.adminId !== currentAdminId && admin.email && admin.email === normalized);
+  if (exists) return { error: 'Admin email is already in use.' };
+  return { email: normalized };
+}
+
+function revokeAdminSessions(store, adminId) {
+  const before = store.adminSessions.length;
+  store.adminSessions = store.adminSessions.filter(session => session.adminId !== adminId);
+  return before - store.adminSessions.length;
+}
+
+export function adminAccounts(store) {
+  normalizeAdminStore(store);
+  return store.admins
+    .slice()
+    .sort((a, b) => Number(a.disabledAt || 0) - Number(b.disabledAt || 0) || a.displayName.localeCompare(b.displayName))
+    .map(publicAdmin);
+}
+
+export function createAdminAccount(store, req, actor, body = {}) {
+  normalizeAdminStore(store);
+  const nameCheck = assertAdminNameAvailable(store, body.displayName);
+  if (nameCheck.error) return nameCheck;
+  const emailCheck = assertAdminEmailAvailable(store, body.email);
+  if (emailCheck.error) return emailCheck;
+  const role = VALID_ROLES.includes(body.role) ? body.role : 'readOnly';
+  const temporaryPassword = body.temporaryPassword ? String(body.temporaryPassword) : generateTemporaryPassword();
+  const passwordError = validateAdminPassword(temporaryPassword);
+  if (passwordError) return { error: passwordError };
+  const mfaCode = body.mfaCode ? String(body.mfaCode).trim() : generateMfaCode();
+  if (!/^\d{6}$/.test(mfaCode)) return { error: 'MFA code must be exactly 6 digits.' };
+  const credentials = hashPassword(temporaryPassword);
+  const admin = {
+    adminId: crypto.randomUUID(),
+    displayName: nameCheck.displayName,
+    email: emailCheck.email,
+    role,
+    salt: credentials.salt,
+    passwordHash: credentials.passwordHash,
+    mfaSecretHash: hashValue(mfaCode),
+    mfaEnabled: body.mfaEnabled !== false,
+    createdAt: now(),
+    lastLoginAt: null,
+    disabledAt: null,
+    failedLoginCount: 0,
+    lastFailedLoginAt: null,
+    lockedUntil: null,
+    passwordChangedAt: now(),
+  };
+  store.admins.push(admin);
+  writeAudit(store, req, actor, 'admin.admins.create', { adminId: admin.adminId }, {
+    reason: cleanAdminReason(body.reason),
+    displayName: admin.displayName,
+    email: admin.email,
+    role: admin.role,
+    mfaEnabled: admin.mfaEnabled,
+  });
+  return {
+    admin: publicAdmin(admin),
+    temporaryPassword: body.temporaryPassword ? null : temporaryPassword,
+    mfaCode: body.mfaCode ? null : mfaCode,
+  };
+}
+
+export function updateAdminAccount(store, req, actor, adminId, patch = {}) {
+  normalizeAdminStore(store);
+  const admin = findAdmin(store, adminId);
+  if (!admin) return { error: 'Admin account not found.' };
+  const before = publicAdmin(admin);
+  if (patch.displayName !== undefined) {
+    const nameCheck = assertAdminNameAvailable(store, patch.displayName, admin.adminId);
+    if (nameCheck.error) return nameCheck;
+    admin.displayName = nameCheck.displayName;
+  }
+  if (patch.email !== undefined) {
+    const emailCheck = assertAdminEmailAvailable(store, patch.email, admin.adminId);
+    if (emailCheck.error) return emailCheck;
+    admin.email = emailCheck.email;
+  }
+  if (patch.role !== undefined) {
+    if (!VALID_ROLES.includes(patch.role)) return { error: 'Invalid admin role.' };
+    if (admin.role === 'owner' && patch.role !== 'owner' && activeOwnerCount(store) <= 1) {
+      return { error: 'At least one active owner admin is required.' };
+    }
+    admin.role = patch.role;
+  }
+  if (patch.mfaEnabled !== undefined) admin.mfaEnabled = patch.mfaEnabled !== false;
+  if (patch.mfaCode !== undefined && String(patch.mfaCode || '').trim()) {
+    const mfaCode = String(patch.mfaCode).trim();
+    if (!/^\d{6}$/.test(mfaCode)) return { error: 'MFA code must be exactly 6 digits.' };
+    admin.mfaSecretHash = hashValue(mfaCode);
+    admin.mfaEnabled = true;
+    revokeAdminSessions(store, admin.adminId);
+  }
+  if (patch.disabled !== undefined) {
+    const disable = !!patch.disabled;
+    if (disable && actor?.adminId === admin.adminId) return { error: 'You cannot disable your own admin account.' };
+    if (disable && admin.role === 'owner' && activeOwnerCount(store) <= 1) {
+      return { error: 'At least one active owner admin is required.' };
+    }
+    admin.disabledAt = disable ? (admin.disabledAt || now()) : null;
+    if (disable) revokeAdminSessions(store, admin.adminId);
+  }
+  writeAudit(store, req, actor, 'admin.admins.update', { adminId: admin.adminId }, { reason: cleanAdminReason(patch.reason), before, after: publicAdmin(admin) });
+  return { admin: publicAdmin(admin) };
+}
+
+export function resetAdminPassword(store, req, actor, adminId, body = {}) {
+  normalizeAdminStore(store);
+  const admin = findAdmin(store, adminId);
+  if (!admin) return { error: 'Admin account not found.' };
+  const temporaryPassword = body.temporaryPassword ? String(body.temporaryPassword) : generateTemporaryPassword();
+  const passwordError = validateAdminPassword(temporaryPassword);
+  if (passwordError) return { error: passwordError };
+  const credentials = hashPassword(temporaryPassword);
+  admin.salt = credentials.salt;
+  admin.passwordHash = credentials.passwordHash;
+  admin.passwordChangedAt = now();
+  admin.failedLoginCount = 0;
+  admin.lastFailedLoginAt = null;
+  admin.lockedUntil = null;
+  const revokedSessions = revokeAdminSessions(store, admin.adminId);
+  writeAudit(store, req, actor, 'admin.admins.password.reset', { adminId: admin.adminId }, { reason: cleanAdminReason(body.reason), revokedSessions });
+  return { admin: publicAdmin(admin), temporaryPassword: body.temporaryPassword ? null : temporaryPassword };
+}
+
 export function createAdminSession(store, req, admin) {
   normalizeAdminStore(store);
   const session = {
@@ -386,10 +604,102 @@ export function authenticateAdmin(store, token) {
 export function loginAdmin(store, req, displayName, password) {
   normalizeAdminStore(store);
   const admin = store.admins.find(item => item.displayName.toLowerCase() === safeString(displayName, 40).toLowerCase() && !item.disabledAt);
-  if (!admin || !verifyPassword(password, admin.salt, admin.passwordHash)) return { error: 'Invalid admin credentials.' };
+  if (!admin) return { error: 'Invalid admin credentials.' };
+  if (admin.lockedUntil && admin.lockedUntil > now()) {
+    return { error: 'Too many failed attempts. Try again later.', status: 429 };
+  }
+  if (!verifyPassword(password, admin.salt, admin.passwordHash)) {
+    admin.failedLoginCount = Math.max(0, Number(admin.failedLoginCount) || 0) + 1;
+    admin.lastFailedLoginAt = now();
+    if (admin.failedLoginCount >= ADMIN_LOGIN_LOCK_THRESHOLD) {
+      admin.lockedUntil = now() + ADMIN_LOGIN_LOCK_MS;
+      writeAudit(store, req, admin, 'admin.login.locked', { adminId: admin.adminId }, { failedLoginCount: admin.failedLoginCount });
+    } else {
+      writeAudit(store, req, admin, 'admin.login.failed', { adminId: admin.adminId }, { failedLoginCount: admin.failedLoginCount });
+    }
+    return { error: 'Invalid admin credentials.', changed: true };
+  }
+  admin.failedLoginCount = 0;
+  admin.lastFailedLoginAt = null;
+  admin.lockedUntil = null;
   const session = createAdminSession(store, req, admin);
   writeAudit(store, req, admin, 'admin.login.started', { adminId: admin.adminId });
-  return { sessionToken: session.token, mfaRequired: !!admin.mfaEnabled, admin: publicAdmin(admin) };
+  return { sessionToken: session.token, token: session.token, mfaRequired: !!admin.mfaEnabled, admin: publicAdmin(admin), changed: true };
+}
+
+function findRecoveryAdmin(store, identifier) {
+  const value = safeString(identifier, 120).toLowerCase();
+  if (!value) return null;
+  return store.admins.find(admin => !admin.disabledAt && (
+    admin.displayName.toLowerCase() === value || (admin.email && admin.email === value)
+  ));
+}
+
+function recoveryCodeHash(adminId, code) {
+  return hashValue(`${adminId}:${String(code || '').trim()}`);
+}
+
+function pruneRecoveryRequests(store) {
+  const cutoff = now() - ADMIN_RECOVERY_TTL_MS;
+  store.adminRecoveryRequests = store.adminRecoveryRequests
+    .filter(request => request.expiresAt > now() || Number(request.usedAt || 0) > cutoff)
+    .slice(-100);
+}
+
+export async function requestAdminPasswordRecovery(store, req, identifier, sendRecoveryCode) {
+  normalizeAdminStore(store);
+  pruneRecoveryRequests(store);
+  const admin = findRecoveryAdmin(store, identifier);
+  if (!admin || !admin.email) return { ok: true, changed: false };
+  const code = generateMfaCode();
+  const request = {
+    requestId: crypto.randomUUID(),
+    adminId: admin.adminId,
+    email: admin.email,
+    codeHash: recoveryCodeHash(admin.adminId, code),
+    createdAt: now(),
+    expiresAt: now() + ADMIN_RECOVERY_TTL_MS,
+    attempts: 0,
+    usedAt: null,
+    ...requestMeta(req),
+  };
+  store.adminRecoveryRequests.push(request);
+  writeAudit(store, req, admin, 'admin.password_recovery.requested', { adminId: admin.adminId }, { email: admin.email });
+  await sendRecoveryCode({ admin: publicAdmin(admin), code, expiresAt: request.expiresAt });
+  return { ok: true, changed: true };
+}
+
+export function completeAdminPasswordRecovery(store, req, body = {}) {
+  normalizeAdminStore(store);
+  pruneRecoveryRequests(store);
+  const admin = findRecoveryAdmin(store, body.identifier);
+  const code = String(body.code || '').trim();
+  const newPassword = String(body.newPassword || '');
+  const passwordError = validateAdminPassword(newPassword);
+  if (passwordError) return { error: passwordError };
+  if (!admin) return { error: 'Invalid or expired recovery code.' };
+  const request = store.adminRecoveryRequests
+    .filter(item => item.adminId === admin.adminId && !item.usedAt && item.expiresAt > now())
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
+  if (!request) return { error: 'Invalid or expired recovery code.' };
+  if (request.attempts >= ADMIN_RECOVERY_MAX_ATTEMPTS) return { error: 'Invalid or expired recovery code.' };
+  if (request.codeHash !== recoveryCodeHash(admin.adminId, code)) {
+    request.attempts += 1;
+    if (request.attempts >= ADMIN_RECOVERY_MAX_ATTEMPTS) request.usedAt = now();
+    return { error: 'Invalid or expired recovery code.', changed: true };
+  }
+  const credentials = hashPassword(newPassword);
+  admin.salt = credentials.salt;
+  admin.passwordHash = credentials.passwordHash;
+  admin.passwordChangedAt = now();
+  admin.failedLoginCount = 0;
+  admin.lastFailedLoginAt = null;
+  admin.lockedUntil = null;
+  request.usedAt = now();
+  request.attempts += 1;
+  const revokedSessions = revokeAdminSessions(store, admin.adminId);
+  writeAudit(store, req, admin, 'admin.password_recovery.completed', { adminId: admin.adminId }, { revokedSessions });
+  return { ok: true, admin: publicAdmin(admin), changed: true };
 }
 
 export function verifyAdminMfa(store, req, token, code) {

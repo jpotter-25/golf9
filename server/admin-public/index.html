@@ -19,6 +19,28 @@
           <button type="submit">Sign In</button>
           <p id="loginError" class="error"></p>
         </form>
+        <div class="panel compact">
+          <div class="split-header">
+            <div>
+              <h2>Password Recovery</h2>
+              <p id="recoveryStatus" class="muted">Checking recovery email status...</p>
+            </div>
+            <button id="toggleRecovery" class="ghost" type="button">Open</button>
+          </div>
+          <div id="recoveryPanel" class="hidden">
+            <form id="recoveryRequestForm" class="compact">
+              <label>Admin name or email <input name="identifier" autocomplete="username" required /></label>
+              <button type="submit">Email Recovery Code</button>
+            </form>
+            <form id="recoveryCompleteForm" class="compact">
+              <label>Admin name or email <input name="identifier" autocomplete="username" required /></label>
+              <label>Recovery code <input name="code" inputmode="numeric" required /></label>
+              <label>New password <input name="newPassword" type="password" autocomplete="new-password" required /></label>
+              <button type="submit">Set New Password</button>
+            </form>
+            <p id="recoveryMessage" class="muted"></p>
+          </div>
+        </div>
       </section>
     </main>
     <template id="consoleTemplate">
@@ -39,6 +61,7 @@
           <button data-tab="competitive">Competitive</button>
           <button data-tab="catalog">Catalog</button>
           <button data-tab="clubs">Clubs</button>
+          <button data-tab="admins">Admins</button>
           <button data-tab="audit">Audit</button>
         </nav>
         <p id="status" class="status"></p>
@@ -349,6 +372,39 @@
               <div id="clubsOutput" class="list"></div>
               <div id="clubDetail" class="panel compact hidden"></div>
             </div>
+          </div>
+        </section>
+        <section id="admins" class="tab">
+          <div class="panel">
+            <div class="split-header">
+              <div>
+                <h2>Admin Accounts</h2>
+                <p class="muted">Owner-only controls for admin users, roles, MFA, lockouts, and password resets.</p>
+              </div>
+              <button id="loadAdmins">Refresh Admins</button>
+            </div>
+            <div id="adminRecoveryBanner" class="statline"></div>
+            <form id="adminCreateForm" class="admin-create-grid">
+              <label>Admin name <input name="displayName" placeholder="support lead" required /></label>
+              <label>Email <input name="email" type="email" placeholder="admin@example.com" required /></label>
+              <label>Role
+                <select name="role">
+                  <option value="readOnly">Read Only</option>
+                  <option value="support">Support</option>
+                  <option value="moderator">Moderator</option>
+                  <option value="economy">Economy</option>
+                  <option value="admin">Admin</option>
+                  <option value="owner">Owner</option>
+                </select>
+              </label>
+              <label>Optional temp password <input name="temporaryPassword" type="password" autocomplete="new-password" placeholder="Generated if blank" /></label>
+              <label>Optional MFA code <input name="mfaCode" inputmode="numeric" placeholder="Generated if blank" /></label>
+              <label>Reason <input name="reason" placeholder="Required audit reason" required /></label>
+              <label class="checkline"><input name="mfaEnabled" type="checkbox" checked /> Require MFA</label>
+              <button type="submit">Create Admin</button>
+            </form>
+            <div id="adminActionOutput" class="card hidden"></div>
+            <div id="adminAccountsOutput" class="player-table-wrap"></div>
           </div>
         </section>
         <section id="audit" class="tab">

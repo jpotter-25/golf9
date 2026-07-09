@@ -7,6 +7,7 @@ import fs from 'fs';
 import http from 'http';
 import path from 'path';
 import cors from 'cors';
+import nodemailer from 'nodemailer';
 import { OAuth2Client } from 'google-auth-library';
 import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
@@ -110,16 +111,20 @@ import {
 } from './testAccounts.js';
 import {
   activeBansFor,
+  adminAccounts,
   adminCosmeticCatalogFor,
   adminEconomySummary,
   adminInvites,
   adminMetrics,
+  adminRoleOptions,
   adminTickets,
   adminUserDetail,
   adminUserList,
   banErrorFor,
   cleanAdminReason,
   clearAdminCookie,
+  completeAdminPasswordRecovery,
+  createAdminAccount,
   consumeSignupInvite,
   createInviteCode,
   createSupportTicket,
@@ -129,10 +134,13 @@ import {
   normalizeAdminStore,
   normalizeUserAdminFields,
   requireAdmin,
+  requestAdminPasswordRecovery,
+  resetAdminPassword,
   seedDevelopmentAdmin,
   setAdminCookie,
   signupInvitesRequired,
   trackUserDevice,
+  updateAdminAccount,
   updateSupportTicket,
   addSupportNote,
   validateSignupInvite,
@@ -165,6 +173,14 @@ const EXPO_ACCESS_TOKEN = String(process.env.EXPO_ACCESS_TOKEN || '').trim();
 const PUSH_TEST_MODE = process.env.PUSH_TEST_MODE === '1';
 const PUSH_DAILY_SCAN_MS = Math.max(60_000, Number(process.env.PUSH_DAILY_SCAN_MS || 60_000));
 const pushTestOutbox = [];
+const ADMIN_EMAIL_TEST_MODE = process.env.ADMIN_EMAIL_TEST_MODE === '1';
+const ADMIN_SMTP_HOST = String(process.env.ADMIN_SMTP_HOST || '').trim();
+const ADMIN_SMTP_PORT = Number(process.env.ADMIN_SMTP_PORT || 587);
+const ADMIN_SMTP_USER = String(process.env.ADMIN_SMTP_USER || '').trim();
+const ADMIN_SMTP_PASS = String(process.env.ADMIN_SMTP_PASS || '').trim();
+const ADMIN_SMTP_FROM = String(process.env.ADMIN_SMTP_FROM || process.env.ADMIN_BOOTSTRAP_EMAIL || '').trim();
+const ADMIN_SMTP_SECURE = process.env.ADMIN_SMTP_SECURE === '1';
+const adminEmailTestOutbox = [];
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const ROOM_TTL_MS = 1000 * 60 * 60 * 2;
 const PORT = String(process.env.PORT || 3001);
@@ -553,6 +569,43 @@ function notificationConfig() {
   return adminStore.notificationConfig;
 }
 
+function adminRecoveryEmailEnabled() {
+  return ADMIN_EMAIL_TEST_MODE || (!!ADMIN_SMTP_HOST && !!ADMIN_SMTP_FROM);
+}
+
+async function sendAdminRecoveryCode({ admin, code, expiresAt }) {
+  const message = {
+    to: admin.email,
+    subject: 'Golf 9 admin password recovery code',
+    text: [
+      `Hello ${admin.displayName},`,
+      '',
+      `Your Golf 9 admin password recovery code is ${code}.`,
+      `It expires at ${new Date(expiresAt).toLocaleString()}.`,
+      '',
+      'If you did not request this code, ignore this message and review admin audit logs.',
+    ].join('\n'),
+  };
+  if (ADMIN_EMAIL_TEST_MODE) {
+    adminEmailTestOutbox.push({ ...message, adminId: admin.adminId, code, expiresAt, sentAt: Date.now() });
+    return;
+  }
+  if (!adminRecoveryEmailEnabled()) throw new Error('Admin recovery email is not configured.');
+  const auth = ADMIN_SMTP_USER || ADMIN_SMTP_PASS ? { user: ADMIN_SMTP_USER, pass: ADMIN_SMTP_PASS } : undefined;
+  const transport = nodemailer.createTransport({
+    host: ADMIN_SMTP_HOST,
+    port: ADMIN_SMTP_PORT,
+    secure: ADMIN_SMTP_SECURE,
+    auth,
+  });
+  await transport.sendMail({
+    from: ADMIN_SMTP_FROM,
+    to: admin.email,
+    subject: message.subject,
+    text: message.text,
+  });
+}
+
 function renderPushTemplate(template, data = {}) {
   return cleanPushText(template, 220).replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, key) => cleanPushText(data[key], 80));
 }
@@ -769,6 +822,7 @@ function applyStoreState(parsed = {}) {
     admins: parsed.admins || [],
     adminSessions: parsed.adminSessions || [],
     adminAudit: parsed.adminAudit || [],
+    adminRecoveryRequests: parsed.adminRecoveryRequests || [],
     supportTickets: parsed.supportTickets || [],
     bans: parsed.bans || [],
     inviteCodes: parsed.inviteCodes || [],
@@ -820,6 +874,7 @@ function storeSnapshot() {
     admins: adminStore.admins,
     adminSessions: adminStore.adminSessions,
     adminAudit: adminStore.adminAudit,
+    adminRecoveryRequests: adminStore.adminRecoveryRequests,
     supportTickets: adminStore.supportTickets,
     bans: adminStore.bans,
     inviteCodes: adminStore.inviteCodes,
@@ -2638,9 +2693,39 @@ app.use('/assets/cosmetics', express.static(ASSET_UPLOAD_DIR, {
   },
 }));
 
+app.get('/admin/api/auth/recovery/config', (_req, res) => {
+  res.json({ enabled: adminRecoveryEmailEnabled() });
+});
+
+app.post('/admin/api/auth/recovery/request', async (req, res) => {
+  if (!adminRecoveryEmailEnabled()) return res.status(503).json({ error: 'Admin password recovery email is not configured yet.' });
+  try {
+    const result = await requestAdminPasswordRecovery(adminStore, req, req.body?.identifier, sendAdminRecoveryCode);
+    if (result.changed) saveStore();
+    return res.json({ ok: true, message: 'If that admin account can recover by email, a code has been sent.' });
+  } catch (error) {
+    console.error('Admin password recovery request failed:', error);
+    saveStore();
+    return res.status(500).json({ error: 'Recovery email could not be sent. Check SMTP settings.' });
+  }
+});
+
+app.post('/admin/api/auth/recovery/complete', (req, res) => {
+  const result = completeAdminPasswordRecovery(adminStore, req, req.body || {});
+  if (result.changed) saveStore();
+  if (result.error) return res.status(400).json({ error: result.error });
+  return res.json({ ok: true });
+});
+
+app.get('/admin/api/auth/recovery/test-outbox', requireAdmin(adminStore, 'admin:write'), (_req, res) => {
+  if (!ADMIN_EMAIL_TEST_MODE) return res.status(404).json({ error: 'Not found.' });
+  return res.json({ messages: adminEmailTestOutbox.slice(-50) });
+});
+
 app.post('/admin/api/auth/login', (req, res) => {
   const result = loginAdmin(adminStore, req, req.body?.displayName, req.body?.password);
-  if (result.error) return res.status(401).json({ error: result.error });
+  if (result.changed) saveStore();
+  if (result.error) return res.status(result.status || 401).json({ error: result.error });
   setAdminCookie(res, result.sessionToken);
   saveStore();
   return res.json(result);
@@ -2667,9 +2752,57 @@ app.get('/admin/api/auth/me', requireAdmin(adminStore), (req, res) => res.json({
   admin: {
     adminId: req.admin.admin.adminId,
     displayName: req.admin.admin.displayName,
+    email: req.admin.admin.email || null,
     role: req.admin.admin.role,
   },
 }));
+
+app.get('/admin/api/admins', requireAdmin(adminStore, 'admin:write'), (_req, res) => {
+  res.json({
+    admins: adminAccounts(adminStore),
+    roles: adminRoleOptions(),
+    recovery: { enabled: adminRecoveryEmailEnabled() },
+  });
+});
+
+app.post('/admin/api/admins', requireAdmin(adminStore, 'admin:write'), (req, res) => {
+  const reason = cleanAdminReason(req.body?.reason);
+  if (!reason) return res.status(400).json({ error: 'Reason is required.' });
+  const result = createAdminAccount(adminStore, req, req.admin.admin, req.body || {});
+  if (result.error) return res.status(result.error.includes('already') ? 409 : 400).json({ error: result.error });
+  saveStore();
+  return res.status(201).json(result);
+});
+
+app.patch('/admin/api/admins/:adminId', requireAdmin(adminStore, 'admin:write'), (req, res) => {
+  const reason = cleanAdminReason(req.body?.reason);
+  if (!reason) return res.status(400).json({ error: 'Reason is required.' });
+  const result = updateAdminAccount(adminStore, req, req.admin.admin, req.params.adminId, req.body || {});
+  if (result.error) return res.status(result.error.includes('not found') ? 404 : result.error.includes('already') ? 409 : 400).json({ error: result.error });
+  saveStore();
+  return res.json(result);
+});
+
+app.post('/admin/api/admins/:adminId/password-reset', requireAdmin(adminStore, 'admin:write'), (req, res) => {
+  const reason = cleanAdminReason(req.body?.reason);
+  if (!reason) return res.status(400).json({ error: 'Reason is required.' });
+  const result = resetAdminPassword(adminStore, req, req.admin.admin, req.params.adminId, req.body || {});
+  if (result.error) return res.status(result.error.includes('not found') ? 404 : 400).json({ error: result.error });
+  saveStore();
+  return res.json(result);
+});
+
+app.post('/admin/api/admins/:adminId/sessions/revoke', requireAdmin(adminStore, 'admin:write'), (req, res) => {
+  const reason = cleanAdminReason(req.body?.reason);
+  if (!reason) return res.status(400).json({ error: 'Reason is required.' });
+  const targetId = String(req.params.adminId);
+  const before = adminStore.adminSessions.length;
+  adminStore.adminSessions = adminStore.adminSessions.filter(session => session.adminId !== targetId);
+  const revokedSessions = before - adminStore.adminSessions.length;
+  writeAudit(adminStore, req, req.admin.admin, 'admin.admins.sessions.revoke', { adminId: targetId }, { reason, revokedSessions });
+  saveStore();
+  return res.json({ ok: true, revokedSessions });
+});
 
 app.get('/admin/api/users', requireAdmin(adminStore, 'users:read'), (req, res) => {
   writeAudit(adminStore, req, req.admin.admin, 'admin.users.search', {}, { query: String(req.query.q || '') });
