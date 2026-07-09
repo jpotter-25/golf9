@@ -10,6 +10,8 @@ let competitiveConfig = null;
 let economyWagerTables = [];
 let economyClubConfig = null;
 let notificationConfig = null;
+let playerSearchResults = [];
+let playerSort = { key: 'displayName', direction: 'asc' };
 
 const NOTIFICATION_LABELS = {
   turn: 'Your Turn',
@@ -17,6 +19,23 @@ const NOTIFICATION_LABELS = {
   roomInvite: 'Room Invite',
   friendRequest: 'Friend Request',
 };
+
+const PLAYER_TABLE_COLUMNS = [
+  { key: 'displayName', label: 'Name', className: 'primary-cell' },
+  { key: 'userId', label: 'User ID', className: 'mono-cell' },
+  { key: 'level', label: 'Level', align: 'right' },
+  { key: 'totalXp', label: 'XP', align: 'right' },
+  { key: 'coins', label: 'Coins', align: 'right' },
+  { key: 'rank', label: 'Rank' },
+  { key: 'mmr', label: 'MMR', align: 'right' },
+  { key: 'games', label: 'Games', align: 'right' },
+  { key: 'wins', label: 'Wins', align: 'right' },
+  { key: 'winRate', label: 'Win Rate', align: 'right' },
+  { key: 'club', label: 'Club' },
+  { key: 'moderation', label: 'Status' },
+  { key: 'devices', label: 'Devices', align: 'right' },
+  { key: 'lastSeen', label: 'Last Seen' },
+];
 
 async function api(path, options = {}) {
   const isForm = options.body instanceof FormData;
@@ -75,6 +94,7 @@ function bindConsoleActions() {
   document.querySelector('#playerSearch').addEventListener('keydown', event => {
     if (event.key === 'Enter') searchPlayers();
   });
+  document.querySelector('#playerResultFilter').addEventListener('input', renderPlayerResults);
   document.querySelector('#loadInvites').addEventListener('click', loadInvites);
   document.querySelector('#inviteEditor').addEventListener('submit', createInvite);
   document.querySelector('#loadTickets').addEventListener('click', loadTickets);
@@ -121,28 +141,177 @@ async function loadMetrics() {
 async function searchPlayers() {
   const q = document.querySelector('#playerSearch').value.trim();
   const { users } = await api(`/users?q=${encodeURIComponent(q)}`);
-  const output = document.querySelector('#playerResults');
-  output.replaceChildren(...users.map(user => {
-    const card = document.createElement('button');
-    card.className = 'card ghost';
-    card.innerHTML = `
-      <strong>${escapeHtml(user.displayName)}</strong>
-      <span class="muted">${escapeHtml(user.userId)}</span>
-      <div class="statline">
-        <span class="chip">Lv ${user.progression?.level ?? 1}</span>
-        <span class="chip">${money(user.currency?.coins)}</span>
-        <span class="chip">${user.competitive?.league?.name ?? 'Unranked'}</span>
-      </div>
-    `;
-    card.addEventListener('click', () => loadUser(user.userId));
-    return card;
-  }));
+  playerSearchResults = users || [];
+  renderPlayerResults();
 }
 
 async function loadUser(userId) {
   const { user } = await api(`/users/${encodeURIComponent(userId)}`);
   selectedUser = user;
   renderUserDetail(user);
+  highlightSelectedPlayerRow(user.userId);
+}
+
+function renderPlayerResults() {
+  const output = document.querySelector('#playerResults');
+  const countNode = document.querySelector('#playerResultCount');
+  const filter = document.querySelector('#playerResultFilter')?.value.trim().toLowerCase() || '';
+  const visibleUsers = playerSearchResults
+    .filter(user => !filter || playerFilterText(user).includes(filter))
+    .sort(comparePlayers);
+
+  if (countNode) {
+    const total = playerSearchResults.length;
+    const visible = visibleUsers.length;
+    countNode.textContent = total ? `${visible.toLocaleString()} of ${total.toLocaleString()} players shown` : 'No players loaded';
+  }
+
+  if (!visibleUsers.length) {
+    output.innerHTML = '<div class="empty-state">No matching players found.</div>';
+    return;
+  }
+
+  output.innerHTML = `
+    <table class="admin-table player-table">
+      <thead>
+        <tr>
+          ${PLAYER_TABLE_COLUMNS.map(column => `
+            <th class="${column.align === 'right' ? 'numeric' : ''}">
+              <button type="button" class="table-sort ${playerSort.key === column.key ? 'active' : ''}" data-sort="${escapeHtml(column.key)}">
+                ${escapeHtml(column.label)}${playerSort.key === column.key ? ` ${playerSort.direction === 'asc' ? '^' : 'v'}` : ''}
+              </button>
+            </th>
+          `).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        ${visibleUsers.map(user => `
+          <tr data-user-id="${escapeHtml(user.userId)}" tabindex="0" class="${selectedUser?.userId === user.userId ? 'selected' : ''}">
+            ${PLAYER_TABLE_COLUMNS.map(column => `
+              <td class="${column.align === 'right' ? 'numeric' : ''} ${column.className || ''}">
+                ${playerCellMarkup(user, column.key)}
+              </td>
+            `).join('')}
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+
+  output.querySelectorAll('[data-sort]').forEach(button => {
+    button.addEventListener('click', () => {
+      const key = button.dataset.sort;
+      playerSort = {
+        key,
+        direction: playerSort.key === key && playerSort.direction === 'asc' ? 'desc' : 'asc',
+      };
+      renderPlayerResults();
+    });
+  });
+  output.querySelectorAll('[data-user-id]').forEach(row => {
+    row.addEventListener('click', () => loadUser(row.dataset.userId));
+    row.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        loadUser(row.dataset.userId);
+      }
+    });
+  });
+}
+
+function highlightSelectedPlayerRow(userId) {
+  document.querySelectorAll('#playerResults [data-user-id]').forEach(row => {
+    row.classList.toggle('selected', row.dataset.userId === userId);
+  });
+}
+
+function playerFilterText(user) {
+  return PLAYER_TABLE_COLUMNS
+    .map(column => String(playerRawValue(user, column.key) ?? ''))
+    .join(' ')
+    .toLowerCase();
+}
+
+function comparePlayers(a, b) {
+  const direction = playerSort.direction === 'desc' ? -1 : 1;
+  const left = playerSortValue(a, playerSort.key);
+  const right = playerSortValue(b, playerSort.key);
+  if (typeof left === 'number' && typeof right === 'number') return (left - right) * direction;
+  return String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: 'base' }) * direction;
+}
+
+function playerSortValue(user, key) {
+  const value = playerRawValue(user, key);
+  if (value == null) return '';
+  return value;
+}
+
+function playerCellMarkup(user, key) {
+  const value = playerRawValue(user, key);
+  if (key === 'displayName') return `<strong>${escapeHtml(value || 'Unnamed')}</strong>`;
+  if (key === 'coins' || key === 'totalXp' || key === 'mmr' || key === 'games' || key === 'wins' || key === 'devices') {
+    return escapeHtml(Number(value || 0).toLocaleString());
+  }
+  if (key === 'winRate') return escapeHtml(formatPercent(value));
+  if (key === 'moderation') return `<span class="status-pill ${value === 'Clear' ? 'ok-pill' : 'danger-pill'}">${escapeHtml(value)}</span>`;
+  if (key === 'lastSeen') return escapeHtml(formatLastSeen(value));
+  return escapeHtml(value || '-');
+}
+
+function playerRawValue(user, key) {
+  const stats = user.statistics || {};
+  const games = Number(stats.gamesPlayed || 0);
+  const wins = Number(stats.wins || 0);
+  switch (key) {
+    case 'displayName':
+      return user.displayName || '';
+    case 'userId':
+      return user.userId || '';
+    case 'level':
+      return Number(user.progression?.level || 1);
+    case 'totalXp':
+      return Number(user.progression?.totalXp || 0);
+    case 'coins':
+      return Number(user.currency?.coins || 0);
+    case 'rank':
+      return user.competitive?.league?.name || 'Unranked';
+    case 'mmr':
+      return Number(user.competitive?.mmr || 0);
+    case 'games':
+      return games;
+    case 'wins':
+      return wins;
+    case 'winRate':
+      return games ? wins / games : 0;
+    case 'club':
+      return user.clubId || 'No club';
+    case 'moderation':
+      return moderationStatus(user);
+    case 'devices':
+      return Number(user.deviceCount ?? user.knownDevices?.length ?? 0);
+    case 'lastSeen':
+      return Number(user.lastSeenAt || 0);
+    default:
+      return '';
+  }
+}
+
+function moderationStatus(user) {
+  const moderation = user.moderation || {};
+  const currentTime = Date.now();
+  if (moderation.accountBannedAt) return 'Banned';
+  if (Number(moderation.suspendedUntil || 0) > currentTime) return 'Suspended';
+  if (Number(moderation.chatMutedUntil || 0) > currentTime) return 'Muted';
+  return 'Clear';
+}
+
+function formatPercent(value) {
+  return `${Math.round((Number(value || 0)) * 100)}%`;
+}
+
+function formatLastSeen(value) {
+  const timestamp = Number(value || 0);
+  return timestamp ? new Date(timestamp).toLocaleString() : 'Never';
 }
 
 function renderUserDetail(user) {

@@ -49,7 +49,11 @@
               <input id="playerSearch" placeholder="Search display name or user id" />
               <button id="searchPlayers">Search</button>
             </div>
-            <div id="playerResults" class="grid"></div>
+            <div class="result-toolbar">
+              <input id="playerResultFilter" placeholder="Filter loaded players by name, rank, club, status, or id" />
+              <span id="playerResultCount" class="muted"></span>
+            </div>
+            <div id="playerResults" class="player-table-wrap"></div>
           </div>
           <div id="playerDetail" class="panel hidden"></div>
         </section>

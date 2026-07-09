@@ -457,9 +457,14 @@ export function trackUserDevice(user, req, rawDeviceId = null) {
 
 function publicUserForAdmin(user, rankedSeason, extras = {}, competitiveConfig = null) {
   normalizeUserAdminFields(user);
+  const lastSeenAt = user.knownDevices.reduce((latest, device) => Math.max(latest, Number(device.lastSeenAt) || 0), 0) || null;
   return {
     ...publicUserProfile(user, rankedSeason, competitiveConfig),
+    clubId: user.clubId || null,
     knownDevices: user.knownDevices,
+    deviceCount: user.knownDevices.length,
+    lastSeenAt,
+    authProviderCount: Object.keys(user.authProviders || {}).length,
     moderation: user.moderation,
     ...extras,
   };
