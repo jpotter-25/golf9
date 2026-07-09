@@ -3,9 +3,10 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import type { StyleProp, ViewStyle } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ChevronLeft } from 'lucide-react-native';
+import { ChevronLeft, Lock } from 'lucide-react-native';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
@@ -335,16 +336,24 @@ function NoClub({
   const joinLocked = level < clubConfig.minJoinLevel;
   const createLocked = level < clubConfig.minCreateLevel;
   const canAffordCreate = coins >= clubConfig.createCost;
+  const clubAccessLevel = Math.max(clubConfig.minJoinLevel, clubConfig.minCreateLevel);
+  const sharedLevelRequirement = clubConfig.minJoinLevel === clubConfig.minCreateLevel;
   if (joinLocked) {
     return (
       <Panel title="Clubhouse Locked">
-        <Text style={styles.lockTitle}>Reach Level {clubConfig.minJoinLevel} to join clubs.</Text>
-        <Text style={styles.metaText}>You are Level {level}. Clubs are meant to be earned into, then built with players who are already active at the tables.</Text>
+        <Text style={styles.lockTitle}>Reach Level {clubAccessLevel} to unlock clubs.</Text>
+        <Text style={styles.metaText}>
+          You are Level {level}. Clubs are meant to be earned into, then built with players who are already active at the tables.
+        </Text>
         <View style={styles.statGrid}>
+          <StatTile
+            label={sharedLevelRequirement ? 'Join + Create Clubs' : `Join Lv ${clubConfig.minJoinLevel} / Create Lv ${clubConfig.minCreateLevel}`}
+            value={`Lv ${clubAccessLevel}`}
+            locked
+            style={styles.statTileWide}
+          />
           <StatTile label="Your Level" value={`Lv ${level}`} />
-          <StatTile label="Join Clubs" value={`Lv ${clubConfig.minJoinLevel}`} />
-          <StatTile label="Create Clubs" value={`Lv ${clubConfig.minCreateLevel}`} />
-          <StatTile label="Create Cost" value={formatCoins(clubConfig.createCost)} />
+          <StatTile label="Create Cost" value={formatCoins(clubConfig.createCost)} dimmed={!canAffordCreate} locked={!canAffordCreate} />
         </View>
       </Panel>
     );
@@ -729,11 +738,26 @@ function Empty({ text }: { text: string }) {
   return <Text style={styles.emptyText}>{text}</Text>;
 }
 
-function StatTile({ label, value }: { label: string; value: string }) {
+function StatTile({
+  label,
+  value,
+  dimmed,
+  locked,
+  style,
+}: {
+  label: string;
+  value: string;
+  dimmed?: boolean;
+  locked?: boolean;
+  style?: StyleProp<ViewStyle>;
+}) {
   return (
-    <View style={styles.statTile}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
+    <View style={[styles.statTile, dimmed && styles.statTileDimmed, style]}>
+      <View style={styles.statValueRow}>
+        {locked ? <Lock size={13} color={dimmed ? '#687097' : '#9BA3C7'} /> : null}
+        <Text style={[styles.statValue, dimmed && styles.statValueDimmed]}>{value}</Text>
+      </View>
+      <Text style={[styles.statLabel, dimmed && styles.statLabelDimmed]}>{label}</Text>
     </View>
   );
 }
@@ -862,8 +886,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#0F1430',
     padding: 10,
   },
+  statTileWide: { width: '100%' },
+  statTileDimmed: { opacity: 0.62 },
+  statValueRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statValue: { color: '#E8ECF1', fontSize: 15, fontWeight: '900' },
   statLabel: { color: '#9BA3C7', fontSize: 11, fontWeight: '800', marginTop: 2 },
+  statValueDimmed: { color: '#9BA3C7' },
+  statLabelDimmed: { color: '#687097' },
   nextPrestigeCard: {
     borderWidth: 1,
     borderColor: '#FFCC66',
