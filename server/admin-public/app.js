@@ -149,14 +149,54 @@ function renderUserDetail(user) {
   const node = document.querySelector('#playerDetail');
   node.classList.remove('hidden');
   const equipped = user.inventory?.equipped || {};
+  const progression = user.progression || {};
+  const cosmeticOptions = cosmeticSelectOptions(user);
   node.innerHTML = `
     <h2>${escapeHtml(user.displayName)}</h2>
     <p class="muted">${escapeHtml(user.userId)}</p>
     <div class="statline">
       <span class="chip">Coins ${money(user.currency?.coins)}</span>
       <span class="chip">Level ${user.progression?.level ?? 1}</span>
+      <span class="chip">${Number(progression.totalXp || 0).toLocaleString()} XP</span>
       <span class="chip">Wins ${user.statistics?.wins ?? 0}</span>
       <span class="chip">MMR ${user.competitive?.mmr ?? 0}</span>
+    </div>
+    <div class="admin-toolbox">
+      <form id="playerProgressionEditor" class="card compact">
+        <strong>Progression</strong>
+        <p class="muted">Apply exactly one operation. Setting a level moves the player to the start of that level.</p>
+        <div class="row three">
+          <label>XP delta <input name="xpDelta" type="number" placeholder="+500 or -250" /></label>
+          <label>Set total XP <input name="totalXp" type="number" min="0" placeholder="${Number(progression.totalXp || 0)}" /></label>
+          <label>Set level <input name="level" type="number" min="1" max="500" placeholder="${Number(progression.level || 1)}" /></label>
+        </div>
+        <input name="reason" placeholder="Required audit reason" required />
+        <button type="submit">Apply Progression</button>
+      </form>
+      <form id="playerCoinsEditor" class="card compact">
+        <strong>Currency</strong>
+        <p class="muted">Add or remove spendable coins without touching account ownership.</p>
+        <div class="row two">
+          <label>Coin delta <input name="amount" type="number" placeholder="+500 or -250" required /></label>
+          <label>Reason <input name="reason" placeholder="Required audit reason" required /></label>
+        </div>
+        <button type="submit">Adjust Coins</button>
+      </form>
+      <form id="playerCosmeticEditor" class="card compact">
+        <strong>Cosmetics</strong>
+        <p class="muted">Grant, revoke, or equip any catalog item for this player.</p>
+        <label>Catalog item
+          <select name="cosmeticId" required>
+            ${cosmeticOptions}
+          </select>
+        </label>
+        <input name="reason" placeholder="Required audit reason" required />
+        <div class="actions-inline">
+          <button type="submit" name="intent" value="grant">Grant</button>
+          <button type="submit" name="intent" value="equip" class="ghost">Equip</button>
+          <button type="submit" name="intent" value="revoke" class="danger">Revoke</button>
+        </div>
+      </form>
     </div>
     <div class="card">
       <strong>Equipped</strong>
@@ -167,11 +207,8 @@ function renderUserDetail(user) {
       ${(user.knownDevices || []).map(device => `<p class="muted">${escapeHtml(device.platform)} - ${escapeHtml(device.deviceHash.slice(0, 14))} - ${new Date(device.lastSeenAt).toLocaleString()}</p>`).join('') || '<p class="muted">No devices recorded yet.</p>'}
     </div>
     <div class="actions">
-      <button data-action="coins">Adjust Coins</button>
       <button data-action="rename">Rename</button>
       <button data-action="password">Reset Password</button>
-      <button data-action="grant">Grant Cosmetic</button>
-      <button data-action="revoke">Revoke Cosmetic</button>
       <button data-action="sessions">Revoke Sessions</button>
       <button data-action="mute">Mute Chat</button>
       <button data-action="suspend">Suspend</button>
@@ -180,7 +217,75 @@ function renderUserDetail(user) {
       <button data-action="clear">Clear Moderation</button>
     </div>
   `;
+  node.querySelector('#playerProgressionEditor')?.addEventListener('submit', adjustPlayerProgression);
+  node.querySelector('#playerCoinsEditor')?.addEventListener('submit', adjustPlayerCoins);
+  node.querySelector('#playerCosmeticEditor')?.addEventListener('submit', adjustPlayerCosmetic);
   node.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', () => runUserAction(button.dataset.action)));
+}
+
+function cosmeticSelectOptions(user) {
+  const cosmetics = [...(user.cosmetics || [])]
+    .sort((a, b) => String(a.type || '').localeCompare(String(b.type || '')) || String(a.name || '').localeCompare(String(b.name || '')));
+  if (!cosmetics.length) return '<option value="">No catalog items loaded</option>';
+  return cosmetics.map(item => {
+    const ownership = item.owned ? 'owned' : item.eligible ? 'eligible' : item.unlockStatus || 'locked';
+    return `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} - ${escapeHtml(item.type)} - ${escapeHtml(ownership)}</option>`;
+  }).join('');
+}
+
+async function adjustPlayerProgression(event) {
+  event.preventDefault();
+  if (!selectedUser) return;
+  const form = event.currentTarget;
+  const payload = { reason: form.elements.reason.value };
+  const xpDelta = form.elements.xpDelta.value.trim();
+  const totalXp = form.elements.totalXp.value.trim();
+  const level = form.elements.level.value.trim();
+  const operations = [xpDelta, totalXp, level].filter(Boolean).length;
+  if (operations !== 1) {
+    alert('Fill exactly one progression field: XP delta, total XP, or level.');
+    return;
+  }
+  if (xpDelta) payload.xpDelta = Number(xpDelta);
+  if (totalXp) payload.totalXp = Number(totalXp);
+  if (level) payload.level = Number(level);
+  await api(`/users/${selectedUser.userId}/progression/adjust`, { method: 'POST', body: JSON.stringify(payload) });
+  status('Progression updated.', 'ok');
+  await loadUser(selectedUser.userId);
+}
+
+async function adjustPlayerCoins(event) {
+  event.preventDefault();
+  if (!selectedUser) return;
+  const form = event.currentTarget;
+  await api(`/users/${selectedUser.userId}/coins/adjust`, {
+    method: 'POST',
+    body: JSON.stringify({
+      amount: Number(form.elements.amount.value),
+      reason: form.elements.reason.value,
+    }),
+  });
+  status('Coins updated.', 'ok');
+  await loadUser(selectedUser.userId);
+}
+
+async function adjustPlayerCosmetic(event) {
+  event.preventDefault();
+  if (!selectedUser) return;
+  const form = event.currentTarget;
+  const intent = event.submitter?.value || 'grant';
+  const cosmeticId = form.elements.cosmeticId.value;
+  if (!cosmeticId) return;
+  const endpoint = intent === 'equip' ? 'equip' : intent === 'revoke' ? 'revoke' : 'grant';
+  await api(`/users/${selectedUser.userId}/cosmetics/${endpoint}`, {
+    method: 'POST',
+    body: JSON.stringify({
+      cosmeticId,
+      reason: form.elements.reason.value,
+    }),
+  });
+  status(`Cosmetic ${endpoint} complete.`, 'ok');
+  await loadUser(selectedUser.userId);
 }
 
 async function runUserAction(action) {

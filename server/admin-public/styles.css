@@ -218,6 +218,13 @@ h2 {
   margin-top: 1rem;
 }
 
+.admin-toolbox {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.8rem;
+  margin: 1rem 0;
+}
+
 .list {
   display: grid;
   gap: 0.8rem;

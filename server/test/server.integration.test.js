@@ -634,6 +634,22 @@ test('admin console supports MFA login, audited player ops, support tickets, and
     }));
     assert.equal(adjustment.after, adjustment.before + 250);
 
+    const xpAdjustment = await json(await fetch(`${baseUrl}/admin/api/users/${player.user.userId}/progression/adjust`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ xpDelta: 1200, reason: 'Support test XP credit' }),
+    }));
+    assert.equal(xpAdjustment.before.level, 1);
+    assert.equal(xpAdjustment.after.level, 2);
+
+    const levelAdjustment = await json(await fetch(`${baseUrl}/admin/api/users/${player.user.userId}/progression/adjust`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ level: 10, reason: 'Support test level correction' }),
+    }));
+    assert.equal(levelAdjustment.after.level, 10);
+    assert.equal(levelAdjustment.user.progression.level, 10);
+
     const tickets = await json(await fetch(`${baseUrl}/admin/api/support/tickets`, { headers: { Cookie: cookie } }));
     assert.ok(tickets.tickets.some(item => item.ticketId === ticket.ticket.ticketId));
 
@@ -648,6 +664,7 @@ test('admin console supports MFA login, audited player ops, support tickets, and
 
     const audit = await json(await fetch(`${baseUrl}/admin/api/audit`, { headers: { Cookie: cookie } }));
     assert.ok(audit.audit.some(entry => entry.action === 'admin.users.coins.adjust'));
+    assert.ok(audit.audit.some(entry => entry.action === 'admin.users.progression.adjust'));
     assert.ok(audit.audit.some(entry => entry.action === 'admin.users.moderation'));
   }, { SEED_ADMIN_ACCOUNT: '1' });
 });

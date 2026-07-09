@@ -37,6 +37,7 @@ import {
   publicUserProfile,
   purchaseCosmetic,
   registerSocialMessage,
+  xpNeededForLevel,
 } from './progression.js';
 import {
   archiveDraftCatalogItem,
@@ -1008,6 +1009,15 @@ function safeUser(user) {
     club: publicClubForUser(user),
     authProviders: publicAuthProviders(user),
   };
+}
+
+function totalXpForLevelStart(level) {
+  const targetLevel = Math.max(1, Math.min(500, Math.trunc(Number(level) || 1)));
+  let totalXp = 0;
+  for (let currentLevel = 1; currentLevel < targetLevel; currentLevel += 1) {
+    totalXp += xpNeededForLevel(currentLevel);
+  }
+  return totalXp;
 }
 
 function currentCatalog() {
@@ -2748,6 +2758,48 @@ app.post('/admin/api/users/:userId/coins/adjust', requireAdmin(adminStore, 'econ
   writeAudit(adminStore, req, req.admin.admin, 'admin.users.coins.adjust', { userId: user.userId }, { reason, amount, before, after: user.currency.coins });
   saveStore();
   return res.json({ user: safeUser(user), before, after: user.currency.coins });
+});
+
+app.post('/admin/api/users/:userId/progression/adjust', requireAdmin(adminStore, 'economy:write'), (req, res) => {
+  const user = findUserByIdentifier(req.params.userId);
+  if (!user) return res.status(404).json({ error: 'Player not found.' });
+  const reason = cleanAdminReason(req.body?.reason);
+  if (!reason) return res.status(400).json({ error: 'Reason is required.' });
+  normalizeUserRecord(user);
+  const before = { ...user.progression };
+  const hasXpDelta = req.body?.xpDelta !== undefined && req.body?.xpDelta !== null && String(req.body.xpDelta).trim() !== '';
+  const hasTotalXp = req.body?.totalXp !== undefined && req.body?.totalXp !== null && String(req.body.totalXp).trim() !== '';
+  const hasLevel = req.body?.level !== undefined && req.body?.level !== null && String(req.body.level).trim() !== '';
+  const operationCount = [hasXpDelta, hasTotalXp, hasLevel].filter(Boolean).length;
+  if (operationCount !== 1) return res.status(400).json({ error: 'Provide exactly one progression operation: XP delta, total XP, or target level.' });
+
+  let operation = 'xpDelta';
+  let value = 0;
+  let nextTotalXp = before.totalXp;
+  if (hasXpDelta) {
+    value = Math.trunc(Number(req.body.xpDelta));
+    if (!Number.isFinite(value) || value === 0) return res.status(400).json({ error: 'XP adjustment amount is required.' });
+    nextTotalXp = Math.max(0, before.totalXp + value);
+  }
+  if (hasTotalXp) {
+    operation = 'totalXp';
+    value = Math.trunc(Number(req.body.totalXp));
+    if (!Number.isFinite(value) || value < 0) return res.status(400).json({ error: 'Total XP must be zero or greater.' });
+    nextTotalXp = value;
+  }
+  if (hasLevel) {
+    operation = 'level';
+    value = Math.trunc(Number(req.body.level));
+    if (!Number.isFinite(value) || value < 1 || value > 500) return res.status(400).json({ error: 'Target level must be between 1 and 500.' });
+    nextTotalXp = totalXpForLevelStart(value);
+  }
+
+  user.progression = { totalXp: nextTotalXp };
+  normalizeUserRecord(user);
+  const after = { ...user.progression };
+  writeAudit(adminStore, req, req.admin.admin, 'admin.users.progression.adjust', { userId: user.userId }, { reason, operation, value, before, after });
+  saveStore();
+  return res.json({ user: safeUser(user), before, after });
 });
 
 app.post('/admin/api/users/:userId/competitive/adjust', requireAdmin(adminStore, 'competitive:write'), (req, res) => {
