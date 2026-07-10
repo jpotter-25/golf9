@@ -685,6 +685,31 @@ test('admin console supports MFA login, audited player ops, support tickets, and
     }));
     assert.equal(restored.user.archived, false);
 
+    const bulkCoins = await json(await fetch(`${baseUrl}/admin/api/users/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({
+        action: 'grantCoins',
+        userIds: [player.user.userId],
+        amount: 75,
+        reason: 'Automated bulk coin test',
+      }),
+    }));
+    assert.equal(bulkCoins.results[0].ok, true);
+    assert.equal(bulkCoins.results[0].after, bulkCoins.results[0].before + 75);
+
+    const bulkMute = await json(await fetch(`${baseUrl}/admin/api/users/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({
+        action: 'chat_mute',
+        userIds: [player.user.userId],
+        durationMs: 60 * 60 * 1000,
+        reason: 'Automated bulk mute test',
+      }),
+    }));
+    assert.equal(bulkMute.results[0].ok, true);
+
     const relogin = await json(await fetch(`${baseUrl}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -707,6 +732,8 @@ test('admin console supports MFA login, audited player ops, support tickets, and
     assert.ok(audit.audit.some(entry => entry.action === 'admin.users.archive'));
     assert.ok(audit.audit.some(entry => entry.action === 'admin.users.restore'));
     assert.ok(audit.audit.some(entry => entry.action === 'admin.users.moderation'));
+    assert.ok(audit.audit.some(entry => entry.action === 'admin.users.bulk.grantCoins'));
+    assert.ok(audit.audit.some(entry => entry.action === 'admin.users.bulk.chat_mute'));
   }, { SEED_ADMIN_ACCOUNT: '1' });
 });
 
@@ -1745,6 +1772,41 @@ test('clubs create, search, request, approve, chat, and ignore local matches', a
     assert.equal(created.club.progression.memberCap, 15);
     assert.equal(created.user.currency.coins >= 0, true);
 
+    const bulkClubFreeze = await json(await fetch(`${baseUrl}/admin/api/clubs/bulk`, {
+      method: 'POST',
+      headers: adminHeaders(admin),
+      body: JSON.stringify({
+        action: 'freeze',
+        clubIds: [created.club.clubId],
+        reason: 'Automated bulk freeze test',
+      }),
+    }));
+    assert.equal(bulkClubFreeze.results[0].ok, true);
+    const adminClubFrozen = await json(await fetch(`${baseUrl}/admin/api/clubs/${created.club.clubId}`, { headers: adminHeaders(admin) }));
+    assert.ok(adminClubFrozen.club.adminStatus.frozenAt);
+
+    const bulkClubAnnounce = await json(await fetch(`${baseUrl}/admin/api/clubs/bulk`, {
+      method: 'POST',
+      headers: adminHeaders(admin),
+      body: JSON.stringify({
+        action: 'announce',
+        clubIds: [created.club.clubId],
+        text: 'Bulk announcement test.',
+        reason: 'Automated bulk announcement test',
+      }),
+    }));
+    assert.equal(bulkClubAnnounce.results[0].ok, true);
+
+    await json(await fetch(`${baseUrl}/admin/api/clubs/bulk`, {
+      method: 'POST',
+      headers: adminHeaders(admin),
+      body: JSON.stringify({
+        action: 'unfreeze',
+        clubIds: [created.club.clubId],
+        reason: 'Automated bulk unfreeze test',
+      }),
+    }));
+
     const searched = await json(await fetch(`${baseUrl}/clubs/search?q=Fairway`, { headers: authHeaders(member.token) }));
     assert.equal(searched.clubs.some(club => club.clubId === created.club.clubId), true);
 
@@ -1800,6 +1862,19 @@ test('clubs create, search, request, approve, chat, and ignore local matches', a
     const afterLocal = await json(await fetch(`${baseUrl}/clubs/me`, { headers: authHeaders(owner.token) }));
     assert.equal(afterLocal.club.progression.totalXp, 0);
     assert.equal(afterLocal.club.goals.weekly.every(goal => goal.progress === 0), true);
+
+    const bulkClubXp = await json(await fetch(`${baseUrl}/admin/api/clubs/bulk`, {
+      method: 'POST',
+      headers: adminHeaders(admin),
+      body: JSON.stringify({
+        action: 'adjustXp',
+        clubIds: [created.club.clubId],
+        amount: 250,
+        reason: 'Automated bulk club XP test',
+      }),
+    }));
+    assert.equal(bulkClubXp.results[0].ok, true);
+    assert.equal(bulkClubXp.results[0].after, bulkClubXp.results[0].before + 250);
 
     const socketOwner = io(baseUrl, { transports: ['websocket'], auth: { token: owner.token }, forceNew: true });
     const socketMember = io(baseUrl, { transports: ['websocket'], auth: { token: member.token }, forceNew: true });

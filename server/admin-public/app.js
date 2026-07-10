@@ -12,6 +12,9 @@ let economyClubConfig = null;
 let notificationConfig = null;
 let playerSearchResults = [];
 let playerSort = { key: 'displayName', direction: 'asc' };
+let selectedPlayerBulkIds = new Set();
+let clubSearchResults = [];
+let selectedClubBulkIds = new Set();
 let adminAccountsCache = [];
 let adminRolesCache = [];
 let mailHistory = [];
@@ -158,6 +161,7 @@ async function searchPlayers() {
   const archived = document.querySelector('#showArchivedPlayers')?.checked ? '1' : '0';
   const { users } = await api(`/users?q=${encodeURIComponent(q)}&archived=${archived}`);
   playerSearchResults = users || [];
+  selectedPlayerBulkIds = new Set();
   renderPlayerResults();
 }
 
@@ -187,10 +191,33 @@ function renderPlayerResults() {
     return;
   }
 
+  const visibleIds = visibleUsers.map(user => user.userId);
+  const selectedVisibleCount = visibleIds.filter(userId => selectedPlayerBulkIds.has(userId)).length;
+  const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
   output.innerHTML = `
+    <div class="bulk-toolbar">
+      <label class="checkline compact-check">
+        <input id="selectAllPlayers" type="checkbox" ${allVisibleSelected ? 'checked' : ''} />
+        Select visible
+      </label>
+      <span class="muted">${selectedPlayerBulkIds.size.toLocaleString()} selected</span>
+      <select id="playerBulkAction">
+        <option value="revokeSessions">Revoke sessions</option>
+        <option value="grantCoins">Grant or remove coins</option>
+        <option value="grantXp">Grant or remove XP</option>
+        <option value="chat_mute">Mute chat</option>
+        <option value="suspension">Suspend</option>
+        <option value="account_ban">Ban account</option>
+        <option value="clear_moderation">Clear moderation</option>
+        <option value="archive">Archive</option>
+        <option value="restore">Restore</option>
+      </select>
+      <button id="runPlayerBulkAction" type="button" ${selectedPlayerBulkIds.size ? '' : 'disabled'}>Apply to Players</button>
+    </div>
     <table class="admin-table player-table">
       <thead>
         <tr>
+          <th class="select-cell">Select</th>
           ${PLAYER_TABLE_COLUMNS.map(column => `
             <th class="${column.align === 'right' ? 'numeric' : ''}">
               <button type="button" class="table-sort ${playerSort.key === column.key ? 'active' : ''}" data-sort="${escapeHtml(column.key)}">
@@ -203,6 +230,7 @@ function renderPlayerResults() {
       <tbody>
         ${visibleUsers.map(user => `
           <tr data-user-id="${escapeHtml(user.userId)}" tabindex="0" class="${selectedUser?.userId === user.userId ? 'selected' : ''}">
+            <td class="select-cell"><input type="checkbox" data-select-user="${escapeHtml(user.userId)}" ${selectedPlayerBulkIds.has(user.userId) ? 'checked' : ''} aria-label="Select ${escapeHtml(user.displayName || user.userId)}" /></td>
             ${PLAYER_TABLE_COLUMNS.map(column => `
               <td class="${column.align === 'right' ? 'numeric' : ''} ${column.className || ''}">
                 ${playerCellMarkup(user, column.key)}
@@ -224,8 +252,28 @@ function renderPlayerResults() {
       renderPlayerResults();
     });
   });
+  output.querySelector('#selectAllPlayers')?.addEventListener('change', event => {
+    visibleIds.forEach(userId => {
+      if (event.currentTarget.checked) selectedPlayerBulkIds.add(userId);
+      else selectedPlayerBulkIds.delete(userId);
+    });
+    renderPlayerResults();
+  });
+  output.querySelectorAll('[data-select-user]').forEach(input => {
+    input.addEventListener('click', event => event.stopPropagation());
+    input.addEventListener('change', event => {
+      const userId = event.currentTarget.dataset.selectUser;
+      if (event.currentTarget.checked) selectedPlayerBulkIds.add(userId);
+      else selectedPlayerBulkIds.delete(userId);
+      renderPlayerResults();
+    });
+  });
+  output.querySelector('#runPlayerBulkAction')?.addEventListener('click', runPlayerBulkAction);
   output.querySelectorAll('[data-user-id]').forEach(row => {
-    row.addEventListener('click', () => loadUser(row.dataset.userId));
+    row.addEventListener('click', event => {
+      if (event.target.closest('input, button, select')) return;
+      loadUser(row.dataset.userId);
+    });
     row.addEventListener('keydown', event => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
@@ -233,6 +281,47 @@ function renderPlayerResults() {
       }
     });
   });
+}
+
+async function runPlayerBulkAction() {
+  const userIds = [...selectedPlayerBulkIds];
+  if (!userIds.length) return;
+  const action = document.querySelector('#playerBulkAction')?.value || 'revokeSessions';
+  const labels = {
+    revokeSessions: 'revoke sessions for',
+    grantCoins: 'adjust coins for',
+    grantXp: 'adjust XP for',
+    chat_mute: 'mute chat for',
+    suspension: 'suspend',
+    account_ban: 'ban',
+    clear_moderation: 'clear moderation for',
+    archive: 'archive',
+    restore: 'restore',
+  };
+  if (!confirm(`Bulk ${labels[action] || action} ${userIds.length} selected player${userIds.length === 1 ? '' : 's'}?`)) return;
+  const reason = prompt('Reason for audit log');
+  if (!reason) return;
+  const payload = { action, userIds, reason };
+  if (action === 'grantCoins' || action === 'grantXp') {
+    const amount = Number(prompt(action === 'grantCoins' ? 'Coin amount, e.g. 500 or -250' : 'XP amount, e.g. 500 or -250', '500'));
+    if (!Number.isFinite(amount) || amount === 0) return alert('Enter a non-zero amount.');
+    payload.amount = amount;
+  }
+  if (action === 'chat_mute' || action === 'suspension') {
+    const hours = Number(prompt('Duration hours', '24'));
+    payload.durationMs = Math.max(1, Number.isFinite(hours) ? hours : 24) * 60 * 60 * 1000;
+  }
+  try {
+    const result = await api('/users/bulk', { method: 'POST', body: JSON.stringify(payload) });
+    const ok = (result.results || []).filter(item => item.ok).length;
+    const failed = (result.results || []).length - ok;
+    status(`Bulk player action complete: ${ok} succeeded${failed ? `, ${failed} failed` : ''}.`, failed ? 'error' : 'ok');
+    selectedPlayerBulkIds = new Set();
+    await searchPlayers();
+    if (selectedUser) loadUser(selectedUser.userId).catch(() => null);
+  } catch (error) {
+    alert(error.message);
+  }
 }
 
 function highlightSelectedPlayerRow(userId) {
@@ -1504,24 +1593,149 @@ function fileToBase64(file) {
 async function loadClubs() {
   const q = document.querySelector('#clubSearch').value.trim();
   const { clubs } = await api(`/clubs?q=${encodeURIComponent(q)}`);
+  clubSearchResults = clubs || [];
+  selectedClubBulkIds = new Set();
+  renderClubResults();
+}
+
+function renderClubResults() {
   const output = document.querySelector('#clubsOutput');
-  output.replaceChildren(...clubs.map(club => {
-    const card = document.createElement('button');
-    card.className = 'card ghost';
-    card.innerHTML = `
-      <strong>${escapeHtml(club.name)} [${escapeHtml(club.tag)}]</strong>
-      <p class="muted">${escapeHtml(club.clubId)} - Owner: ${escapeHtml(club.ownerName)}</p>
-      <div class="statline">
-        <span class="chip">Lv ${club.level}</span>
-        <span class="chip">${club.memberCount}/${club.memberCap} members</span>
-        <span class="chip">${club.requestCount} requests</span>
-        <span class="chip">Event ${club.eventScore}</span>
-        ${club.adminStatus?.frozenAt ? '<span class="chip danger-chip">Frozen</span>' : ''}
-      </div>
-    `;
-    card.addEventListener('click', () => loadClub(club.clubId));
-    return card;
-  }));
+  if (!clubSearchResults.length) {
+    output.innerHTML = '<div class="empty-state">No matching clubs found.</div>';
+    return;
+  }
+  const visibleIds = clubSearchResults.map(club => club.clubId);
+  const selectedVisibleCount = visibleIds.filter(clubId => selectedClubBulkIds.has(clubId)).length;
+  const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+  output.innerHTML = `
+    <div class="bulk-toolbar">
+      <label class="checkline compact-check">
+        <input id="selectAllClubs" type="checkbox" ${allVisibleSelected ? 'checked' : ''} />
+        Select visible
+      </label>
+      <span class="muted">${selectedClubBulkIds.size.toLocaleString()} selected</span>
+      <select id="clubBulkAction">
+        <option value="freeze">Freeze clubs</option>
+        <option value="unfreeze">Unfreeze clubs</option>
+        <option value="adjustXp">Adjust club XP</option>
+        <option value="announce">Post announcement</option>
+        <option value="rewardGrant">Grant reward</option>
+        <option value="rewardRevoke">Revoke reward</option>
+      </select>
+      <button id="runClubBulkAction" type="button" ${selectedClubBulkIds.size ? '' : 'disabled'}>Apply to Clubs</button>
+    </div>
+    <table class="admin-table club-table">
+      <thead>
+        <tr>
+          <th class="select-cell">Select</th>
+          <th>Club</th>
+          <th>Owner</th>
+          <th class="numeric">Level</th>
+          <th class="numeric">Members</th>
+          <th class="numeric">Treasury</th>
+          <th class="numeric">Requests</th>
+          <th class="numeric">Event</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${clubSearchResults.map(club => `
+          <tr data-club-id="${escapeHtml(club.clubId)}" tabindex="0" class="${selectedClub?.clubId === club.clubId ? 'selected' : ''}">
+            <td class="select-cell"><input type="checkbox" data-select-club="${escapeHtml(club.clubId)}" ${selectedClubBulkIds.has(club.clubId) ? 'checked' : ''} aria-label="Select ${escapeHtml(club.name)}" /></td>
+            <td class="primary-cell"><strong>${escapeHtml(club.name)} [${escapeHtml(club.tag)}]</strong><br /><span class="muted mono-text">${escapeHtml(club.clubId)}</span></td>
+            <td>${escapeHtml(club.ownerName || 'No owner')}</td>
+            <td class="numeric">${Number(club.level || 1).toLocaleString()}</td>
+            <td class="numeric">${Number(club.memberCount || 0).toLocaleString()} / ${Number(club.memberCap || 0).toLocaleString()}</td>
+            <td class="numeric">${Number(club.treasury?.coins || 0).toLocaleString()}</td>
+            <td class="numeric">${Number(club.requestCount || 0).toLocaleString()}</td>
+            <td class="numeric">${Number(club.eventScore || 0).toLocaleString()}</td>
+            <td>${club.adminStatus?.frozenAt ? '<span class="status-pill danger-pill">Frozen</span>' : '<span class="status-pill ok-pill">Active</span>'}</td>
+            <td><button type="button" class="ghost" data-open-club="${escapeHtml(club.clubId)}">Details</button></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+  output.querySelector('#selectAllClubs')?.addEventListener('change', event => {
+    visibleIds.forEach(clubId => {
+      if (event.currentTarget.checked) selectedClubBulkIds.add(clubId);
+      else selectedClubBulkIds.delete(clubId);
+    });
+    renderClubResults();
+  });
+  output.querySelectorAll('[data-select-club]').forEach(input => {
+    input.addEventListener('click', event => event.stopPropagation());
+    input.addEventListener('change', event => {
+      const clubId = event.currentTarget.dataset.selectClub;
+      if (event.currentTarget.checked) selectedClubBulkIds.add(clubId);
+      else selectedClubBulkIds.delete(clubId);
+      renderClubResults();
+    });
+  });
+  output.querySelector('#runClubBulkAction')?.addEventListener('click', runClubBulkAction);
+  output.querySelectorAll('[data-open-club]').forEach(button => {
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      loadClub(button.dataset.openClub);
+    });
+  });
+  output.querySelectorAll('[data-club-id]').forEach(row => {
+    row.addEventListener('click', event => {
+      if (event.target.closest('input, button, select')) return;
+      loadClub(row.dataset.clubId);
+    });
+    row.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        loadClub(row.dataset.clubId);
+      }
+    });
+  });
+}
+
+async function runClubBulkAction() {
+  const clubIds = [...selectedClubBulkIds];
+  if (!clubIds.length) return;
+  const action = document.querySelector('#clubBulkAction')?.value || 'freeze';
+  const labels = {
+    freeze: 'freeze',
+    unfreeze: 'unfreeze',
+    adjustXp: 'adjust XP for',
+    announce: 'post an announcement to',
+    rewardGrant: 'grant a reward to',
+    rewardRevoke: 'revoke a reward from',
+  };
+  if (!confirm(`Bulk ${labels[action] || action} ${clubIds.length} selected club${clubIds.length === 1 ? '' : 's'}?`)) return;
+  const reason = prompt('Reason for audit log');
+  if (!reason) return;
+  const payload = { action, clubIds, reason };
+  if (action === 'adjustXp') {
+    const amount = Number(prompt('Club XP amount, e.g. 500 or -250', '500'));
+    if (!Number.isFinite(amount) || amount === 0) return alert('Enter a non-zero amount.');
+    payload.amount = amount;
+  }
+  if (action === 'announce') {
+    const text = prompt('Announcement text');
+    if (!text) return;
+    payload.text = text;
+  }
+  if (action === 'rewardGrant' || action === 'rewardRevoke') {
+    const rewardId = prompt('Reward id');
+    if (!rewardId) return;
+    payload.rewardId = rewardId;
+  }
+  try {
+    const result = await api('/clubs/bulk', { method: 'POST', body: JSON.stringify(payload) });
+    const ok = (result.results || []).filter(item => item.ok).length;
+    const failed = (result.results || []).length - ok;
+    status(`Bulk club action complete: ${ok} succeeded${failed ? `, ${failed} failed` : ''}.`, failed ? 'error' : 'ok');
+    selectedClubBulkIds = new Set();
+    await loadClubs();
+    if (selectedClub) loadClub(selectedClub.clubId).catch(() => null);
+  } catch (error) {
+    alert(error.message);
+  }
 }
 
 async function loadClub(clubId) {

@@ -131,6 +131,7 @@ import {
   createSupportTicket,
   disableInviteCode,
   ensureBootstrapAdmin,
+  adminHasPermission,
   loginAdmin,
   normalizeAdminStore,
   normalizeUserAdminFields,
@@ -2852,6 +2853,143 @@ app.get('/admin/api/users', requireAdmin(adminStore, 'users:read'), (req, res) =
   return res.json({ users: adminUserList(users, rankedSeason, req.query.q, rankedConfig(), { archived: req.query.archived === '1' }) });
 });
 
+function bulkAdminTargets(rawIds, finder) {
+  const ids = [...new Set((Array.isArray(rawIds) ? rawIds : [])
+    .map(value => String(value || '').trim())
+    .filter(Boolean))].slice(0, 250);
+  return ids.map(id => {
+    const target = finder(id);
+    return target ? { id, target } : { id, error: 'Not found.' };
+  });
+}
+
+function bulkActionResult(id, target, extra = {}) {
+  return { id, ok: true, userId: target?.userId, clubId: target?.clubId, name: target?.displayName || target?.name || '', ...extra };
+}
+
+app.post('/admin/api/users/bulk', requireAdmin(adminStore), (req, res) => {
+  const action = String(req.body?.action || '').trim();
+  const reason = cleanAdminReason(req.body?.reason);
+  const permissionByAction = {
+    revokeSessions: 'users:write',
+    archive: 'users:write',
+    restore: 'users:write',
+    grantCoins: 'economy:write',
+    grantXp: 'economy:write',
+    chat_mute: 'moderation:write',
+    suspension: 'moderation:write',
+    account_ban: 'moderation:write',
+    clear_moderation: 'moderation:write',
+  };
+  const requiredPermission = permissionByAction[action];
+  if (!requiredPermission) return res.status(400).json({ error: 'Unsupported bulk player action.' });
+  if (!adminHasPermission(req.admin.admin, requiredPermission)) return res.status(403).json({ error: 'Admin permission denied.' });
+  if (!reason) return res.status(400).json({ error: 'Reason is required.' });
+
+  const targets = bulkAdminTargets(req.body?.userIds, findUserByIdentifier);
+  if (!targets.length) return res.status(400).json({ error: 'Select at least one player.' });
+  const amount = Math.trunc(Number(req.body?.amount) || 0);
+  const durationMs = Math.max(0, Math.trunc(Number(req.body?.durationMs) || 0));
+  if ((action === 'grantCoins' || action === 'grantXp') && (!Number.isFinite(amount) || amount === 0)) {
+    return res.status(400).json({ error: 'Bulk amount is required.' });
+  }
+
+  const resultsOut = [];
+  for (const item of targets) {
+    if (item.error) {
+      resultsOut.push({ id: item.id, ok: false, error: item.error });
+      continue;
+    }
+    const user = item.target;
+    try {
+      if (action === 'revokeSessions') {
+        resultsOut.push(bulkActionResult(item.id, user, { revoked: revokeUserSessions(user.userId) }));
+      } else if (action === 'archive') {
+        normalizeUserAdminFields(user);
+        const wasArchived = isUserArchived(user);
+        const timestamp = Date.now();
+        user.adminArchive.archivedAt = timestamp;
+        user.adminArchive.archivedBy = req.admin.admin.adminId;
+        user.adminArchive.archivedByName = req.admin.admin.displayName;
+        user.adminArchive.archiveReason = reason;
+        user.adminArchive.restoredAt = null;
+        user.adminArchive.restoredBy = null;
+        user.adminArchive.restoredByName = null;
+        user.adminArchive.restoreReason = null;
+        const revokedSessions = revokeUserSessions(user.userId);
+        normalizePushNotifications(user).tokens = [];
+        rankedQueue.delete(user.userId);
+        io.to(`user:${user.userId}`).emit('account:archived', { archivedAt: user.adminArchive.archivedAt });
+        resultsOut.push(bulkActionResult(item.id, user, { wasArchived, revokedSessions }));
+      } else if (action === 'restore') {
+        normalizeUserAdminFields(user);
+        const wasArchived = isUserArchived(user);
+        const timestamp = Date.now();
+        user.adminArchive.restoredAt = timestamp;
+        user.adminArchive.restoredBy = req.admin.admin.adminId;
+        user.adminArchive.restoredByName = req.admin.admin.displayName;
+        user.adminArchive.restoreReason = reason;
+        resultsOut.push(bulkActionResult(item.id, user, { wasArchived }));
+      } else if (action === 'grantCoins') {
+        user.currency ||= { coins: 0, lifetimeCoins: 0 };
+        const before = user.currency.coins || 0;
+        user.currency.coins = Math.max(0, before + amount);
+        if (amount > 0) user.currency.lifetimeCoins = Math.max(user.currency.lifetimeCoins || 0, user.currency.coins);
+        resultsOut.push(bulkActionResult(item.id, user, { before, after: user.currency.coins }));
+      } else if (action === 'grantXp') {
+        normalizeUserRecord(user);
+        const before = { ...user.progression };
+        user.progression = { totalXp: Math.max(0, before.totalXp + amount) };
+        normalizeUserRecord(user);
+        resultsOut.push(bulkActionResult(item.id, user, { before, after: user.progression }));
+      } else {
+        user.moderation ||= {};
+        if (action === 'clear_moderation') {
+          user.moderation = { accountBannedAt: null, suspendedUntil: null, chatMutedUntil: null, reason: '', updatedAt: Date.now() };
+          for (const ban of adminStore.bans) {
+            if (ban.userId === user.userId) ban.revokedAt = Date.now();
+          }
+        } else if (action === 'chat_mute') {
+          user.moderation.chatMutedUntil = Date.now() + (durationMs || 24 * 60 * 60 * 1000);
+        } else if (action === 'suspension') {
+          user.moderation.suspendedUntil = Date.now() + (durationMs || 24 * 60 * 60 * 1000);
+        } else if (action === 'account_ban') {
+          user.moderation.accountBannedAt = Date.now();
+        }
+        if (action !== 'clear_moderation') {
+          user.moderation.reason = reason;
+          user.moderation.updatedAt = Date.now();
+          adminStore.bans.push({
+            banId: crypto.randomUUID(),
+            type: action,
+            userId: user.userId,
+            deviceHash: null,
+            reason,
+            createdAt: Date.now(),
+            expiresAt: durationMs ? Date.now() + durationMs : null,
+            revokedAt: null,
+            createdBy: req.admin.admin.adminId,
+          });
+        }
+        resultsOut.push(bulkActionResult(item.id, user));
+      }
+    } catch (error) {
+      resultsOut.push({ id: item.id, ok: false, userId: user.userId, name: user.displayName, error: error.message });
+    }
+  }
+
+  writeAudit(adminStore, req, req.admin.admin, `admin.users.bulk.${action}`, {}, {
+    reason,
+    requested: targets.length,
+    succeeded: resultsOut.filter(item => item.ok).length,
+    failed: resultsOut.filter(item => !item.ok).length,
+    amount: action === 'grantCoins' || action === 'grantXp' ? amount : undefined,
+    durationMs: durationMs || undefined,
+  });
+  saveStore();
+  return res.json({ ok: true, results: resultsOut });
+});
+
 app.get('/admin/api/users/:userId', requireAdmin(adminStore, 'users:read'), (req, res) => {
   const user = findUserByIdentifier(req.params.userId);
   if (!user) return res.status(404).json({ error: 'Player not found.' });
@@ -3409,6 +3547,81 @@ app.delete('/admin/api/competitive/queues/:userId', requireAdmin(adminStore, 'co
 
 app.get('/admin/api/rooms', requireAdmin(adminStore, 'metrics:read'), (_req, res) => res.json({ rooms: [...rooms.values()].map(roomSummary) }));
 app.get('/admin/api/clubs', requireAdmin(adminStore, 'metrics:read'), (req, res) => res.json({ clubs: adminClubSummaries(req.query.q) }));
+
+app.post('/admin/api/clubs/bulk', requireAdmin(adminStore, 'clubs:write'), (req, res) => {
+  const action = String(req.body?.action || '').trim();
+  const reason = requireClubAdminReason(req, res);
+  if (!reason) return;
+  const supported = new Set(['freeze', 'unfreeze', 'adjustXp', 'announce', 'rewardGrant', 'rewardRevoke']);
+  if (!supported.has(action)) return res.status(400).json({ error: 'Unsupported bulk club action.' });
+  const targets = bulkAdminTargets(req.body?.clubIds, id => clubs.get(String(id || '')));
+  if (!targets.length) return res.status(400).json({ error: 'Select at least one club.' });
+  const amount = Math.trunc(Number(req.body?.amount) || 0);
+  const rewardId = String(req.body?.rewardId || '').trim();
+  const text = String(req.body?.text || '').replace(/\s+/g, ' ').trim().slice(0, 280);
+  if (action === 'adjustXp' && (!Number.isFinite(amount) || amount === 0)) return res.status(400).json({ error: 'XP adjustment amount is required.' });
+  if ((action === 'rewardGrant' || action === 'rewardRevoke') && !rewardId) return res.status(400).json({ error: 'Reward id is required.' });
+  if (action === 'announce' && !text) return res.status(400).json({ error: 'Announcement text is required.' });
+
+  const resultsOut = [];
+  for (const item of targets) {
+    if (item.error) {
+      resultsOut.push({ id: item.id, ok: false, error: item.error });
+      continue;
+    }
+    const club = item.target;
+    try {
+      if (action === 'freeze' || action === 'unfreeze') {
+        club.adminStatus ||= { frozenAt: null, frozenReason: '', disbandedAt: null };
+        if (action === 'unfreeze') {
+          club.adminStatus.frozenAt = null;
+          club.adminStatus.frozenReason = '';
+        } else {
+          club.adminStatus.frozenAt = Date.now();
+          club.adminStatus.frozenReason = reason;
+        }
+      }
+      if (action === 'adjustXp') {
+        const before = club.progression?.totalXp || 0;
+        club.progression ||= { totalXp: 0 };
+        club.progression.totalXp = Math.max(0, before + amount);
+        resultsOut.push(bulkActionResult(item.id, club, { before, after: club.progression.totalXp }));
+      } else if (action === 'announce') {
+        const announcement = {
+          id: crypto.randomUUID(),
+          authorUserId: req.admin.admin.adminId,
+          authorName: `Admin: ${req.admin.admin.displayName}`,
+          text,
+          createdAt: Date.now(),
+        };
+        club.announcements ||= [];
+        club.announcements.push(announcement);
+        resultsOut.push(bulkActionResult(item.id, club, { announcementId: announcement.id }));
+      } else if (action === 'rewardGrant' || action === 'rewardRevoke') {
+        club.rewards ||= { unlocked: [], memberClaims: {} };
+        if (action === 'rewardGrant' && !club.rewards.unlocked.includes(rewardId)) club.rewards.unlocked.push(rewardId);
+        if (action === 'rewardRevoke') club.rewards.unlocked = club.rewards.unlocked.filter(id => id !== rewardId);
+        resultsOut.push(bulkActionResult(item.id, club, { rewardId }));
+      } else {
+        resultsOut.push(bulkActionResult(item.id, club));
+      }
+      club.updatedAt = Date.now();
+      normalizeClub(club, Date.now(), rankedSeason);
+    } catch (error) {
+      resultsOut.push({ id: item.id, ok: false, clubId: club.clubId, name: club.name, error: error.message });
+    }
+  }
+  writeAudit(adminStore, req, req.admin.admin, `admin.clubs.bulk.${action}`, {}, {
+    reason,
+    requested: targets.length,
+    succeeded: resultsOut.filter(item => item.ok).length,
+    failed: resultsOut.filter(item => !item.ok).length,
+    amount: action === 'adjustXp' ? amount : undefined,
+    rewardId: rewardId || undefined,
+  });
+  saveStore();
+  return res.json({ ok: true, results: resultsOut });
+});
 
 app.get('/admin/api/clubs/:clubId', requireAdmin(adminStore, 'metrics:read'), (req, res) => {
   const club = clubs.get(String(req.params.clubId || ''));
