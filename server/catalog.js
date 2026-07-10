@@ -3,7 +3,6 @@ import fs from 'fs';
 import path from 'path';
 import { COSMETIC_CATALOG } from './progression.js';
 
-const MAX_ASSET_BYTES = 2 * 1024 * 1024;
 const VALID_TYPES = new Set(['cardBack', 'avatarFrame', 'avatarIcon', 'avatarAccessory', 'title', 'tableTheme']);
 const VALID_CATEGORIES = new Set(['starter', 'coin', 'ranked', 'club', 'event']);
 const VALID_RARITIES = new Set(['starter', 'common', 'rare', 'epic', 'legendary']);
@@ -12,6 +11,43 @@ const IMAGE_MIME_EXT = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
   'image/webp': 'webp',
+};
+const CATALOG_ASSET_SPECS = {
+  avatarIcon: {
+    width: 512,
+    height: 512,
+    maxBytes: 2 * 1024 * 1024,
+    mimeTypes: ['image/png', 'image/webp'],
+    label: 'Avatar Icon',
+  },
+  avatarFrame: {
+    width: 512,
+    height: 512,
+    maxBytes: 2 * 1024 * 1024,
+    mimeTypes: ['image/png', 'image/webp'],
+    label: 'Avatar Frame',
+  },
+  avatarAccessory: {
+    width: 512,
+    height: 512,
+    maxBytes: 2 * 1024 * 1024,
+    mimeTypes: ['image/png', 'image/webp'],
+    label: 'Avatar Accessory',
+  },
+  cardBack: {
+    width: 512,
+    height: 768,
+    maxBytes: 2 * 1024 * 1024,
+    mimeTypes: ['image/png', 'image/webp'],
+    label: 'Card Back',
+  },
+  tableTheme: {
+    width: 1024,
+    height: 1024,
+    maxBytes: 4 * 1024 * 1024,
+    mimeTypes: ['image/png', 'image/webp', 'image/jpeg'],
+    label: 'Table Theme',
+  },
 };
 const LEGACY_RANK_REQUIREMENTS = new Map([
   ['s1-bronze-frame', 0],
@@ -50,6 +86,18 @@ function normalizeVisual(input = {}, type = 'cardBack') {
   return result;
 }
 
+export function catalogAssetRequirements() {
+  return Object.fromEntries(Object.entries(CATALOG_ASSET_SPECS).map(([type, spec]) => [type, {
+    type,
+    label: spec.label,
+    width: spec.width,
+    height: spec.height,
+    maxBytes: spec.maxBytes,
+    maxMb: Math.round((spec.maxBytes / (1024 * 1024)) * 10) / 10,
+    mimeTypes: spec.mimeTypes,
+  }]));
+}
+
 export function normalizeCatalogItem(input = {}, fallback = null, createdAt = now()) {
   const id = cleanId(input.id || fallback?.id || crypto.randomUUID());
   const type = VALID_TYPES.has(input.type) ? input.type : VALID_TYPES.has(fallback?.type) ? fallback.type : 'cardBack';
@@ -80,6 +128,9 @@ export function normalizeCatalogItem(input = {}, fallback = null, createdAt = no
       url: cleanText(input.asset.url, 240),
       mimeType: cleanText(input.asset.mimeType, 80),
       originalName: cleanText(input.asset.originalName, 120),
+      width: Number(input.asset.width) || null,
+      height: Number(input.asset.height) || null,
+      byteSize: Number(input.asset.byteSize) || null,
       uploadedAt: Number(input.asset.uploadedAt) || createdAt,
     } : fallback?.asset || null,
     createdAt: Number(input.createdAt ?? fallback?.createdAt ?? createdAt) || createdAt,
@@ -228,13 +279,73 @@ export function rollbackCatalog(store, versionId) {
   return { cosmetics: draftCatalog(store), version };
 }
 
+function pngSize(bytes) {
+  if (bytes.length < 24) return null;
+  if (bytes.toString('ascii', 1, 4) !== 'PNG') return null;
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+}
+
+function jpegSize(bytes) {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  let offset = 2;
+  while (offset + 9 < bytes.length) {
+    if (bytes[offset] !== 0xff) return null;
+    const marker = bytes[offset + 1];
+    offset += 2;
+    if (marker === 0xd8 || marker === 0xd9) continue;
+    const length = bytes.readUInt16BE(offset);
+    if (length < 2 || offset + length > bytes.length) return null;
+    if (marker >= 0xc0 && marker <= 0xc3) {
+      return { width: bytes.readUInt16BE(offset + 5), height: bytes.readUInt16BE(offset + 3) };
+    }
+    offset += length;
+  }
+  return null;
+}
+
+function webpSize(bytes) {
+  if (bytes.length < 30 || bytes.toString('ascii', 0, 4) !== 'RIFF' || bytes.toString('ascii', 8, 12) !== 'WEBP') return null;
+  const chunk = bytes.toString('ascii', 12, 16);
+  if (chunk === 'VP8X' && bytes.length >= 30) {
+    return {
+      width: 1 + bytes.readUIntLE(24, 3),
+      height: 1 + bytes.readUIntLE(27, 3),
+    };
+  }
+  if (chunk === 'VP8 ' && bytes.length >= 30) {
+    return {
+      width: bytes.readUInt16LE(26) & 0x3fff,
+      height: bytes.readUInt16LE(28) & 0x3fff,
+    };
+  }
+  if (chunk === 'VP8L' && bytes.length >= 25) {
+    const bits = bytes.readUInt32LE(21);
+    return {
+      width: (bits & 0x3fff) + 1,
+      height: ((bits >> 14) & 0x3fff) + 1,
+    };
+  }
+  return null;
+}
+
+function imageSizeFor(bytes, mimeType) {
+  if (mimeType === 'image/png') return pngSize(bytes);
+  if (mimeType === 'image/jpeg') return jpegSize(bytes);
+  if (mimeType === 'image/webp') return webpSize(bytes);
+  return null;
+}
+
 export function uploadCatalogAsset(store, uploadRoot, publicBaseUrl, cosmeticId, payload = {}) {
   normalizeCatalogStore(store);
   const item = store.draft.find(entry => entry.id === cosmeticId);
   if (!item) return { error: 'Catalog item not found.' };
+  const spec = CATALOG_ASSET_SPECS[item.type];
+  if (!spec) return { error: `${item.type} does not support image asset uploads yet.` };
   const mimeType = cleanText(payload.mimeType, 80);
   const ext = IMAGE_MIME_EXT[mimeType];
-  if (!ext) return { error: 'Asset must be a PNG, JPEG, or WebP image.' };
+  if (!ext || !spec.mimeTypes.includes(mimeType)) {
+    return { error: `${spec.label} assets must be ${spec.mimeTypes.map(type => type.replace('image/', '').toUpperCase()).join(' or ')} images.` };
+  }
   const base64 = String(payload.data || '').replace(/^data:[^;]+;base64,/, '');
   let bytes;
   try {
@@ -242,7 +353,14 @@ export function uploadCatalogAsset(store, uploadRoot, publicBaseUrl, cosmeticId,
   } catch {
     return { error: 'Asset data is not valid base64.' };
   }
-  if (!bytes.length || bytes.length > MAX_ASSET_BYTES) return { error: 'Asset must be between 1 byte and 2 MB.' };
+  if (!bytes.length || bytes.length > spec.maxBytes) {
+    return { error: `${spec.label} assets must be between 1 byte and ${Math.round(spec.maxBytes / (1024 * 1024))} MB.` };
+  }
+  const size = imageSizeFor(bytes, mimeType);
+  if (!size) return { error: 'Asset dimensions could not be read. Try a different exported image.' };
+  if (size.width !== spec.width || size.height !== spec.height) {
+    return { error: `${spec.label} assets must be exactly ${spec.width}x${spec.height}px. This image is ${size.width}x${size.height}px.` };
+  }
   const safeId = cleanId(cosmeticId);
   const dir = path.join(uploadRoot, safeId);
   fs.mkdirSync(dir, { recursive: true });
@@ -253,6 +371,9 @@ export function uploadCatalogAsset(store, uploadRoot, publicBaseUrl, cosmeticId,
     url: `${publicBaseUrl}/${safeId}/${fileName}`,
     mimeType,
     originalName: cleanText(payload.originalName || fileName, 120),
+    width: size.width,
+    height: size.height,
+    byteSize: bytes.length,
     uploadedAt: now(),
   };
   item.updatedAt = now();

@@ -46,6 +46,7 @@ import {
   duplicateDraftCatalogItem,
   liveCatalog,
   normalizeCatalogStore,
+  catalogAssetRequirements,
   publishCatalog,
   rollbackCatalog,
   saveDraftCatalogItem,
@@ -133,6 +134,7 @@ import {
   loginAdmin,
   normalizeAdminStore,
   normalizeUserAdminFields,
+  isUserArchived,
   requireAdmin,
   requestAdminPasswordRecovery,
   resetAdminPassword,
@@ -147,6 +149,17 @@ import {
   verifyAdminMfa,
   writeAudit,
 } from './admin.js';
+import {
+  adminMailLog,
+  claimMailForUser,
+  cleanFeedbackPayload,
+  createSystemMail,
+  deleteMailForUser,
+  mailEntriesForUser,
+  mailSummaryForUser,
+  markMailRead,
+  normalizeMailEntries,
+} from './mail.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DATA_DIR = path.join(__dirname, 'data');
@@ -179,7 +192,7 @@ const ADMIN_SMTP_PORT = Number(process.env.ADMIN_SMTP_PORT || 587);
 const ADMIN_SMTP_USER = String(process.env.ADMIN_SMTP_USER || '').trim();
 const ADMIN_SMTP_PASS = String(process.env.ADMIN_SMTP_PASS || '').trim();
 const ADMIN_SMTP_FROM = String(process.env.ADMIN_SMTP_FROM || process.env.ADMIN_BOOTSTRAP_EMAIL || '').trim();
-const ADMIN_SMTP_SECURE = process.env.ADMIN_SMTP_SECURE === '1';
+const ADMIN_SMTP_SECURE = ['1', 'true', 'yes'].includes(String(process.env.ADMIN_SMTP_SECURE || '').trim().toLowerCase());
 const adminEmailTestOutbox = [];
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const ROOM_TTL_MS = 1000 * 60 * 60 * 2;
@@ -238,7 +251,7 @@ const ROOM_INVITE_TTL_MS = 1000 * 60 * 30;
 const SOCIAL_RECENT_LIMIT = 20;
 const CLUB_CHAT_RATE_LIMIT_MS = 1000;
 const MAX_PUSH_TOKENS_PER_USER = 12;
-const PUSH_TEMPLATE_KEYS = ['turn', 'dailyBonus', 'roomInvite', 'friendRequest'];
+const PUSH_TEMPLATE_KEYS = ['turn', 'dailyBonus', 'roomInvite', 'friendRequest', 'mail'];
 const DEFAULT_NOTIFICATION_CONFIG = {
   enabled: true,
   types: {
@@ -261,6 +274,11 @@ const DEFAULT_NOTIFICATION_CONFIG = {
       enabled: true,
       title: 'New friend request',
       body: '{fromDisplayName} wants to connect on Golf 9.',
+    },
+    mail: {
+      enabled: true,
+      title: 'New Golf 9 mail',
+      body: '{title}',
     },
   },
   custom: {
@@ -351,6 +369,8 @@ const userSockets = new Map();
 const rankedQueue = new Map();
 /** @type {Map<string, any>} */
 const clubs = new Map();
+/** @type {Array<any>} */
+const mailEntries = [];
 /** @type {Map<string, number>} */
 const clubChatRate = new Map();
 const competitiveStore = normalizeCompetitiveConfigStore({});
@@ -726,7 +746,7 @@ async function sendQueuedPush(user, payload) {
 
 function queuePushToUser(userId, payload) {
   const user = users.get(userId);
-  if (!user) return false;
+  if (!visiblePlayer(user)) return false;
   const push = normalizePushNotifications(user);
   if (!push.tokens.length) return false;
   const keyName = payload.keyName || payload.type || 'notification';
@@ -759,7 +779,7 @@ function queueAdminCustomPush({ title, body, targetUserId = null, data = {} } = 
   const safeTitle = cleanPushText(title, 80);
   const safeBody = cleanPushText(body, 180);
   if (!safeTitle || !safeBody) return { error: 'Title and message are required.' };
-  const targets = targetUserId ? [users.get(targetUserId)].filter(Boolean) : [...users.values()];
+  const targets = targetUserId ? [users.get(targetUserId)].filter(visiblePlayer) : activePlayerAccounts();
   let queued = 0;
   for (const user of targets) {
     if (queuePushToUser(user.userId, {
@@ -814,6 +834,7 @@ function applyStoreState(parsed = {}) {
   users.clear();
   sessions.clear();
   results.splice(0, results.length);
+  mailEntries.splice(0, mailEntries.length);
   clubs.clear();
   normalizeCatalogStore(Object.assign(catalogStore, parsed.catalog || {}));
   seedCatalogStore(catalogStore);
@@ -839,6 +860,7 @@ function applyStoreState(parsed = {}) {
     if (session.expiresAt > Date.now()) sessions.set(session.token, session);
   }
   results.push(...(parsed.results || []));
+  mailEntries.push(...normalizeMailEntries(parsed.mailEntries || []));
   reconcileClubMemberships();
 }
 
@@ -866,6 +888,7 @@ function storeSnapshot() {
     users: [...users.values()],
     sessions: [...sessions.values()],
     results,
+    mailEntries: normalizeMailEntries(mailEntries),
     rankedSeason,
     competitiveConfig: competitiveStore,
     economyConfig: economyStore,
@@ -1397,7 +1420,7 @@ function publicViewedProfile(viewer, target) {
 
 function publicRequest(viewer, request, direction) {
   const target = users.get(request.userId);
-  if (!target) return null;
+  if (!visiblePlayer(target)) return null;
   return {
     id: request.id,
     createdAt: request.createdAt,
@@ -1419,7 +1442,7 @@ function pruneRoomInvites(user, now = Date.now()) {
 function publicRoomInvite(viewer, invite) {
   const room = rooms.get(invite.roomCode);
   const from = users.get(invite.fromUserId);
-  if (!room || !from) return null;
+  if (!room || !visiblePlayer(from)) return null;
   return {
     id: invite.id,
     roomCode: invite.roomCode,
@@ -1436,7 +1459,7 @@ function recentPlayersFor(user) {
     const current = result.players.find(player => player.userId === user.userId);
     if (!current) continue;
     for (const player of result.players) {
-      if (player.userId === user.userId || !users.has(player.userId) || seen.has(player.userId)) continue;
+      if (player.userId === user.userId || !visiblePlayer(users.get(player.userId)) || seen.has(player.userId)) continue;
       seen.set(player.userId, {
         completedAt: result.completedAt,
         matchType: result.matchType || result.mode || 'casual',
@@ -1461,7 +1484,7 @@ function socialSummary(user) {
     friends: user.social.friends
       .map(friend => {
         const target = users.get(friend.userId);
-        return target ? publicPlayerCard(user, target, { since: friend.since }) : null;
+        return visiblePlayer(target) ? publicPlayerCard(user, target, { since: friend.since }) : null;
       })
       .filter(Boolean),
     incomingRequests: user.social.incomingRequests.map(request => publicRequest(user, request, 'incoming')).filter(Boolean),
@@ -1737,6 +1760,25 @@ function createSession(userId) {
   sessions.set(token, session);
   saveStore();
   return session;
+}
+
+function visiblePlayer(user) {
+  return !!user && !isUserArchived(user);
+}
+
+function activePlayerAccounts() {
+  return [...users.values()].filter(visiblePlayer);
+}
+
+function revokeUserSessions(userId) {
+  let revoked = 0;
+  sessions.forEach((session, token) => {
+    if (session.userId === userId) {
+      sessions.delete(token);
+      revoked += 1;
+    }
+  });
+  return revoked;
 }
 
 function authenticateToken(token) {
@@ -2805,9 +2847,9 @@ app.post('/admin/api/admins/:adminId/sessions/revoke', requireAdmin(adminStore, 
 });
 
 app.get('/admin/api/users', requireAdmin(adminStore, 'users:read'), (req, res) => {
-  writeAudit(adminStore, req, req.admin.admin, 'admin.users.search', {}, { query: String(req.query.q || '') });
+  writeAudit(adminStore, req, req.admin.admin, 'admin.users.search', {}, { query: String(req.query.q || ''), archived: req.query.archived === '1' });
   saveStore();
-  return res.json({ users: adminUserList(users, rankedSeason, req.query.q, rankedConfig()) });
+  return res.json({ users: adminUserList(users, rankedSeason, req.query.q, rankedConfig(), { archived: req.query.archived === '1' }) });
 });
 
 app.get('/admin/api/users/:userId', requireAdmin(adminStore, 'users:read'), (req, res) => {
@@ -2875,6 +2917,67 @@ app.post('/admin/api/users/:userId/sessions/revoke', requireAdmin(adminStore, 'u
   writeAudit(adminStore, req, req.admin.admin, 'admin.users.sessions.revoke', { userId: user.userId }, { reason, revoked });
   saveStore();
   return res.json({ ok: true, revoked });
+});
+
+app.post('/admin/api/users/:userId/archive', requireAdmin(adminStore, 'users:write'), (req, res) => {
+  const user = findUserByIdentifier(req.params.userId);
+  if (!user) return res.status(404).json({ error: 'Player not found.' });
+  const reason = cleanAdminReason(req.body?.reason);
+  if (!reason) return res.status(400).json({ error: 'Reason is required.' });
+  normalizeUserAdminFields(user);
+  const wasArchived = isUserArchived(user);
+  const timestamp = Date.now();
+  user.adminArchive.archivedAt = timestamp;
+  user.adminArchive.archivedBy = req.admin.admin.adminId;
+  user.adminArchive.archivedByName = req.admin.admin.displayName;
+  user.adminArchive.archiveReason = reason;
+  user.adminArchive.restoredAt = null;
+  user.adminArchive.restoredBy = null;
+  user.adminArchive.restoredByName = null;
+  user.adminArchive.restoreReason = null;
+  const revokedSessions = revokeUserSessions(user.userId);
+  normalizePushNotifications(user).tokens = [];
+  rankedQueue.delete(user.userId);
+  io.to(`user:${user.userId}`).emit('account:archived', { archivedAt: user.adminArchive.archivedAt });
+  writeAudit(adminStore, req, req.admin.admin, 'admin.users.archive', { userId: user.userId }, { reason, wasArchived, revokedSessions });
+  saveStore();
+  return res.json({
+    user: adminUserDetail(
+      user,
+      rankedSeason,
+      results,
+      adminCosmeticCatalogFor(user, rankedSeason, currentCatalog(), rankedConfig()),
+      publicEconomyCatalog(user, economyConfig()),
+      rankedConfig()
+    ),
+    revokedSessions,
+  });
+});
+
+app.post('/admin/api/users/:userId/restore', requireAdmin(adminStore, 'users:write'), (req, res) => {
+  const user = findUserByIdentifier(req.params.userId);
+  if (!user) return res.status(404).json({ error: 'Player not found.' });
+  const reason = cleanAdminReason(req.body?.reason);
+  if (!reason) return res.status(400).json({ error: 'Reason is required.' });
+  normalizeUserAdminFields(user);
+  const wasArchived = isUserArchived(user);
+  const timestamp = Date.now();
+  user.adminArchive.restoredAt = timestamp;
+  user.adminArchive.restoredBy = req.admin.admin.adminId;
+  user.adminArchive.restoredByName = req.admin.admin.displayName;
+  user.adminArchive.restoreReason = reason;
+  writeAudit(adminStore, req, req.admin.admin, 'admin.users.restore', { userId: user.userId }, { reason, wasArchived });
+  saveStore();
+  return res.json({
+    user: adminUserDetail(
+      user,
+      rankedSeason,
+      results,
+      adminCosmeticCatalogFor(user, rankedSeason, currentCatalog(), rankedConfig()),
+      publicEconomyCatalog(user, economyConfig()),
+      rankedConfig()
+    ),
+  });
 });
 
 app.post('/admin/api/users/:userId/coins/adjust', requireAdmin(adminStore, 'economy:write'), (req, res) => {
@@ -3049,6 +3152,58 @@ app.post('/admin/api/support/tickets/:ticketId/notes', requireAdmin(adminStore, 
   return res.json(result);
 });
 
+function adminMailRecipients(body = {}) {
+  const mode = String(body.targetType || body.mode || 'all').trim();
+  if (mode === 'all') return { recipients: activePlayerAccounts(), targetLabel: 'all' };
+  const rawTargets = String(body.targetUsers || body.target || body.userId || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+  if (!rawTargets.length) return { error: 'Enter at least one recipient.' };
+  const recipients = [];
+  const missing = [];
+  for (const raw of rawTargets) {
+    const user = findUserByIdentifier(raw);
+    if (!user || !visiblePlayer(user)) missing.push(raw);
+    else recipients.push(user);
+  }
+  if (missing.length) return { error: `Recipient not found or archived: ${missing.slice(0, 3).join(', ')}` };
+  return { recipients, targetLabel: mode === 'one' ? rawTargets[0] : `${rawTargets.length} selected` };
+}
+
+app.get('/admin/api/mail', requireAdmin(adminStore, 'mail:read'), (_req, res) => res.json({
+  history: adminMailLog(mailEntries),
+  cosmetics: liveCatalog(catalogStore).filter(item => item.enabled !== false && !item.archivedAt),
+}));
+
+app.post('/admin/api/mail', requireAdmin(adminStore, 'mail:write'), (req, res) => {
+  const reason = cleanAdminReason(req.body?.reason);
+  if (!reason) return res.status(400).json({ error: 'Reason is required.' });
+  const recipientResult = adminMailRecipients(req.body || {});
+  if (recipientResult.error) return res.status(400).json({ error: recipientResult.error });
+  const result = createSystemMail(mailEntries, recipientResult.recipients, req.admin.admin, req.body || {}, liveCatalog(catalogStore));
+  if (result.error) return res.status(400).json({ error: result.error });
+  let pushed = 0;
+  for (const user of recipientResult.recipients) {
+    if (queueConfiguredPushToUser(user.userId, 'mail', {
+      keyName: 'mail',
+      dedupeKey: `mail:${result.batchId}:${user.userId}`,
+      templateData: { title: req.body?.title || 'New Golf 9 mail', displayName: user.displayName },
+      data: { type: 'mail', batchId: result.batchId },
+    })) pushed += 1;
+    io.to(`user:${user.userId}`).emit('mail:update', mailSummaryForUser(mailEntries, user.userId));
+  }
+  writeAudit(adminStore, req, req.admin.admin, 'admin.mail.send', { batchId: result.batchId }, {
+    reason,
+    target: recipientResult.targetLabel,
+    recipientCount: result.count,
+    pushQueued: pushed,
+    attachments: result.attachments,
+  });
+  saveStore();
+  return res.status(201).json({ ...result, pushQueued: pushed, history: adminMailLog(mailEntries) });
+});
+
 app.get('/admin/api/audit', requireAdmin(adminStore, 'audit:read'), (_req, res) => res.json({ audit: adminStore.adminAudit.slice().reverse().slice(0, 250) }));
 app.get('/admin/api/catalog/cosmetics', requireAdmin(adminStore, 'catalog:read'), (req, res) => {
   const user = req.query.userId ? findUserByIdentifier(req.query.userId) : [...users.values()][0];
@@ -3056,7 +3211,12 @@ app.get('/admin/api/catalog/cosmetics', requireAdmin(adminStore, 'catalog:read')
     live: liveCatalog(catalogStore),
     draft: draftCatalog(catalogStore),
     cosmetics: user ? cosmeticsFor(user) : liveCatalog(catalogStore),
+    assetRequirements: catalogAssetRequirements(),
   });
+});
+
+app.get('/admin/api/catalog/asset-requirements', requireAdmin(adminStore, 'catalog:read'), (_req, res) => {
+  res.json({ assetRequirements: catalogAssetRequirements() });
 });
 
 app.post('/admin/api/catalog/cosmetics', requireAdmin(adminStore, 'catalog:write'), (req, res) => {
@@ -3655,6 +3815,53 @@ app.get('/auth/me', requireAuth, (req, res) => res.json({ user: safeUser(req.aut
 
 app.get('/profile/me', requireAuth, (req, res) => res.json({ user: safeUser(req.auth.user) }));
 
+app.get('/mail/summary', requireAuth, (req, res) => {
+  return res.json({ summary: mailSummaryForUser(mailEntries, req.auth.user.userId) });
+});
+
+app.get('/mail', requireAuth, (req, res) => {
+  return res.json({
+    mail: mailEntriesForUser(mailEntries, req.auth.user.userId),
+    summary: mailSummaryForUser(mailEntries, req.auth.user.userId),
+  });
+});
+
+app.post('/mail/:mailId/read', requireAuth, (req, res) => {
+  const result = markMailRead(mailEntries, req.auth.user.userId, String(req.params.mailId || ''));
+  if (result.error) return res.status(404).json({ error: result.error });
+  saveStore();
+  return res.json({ ...result, summary: mailSummaryForUser(mailEntries, req.auth.user.userId) });
+});
+
+app.post('/mail/:mailId/claim', requireAuth, (req, res) => {
+  const result = claimMailForUser(mailEntries, req.auth.user, liveCatalog(catalogStore), String(req.params.mailId || ''));
+  if (result.error) return res.status(result.status || 400).json({ error: result.error });
+  saveStore();
+  return res.json({
+    ...result,
+    user: safeUser(req.auth.user),
+    cosmetics: cosmeticsFor(req.auth.user),
+    summary: mailSummaryForUser(mailEntries, req.auth.user.userId),
+  });
+});
+
+app.delete('/mail/:mailId', requireAuth, (req, res) => {
+  const result = deleteMailForUser(mailEntries, req.auth.user.userId, String(req.params.mailId || ''));
+  if (result.error) return res.status(404).json({ error: result.error });
+  saveStore();
+  return res.json({ ...result, summary: mailSummaryForUser(mailEntries, req.auth.user.userId) });
+});
+
+app.post('/mail/feedback', requireAuth, (req, res) => {
+  const payload = cleanFeedbackPayload(req.body || {});
+  if (payload.error) return res.status(400).json({ error: payload.error });
+  const result = createSupportTicket(adminStore, req, req.auth.user, payload);
+  if (result.error) return res.status(400).json({ error: result.error });
+  writeAudit(adminStore, req, null, 'player.feedback.mailbox', { userId: req.auth.user.userId }, { category: payload.category });
+  saveStore();
+  return res.status(201).json(result);
+});
+
 app.post('/push/register', requireAuth, (req, res) => {
   const result = upsertPushToken(req.auth.user, req.body || {});
   if (result.error) return res.status(400).json({ error: result.error });
@@ -3675,7 +3882,7 @@ app.get('/players/search', requireAuth, (req, res) => {
   const query = String(req.query.q || '').trim().toLowerCase();
   if (query.length < 2) return res.json({ players: [] });
   const players = [...users.values()]
-    .filter(user => user.userId !== req.auth.user.userId && user.displayName.toLowerCase().includes(query))
+    .filter(user => user.userId !== req.auth.user.userId && visiblePlayer(user) && user.displayName.toLowerCase().includes(query))
     .slice(0, 12)
     .map(user => publicPlayerCard(req.auth.user, user));
   return res.json({ players });
@@ -3683,7 +3890,7 @@ app.get('/players/search', requireAuth, (req, res) => {
 
 app.get('/profiles/:userId', requireAuth, (req, res) => {
   const target = users.get(String(req.params.userId || ''));
-  if (!target) return res.status(404).json({ error: 'Player not found.' });
+  if (!visiblePlayer(target)) return res.status(404).json({ error: 'Player not found.' });
   return res.json({ profile: publicViewedProfile(req.auth.user, target) });
 });
 
@@ -3808,7 +4015,7 @@ app.post('/clubs/:clubId/requests/:requestId/accept', requireAuth, (req, res) =>
   if (!canManageRequests(role)) return res.status(403).json({ error: 'Only owners and officers can approve requests.' });
   const request = club.joinRequests.find(item => item.id === req.params.requestId);
   const target = request ? users.get(request.userId) : null;
-  if (!request || !target) return res.status(404).json({ error: 'Request not found.' });
+  if (!request || !visiblePlayer(target)) return res.status(404).json({ error: 'Request not found.' });
   const access = clubAccessError(target, 'join');
   if (access) return res.status(access.status).json({ ...access, error: `That player must reach Level ${access.requiredLevel} before joining clubs.` });
   if (target.clubId && clubs.has(target.clubId)) return res.status(409).json({ error: 'That player is already in a club.' });
@@ -3853,7 +4060,7 @@ app.post('/clubs/:clubId/invites', requireAuth, (req, res) => {
   const role = currentClubRole(req.auth.user, club);
   if (!canManageRequests(role)) return res.status(403).json({ error: 'Only owners and officers can invite players.' });
   const target = findUserByIdentifier(req.body?.userId || req.body?.displayName);
-  if (!target) return res.status(404).json({ error: 'Player not found.' });
+  if (!visiblePlayer(target)) return res.status(404).json({ error: 'Player not found.' });
   const access = clubAccessError(target, 'join');
   if (access) return res.status(access.status).json({ ...access, error: `That player must reach Level ${access.requiredLevel} before joining clubs.` });
   if (target.clubId && clubs.has(target.clubId)) return res.status(409).json({ error: 'That player is already in a club.' });
@@ -4012,7 +4219,7 @@ app.post('/clubs/rewards/claim', requireAuth, (req, res) => {
 
 app.post('/friends/requests', requireAuth, (req, res) => {
   const target = findUserByIdentifier(req.body?.userId || req.body?.displayName);
-  if (!target) return res.status(404).json({ error: 'Player not found.' });
+  if (!visiblePlayer(target)) return res.status(404).json({ error: 'Player not found.' });
   if (target.userId === req.auth.user.userId) return res.status(400).json({ error: 'You cannot add yourself.' });
   normalizeSocial(req.auth.user);
   normalizeSocial(target);
@@ -4056,7 +4263,7 @@ app.post('/friends/requests/:requestId/accept', requireAuth, (req, res) => {
   normalizeSocial(req.auth.user);
   const request = req.auth.user.social.incomingRequests.find(item => item.id === req.params.requestId);
   const from = request ? users.get(request.userId) : null;
-  if (!request || !from) return res.status(404).json({ error: 'Friend request not found.' });
+  if (!request || !visiblePlayer(from)) return res.status(404).json({ error: 'Friend request not found.' });
   addFriendship(req.auth.user, from);
   saveStore();
   emitSocialUpdate(req.auth.user.userId);
@@ -4068,7 +4275,7 @@ app.post('/friends/requests/:requestId/reject', requireAuth, (req, res) => {
   normalizeSocial(req.auth.user);
   const request = req.auth.user.social.incomingRequests.find(item => item.id === req.params.requestId);
   const from = request ? users.get(request.userId) : null;
-  if (!request || !from) return res.status(404).json({ error: 'Friend request not found.' });
+  if (!request || !visiblePlayer(from)) return res.status(404).json({ error: 'Friend request not found.' });
   removeRequestsBetween(req.auth.user, from);
   saveStore();
   emitSocialUpdate(req.auth.user.userId);
@@ -4081,7 +4288,7 @@ app.delete('/friends/requests/:requestId', requireAuth, (req, res) => {
   const outgoing = req.auth.user.social.outgoingRequests.find(item => item.id === req.params.requestId);
   const incoming = req.auth.user.social.incomingRequests.find(item => item.id === req.params.requestId);
   const other = users.get(outgoing?.userId || incoming?.userId || '');
-  if (!other) return res.status(404).json({ error: 'Friend request not found.' });
+  if (!visiblePlayer(other)) return res.status(404).json({ error: 'Friend request not found.' });
   removeRequestsBetween(req.auth.user, other);
   saveStore();
   emitSocialUpdate(req.auth.user.userId);
@@ -4091,7 +4298,7 @@ app.delete('/friends/requests/:requestId', requireAuth, (req, res) => {
 
 app.delete('/friends/:userId', requireAuth, (req, res) => {
   const target = users.get(String(req.params.userId || ''));
-  if (!target || !isFriend(req.auth.user, target.userId)) return res.status(404).json({ error: 'Friend not found.' });
+  if (!visiblePlayer(target) || !isFriend(req.auth.user, target.userId)) return res.status(404).json({ error: 'Friend not found.' });
   removeFriendship(req.auth.user, target);
   saveStore();
   emitSocialUpdate(req.auth.user.userId);
@@ -4371,7 +4578,7 @@ app.post('/rooms/:code/invites', requireAuth, (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   const target = users.get(String(req.body?.userId || ''));
   if (!room) return res.status(404).json({ error: 'Room not found.' });
-  if (!target) return res.status(404).json({ error: 'Friend not found.' });
+  if (!visiblePlayer(target)) return res.status(404).json({ error: 'Friend not found.' });
   if (room.status !== 'lobby') return res.status(409).json({ error: 'Invites are only available before the game starts.' });
   if (!room.players.some(player => player.userId === req.auth.user.userId)) return res.status(403).json({ error: 'Join the room before inviting friends.' });
   if (!isFriend(req.auth.user, target.userId)) return res.status(403).json({ error: 'Only friends can be invited from the friends list.' });
@@ -4413,6 +4620,12 @@ app.post('/rooms/invites/:inviteId/accept', requireAuth, (req, res) => {
   const invite = req.auth.user.social.roomInvites.find(item => item.id === req.params.inviteId);
   if (!invite) return res.status(404).json({ error: 'Invite not found.' });
   const room = rooms.get(invite.roomCode);
+  const inviter = users.get(invite.fromUserId);
+  if (!visiblePlayer(inviter)) {
+    req.auth.user.social.roomInvites = req.auth.user.social.roomInvites.filter(item => item.id !== invite.id);
+    saveStore();
+    return res.status(404).json({ error: 'Invite is no longer available.' });
+  }
   if (!room || room.status !== 'lobby') {
     req.auth.user.social.roomInvites = req.auth.user.social.roomInvites.filter(item => item.id !== invite.id);
     saveStore();

@@ -5,14 +5,24 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { createServer } from 'node:net';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { io } = require('socket.io-client');
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function port() {
-  return 4300 + Math.floor(Math.random() * 1000);
+async function freePort() {
+  const server = createServer();
+  server.unref();
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  const selected = address && typeof address === 'object' ? address.port : 0;
+  await new Promise(resolve => server.close(resolve));
+  return selected;
 }
 
 async function waitForHealth(baseUrl) {
@@ -128,7 +138,7 @@ async function adminAdjustCoins(baseUrl, admin, userId, amount) {
 }
 
 async function withServer(fn, extraEnv = {}) {
-  const serverPort = port();
+  const serverPort = await freePort();
   const dataDir = await mkdtemp(path.join(tmpdir(), 'golf9-server-test-'));
   await fnWithServer(dataDir, serverPort, fn, extraEnv);
 }
@@ -154,7 +164,7 @@ async function fnWithServer(dataDir, serverPort, fn, extraEnv = {}) {
 }
 
 async function withSeededServer(seed, fn) {
-  const serverPort = port();
+  const serverPort = await freePort();
   const dataDir = await mkdtemp(path.join(tmpdir(), 'golf9-server-test-'));
   await mkdir(dataDir, { recursive: true });
   await writeFile(path.join(dataDir, 'auth-store.json'), JSON.stringify(seed, null, 2));
@@ -212,7 +222,7 @@ test('local JSON storage remains available outside production', async () => {
 });
 
 test('production refuses to start without durable database storage', async () => {
-  const serverPort = port();
+  const serverPort = await freePort();
   const dataDir = await mkdtemp(path.join(tmpdir(), 'golf9-server-test-'));
   const child = spawn(process.execPath, ['index.js'], {
     cwd: path.resolve('..', 'server'),
@@ -653,18 +663,49 @@ test('admin console supports MFA login, audited player ops, support tickets, and
     const tickets = await json(await fetch(`${baseUrl}/admin/api/support/tickets`, { headers: { Cookie: cookie } }));
     assert.ok(tickets.tickets.some(item => item.ticketId === ticket.ticket.ticketId));
 
+    const archived = await json(await fetch(`${baseUrl}/admin/api/users/${player.user.userId}/archive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ reason: 'Automated archive test' }),
+    }));
+    assert.equal(archived.user.archived, true);
+    assert.equal(archived.revokedSessions, 1);
+
+    const hiddenAfterArchive = await json(await fetch(`${baseUrl}/admin/api/users?q=Ops`, { headers: { Cookie: cookie } }));
+    assert.equal(hiddenAfterArchive.users.some(user => user.userId === player.user.userId), false);
+    const archivedList = await json(await fetch(`${baseUrl}/admin/api/users?q=Ops&archived=1`, { headers: { Cookie: cookie } }));
+    assert.ok(archivedList.users.some(user => user.userId === player.user.userId));
+    const archivedBlocked = await fetch(`${baseUrl}/auth/me`, { headers: authHeaders(player.token) });
+    assert.equal(archivedBlocked.status, 401);
+
+    const restored = await json(await fetch(`${baseUrl}/admin/api/users/${player.user.userId}/restore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ reason: 'Automated restore test' }),
+    }));
+    assert.equal(restored.user.archived, false);
+
+    const relogin = await json(await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: player.user.displayName, password: 'password1' }),
+    }));
+    assert.equal(relogin.user.userId, player.user.userId);
+
     await json(await fetch(`${baseUrl}/admin/api/users/${player.user.userId}/moderation`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ action: 'account_ban', reason: 'Automated admin test' }),
     }));
 
-    const blocked = await fetch(`${baseUrl}/auth/me`, { headers: authHeaders(player.token) });
+    const blocked = await fetch(`${baseUrl}/auth/me`, { headers: authHeaders(relogin.token) });
     assert.equal(blocked.status, 403);
 
     const audit = await json(await fetch(`${baseUrl}/admin/api/audit`, { headers: { Cookie: cookie } }));
     assert.ok(audit.audit.some(entry => entry.action === 'admin.users.coins.adjust'));
     assert.ok(audit.audit.some(entry => entry.action === 'admin.users.progression.adjust'));
+    assert.ok(audit.audit.some(entry => entry.action === 'admin.users.archive'));
+    assert.ok(audit.audit.some(entry => entry.action === 'admin.users.restore'));
     assert.ok(audit.audit.some(entry => entry.action === 'admin.users.moderation'));
   }, { SEED_ADMIN_ACCOUNT: '1' });
 });

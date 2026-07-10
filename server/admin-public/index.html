@@ -56,6 +56,7 @@
           <button data-tab="players" class="active">Players</button>
           <button data-tab="invites">Invites</button>
           <button data-tab="support">Support</button>
+          <button data-tab="mail">Mail</button>
           <button data-tab="economy">Economy</button>
           <button data-tab="notifications">Notifications</button>
           <button data-tab="competitive">Competitive</button>
@@ -74,6 +75,7 @@
             </div>
             <div class="result-toolbar">
               <input id="playerResultFilter" placeholder="Filter loaded players by name, rank, club, status, or id" />
+              <label class="checkline compact-check"><input id="showArchivedPlayers" type="checkbox" /> Archived players</label>
               <span id="playerResultCount" class="muted"></span>
             </div>
             <div id="playerResults" class="player-table-wrap"></div>
@@ -109,6 +111,46 @@
             <h2>Support Inbox</h2>
             <button id="loadTickets">Refresh Tickets</button>
             <div id="tickets" class="list"></div>
+          </div>
+        </section>
+        <section id="mail" class="tab">
+          <div class="panel">
+            <div class="split-header">
+              <div>
+                <h2>System Mail</h2>
+                <p class="muted">Send notices, compensation, coins, or cosmetics. Players can read, claim, keep, or delete these messages.</p>
+              </div>
+              <button id="loadMail">Refresh Mail</button>
+            </div>
+            <form id="mailComposer" class="editor">
+              <div class="row three">
+                <label>Recipients
+                  <select name="targetMode">
+                    <option value="all">Everyone</option>
+                    <option value="selected">Selected players</option>
+                    <option value="single">One player</option>
+                  </select>
+                </label>
+                <label>Player IDs or names <input name="targets" placeholder="Comma-separated; blank for everyone" /></label>
+                <label>Optional expiry <input name="expiresAt" type="date" /></label>
+              </div>
+              <input name="title" placeholder="Mail title" required />
+              <textarea name="message" rows="4" placeholder="Message shown in the player mailbox" required></textarea>
+              <div class="row three">
+                <label>Coin reward <input name="coins" type="number" min="0" step="1" placeholder="0" /></label>
+                <label>Cosmetic reward
+                  <select name="cosmeticId">
+                    <option value="">No cosmetic</option>
+                  </select>
+                </label>
+                <label>Reason <input name="reason" placeholder="Required audit reason" required /></label>
+              </div>
+              <button type="submit">Send Mail</button>
+            </form>
+          </div>
+          <div class="panel">
+            <h2>Delivery History</h2>
+            <div id="mailHistory" class="list"></div>
           </div>
         </section>
         <section id="economy" class="tab">
@@ -335,7 +377,10 @@
                   <label><input name="sale" type="checkbox" /> On sale</label>
                   <label><input name="featured" type="checkbox" /> Featured</label>
                 </div>
+                <div id="catalogAssetRequirement" class="asset-requirement"></div>
                 <label>Preview asset <input id="catalogAsset" type="file" accept="image/png,image/jpeg,image/webp" /></label>
+                <div id="catalogAssetPreview" class="asset-preview empty">Choose an asset to preview it here.</div>
+                <p id="catalogAssetError" class="error"></p>
                 <div class="actions">
                   <button type="submit">Save Draft</button>
                   <button type="button" id="uploadCatalogAsset" class="ghost">Upload Asset</button>
@@ -348,9 +393,9 @@
           <div class="panel">
             <h2>Asset Guide</h2>
             <div class="guide">
-              <p><strong>Card backs:</strong> use PNG/WebP, portrait 512x768 preferred, under 2 MB. The preset colors still control live in-game rendering unless an image-backed cosmetic is supported for that slot.</p>
-              <p><strong>Avatar frames:</strong> use transparent PNG/WebP, square 512x512 preferred. Keep the middle clear so player initials remain readable.</p>
-              <p><strong>Table themes:</strong> use preset colors first. Uploaded art is a preview/reference asset for now.</p>
+              <p><strong>Avatar icons, frames, and accessories:</strong> PNG/WebP, exactly 512x512, under 2 MB.</p>
+              <p><strong>Card backs:</strong> PNG/WebP, exactly 512x768, under 2 MB.</p>
+              <p><strong>Table themes:</strong> PNG/WebP/JPEG, exactly 1024x1024, under 4 MB.</p>
               <p><strong>Naming:</strong> keep IDs lowercase with dashes. Never rename an ID after players own it; edit the title instead.</p>
             </div>
           </div>

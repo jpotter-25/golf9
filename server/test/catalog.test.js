@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import {
   archiveDraftCatalogItem,
+  catalogAssetRequirements,
   draftCatalog,
   duplicateDraftCatalogItem,
   liveCatalog,
@@ -10,6 +14,7 @@ import {
   rollbackCatalog,
   saveDraftCatalogItem,
   seedCatalogStore,
+  uploadCatalogAsset,
 } from '../catalog.js';
 import { normalizeUserProgression, publicCosmeticCatalog, purchaseCosmetic } from '../progression.js';
 
@@ -21,6 +26,19 @@ function user(overrides = {}) {
     passwordHash: 'unused',
     ...overrides,
   };
+}
+
+function fakePngBase64(width, height, bytes = 64) {
+  const png = Buffer.alloc(Math.max(24, bytes));
+  png[0] = 0x89;
+  png.write('PNG', 1, 'ascii');
+  png[4] = 0x0d;
+  png[5] = 0x0a;
+  png[6] = 0x1a;
+  png[7] = 0x0a;
+  png.writeUInt32BE(width, 16);
+  png.writeUInt32BE(height, 20);
+  return png.toString('base64');
 }
 
 test('catalog store seeds legacy cosmetics into live and draft records', () => {
@@ -106,4 +124,38 @@ test('catalog items can be duplicated safely as disabled draft copies', () => {
   assert.equal(result.error, undefined);
   assert.match(result.item.id, /^gold-trim-card-back-copy/);
   assert.equal(result.item.enabled, false);
+});
+
+test('catalog asset requirements expose exact upload constraints', () => {
+  const requirements = catalogAssetRequirements();
+
+  assert.equal(requirements.avatarIcon.width, 512);
+  assert.equal(requirements.avatarIcon.height, 512);
+  assert.equal(requirements.avatarIcon.maxBytes, 2 * 1024 * 1024);
+  assert.deepEqual(requirements.cardBack.mimeTypes, ['image/png', 'image/webp']);
+  assert.equal(requirements.tableTheme.width, 1024);
+});
+
+test('catalog asset uploads validate dimensions and metadata before saving', () => {
+  const store = normalizeCatalogStore({});
+  seedCatalogStore(store);
+  const uploadRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'golf9-catalog-assets-'));
+
+  const uploaded = uploadCatalogAsset(store, uploadRoot, '/uploads/catalog', 'classic-card-back', {
+    mimeType: 'image/png',
+    originalName: 'card-back.png',
+    data: fakePngBase64(512, 768),
+  });
+  assert.equal(uploaded.error, undefined);
+  assert.equal(uploaded.asset.width, 512);
+  assert.equal(uploaded.asset.height, 768);
+  assert.equal(uploaded.asset.mimeType, 'image/png');
+  assert.match(uploaded.asset.url, /\/uploads\/catalog\/classic-card-back\/preview-/);
+
+  const rejected = uploadCatalogAsset(store, uploadRoot, '/uploads/catalog', 'classic-card-back', {
+    mimeType: 'image/png',
+    originalName: 'too-small.png',
+    data: fakePngBase64(512, 512),
+  });
+  assert.match(rejected.error, /exactly 512x768px/);
 });

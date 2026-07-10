@@ -230,7 +230,7 @@ h2 {
 
 .result-toolbar {
   display: grid;
-  grid-template-columns: minmax(220px, 420px) 1fr;
+  grid-template-columns: minmax(220px, 420px) auto 1fr;
   gap: 0.75rem;
   align-items: center;
   margin-top: 1rem;
@@ -238,6 +238,11 @@ h2 {
 
 .result-toolbar .muted {
   text-align: right;
+}
+
+.compact-check {
+  justify-self: start;
+  white-space: nowrap;
 }
 
 .admin-toolbox {
@@ -472,6 +477,49 @@ h2 {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.asset-requirement {
+  border: 1px dashed rgba(85, 168, 255, 0.55);
+  border-radius: 14px;
+  padding: 0.75rem;
+  background: rgba(85, 168, 255, 0.08);
+}
+
+.asset-requirement p {
+  margin: 0.35rem 0 0;
+}
+
+.asset-preview {
+  display: grid;
+  gap: 0.55rem;
+  place-items: center;
+  min-height: 170px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(6, 11, 24, 0.45);
+  color: var(--muted);
+  overflow: hidden;
+  text-align: center;
+}
+
+.asset-preview img {
+  max-width: min(100%, 240px);
+  max-height: 220px;
+  object-fit: contain;
+  padding: 0.75rem;
+}
+
+.asset-preview span {
+  align-self: stretch;
+  padding: 0.45rem 0.75rem;
+  background: rgba(17, 25, 54, 0.9);
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.asset-preview.empty {
+  padding: 1rem;
 }
 
 .dim {

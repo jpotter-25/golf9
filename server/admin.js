@@ -32,12 +32,14 @@ const ROLE_PERMISSIONS = {
     'competitive:write',
     'notifications:read',
     'notifications:write',
+    'mail:read',
+    'mail:write',
     'metrics:read',
   ],
-  support: ['users:read', 'invites:read', 'support:read', 'support:write', 'catalog:read', 'metrics:read'],
+  support: ['users:read', 'invites:read', 'support:read', 'support:write', 'catalog:read', 'mail:read', 'mail:write', 'metrics:read'],
   moderator: ['users:read', 'support:read', 'moderation:write', 'audit:read', 'catalog:read', 'metrics:read'],
-  economy: ['users:read', 'economy:write', 'cosmetics:write', 'catalog:read', 'catalog:write', 'competitive:read', 'metrics:read'],
-  readOnly: ['users:read', 'support:read', 'audit:read', 'catalog:read', 'competitive:read', 'metrics:read'],
+  economy: ['users:read', 'economy:write', 'cosmetics:write', 'catalog:read', 'catalog:write', 'competitive:read', 'mail:read', 'mail:write', 'metrics:read'],
+  readOnly: ['users:read', 'support:read', 'audit:read', 'catalog:read', 'competitive:read', 'mail:read', 'metrics:read'],
 };
 
 const VALID_ROLES = Object.keys(ROLE_PERMISSIONS);
@@ -350,6 +352,15 @@ export function normalizeUserAdminFields(user) {
   user.moderation.chatMutedUntil = Number(user.moderation.chatMutedUntil) || null;
   user.moderation.reason = safeString(user.moderation.reason, ADMIN_REASON_MAX_LENGTH);
   user.moderation.updatedAt = Number(user.moderation.updatedAt) || null;
+  user.adminArchive ||= {};
+  user.adminArchive.archivedAt = Number(user.adminArchive.archivedAt) || null;
+  user.adminArchive.archivedBy = user.adminArchive.archivedBy ? String(user.adminArchive.archivedBy) : null;
+  user.adminArchive.archivedByName = safeString(user.adminArchive.archivedByName || '', 40) || null;
+  user.adminArchive.archiveReason = safeString(user.adminArchive.archiveReason || '', ADMIN_REASON_MAX_LENGTH) || null;
+  user.adminArchive.restoredAt = Number(user.adminArchive.restoredAt) || null;
+  user.adminArchive.restoredBy = user.adminArchive.restoredBy ? String(user.adminArchive.restoredBy) : null;
+  user.adminArchive.restoredByName = safeString(user.adminArchive.restoredByName || '', 40) || null;
+  user.adminArchive.restoreReason = safeString(user.adminArchive.restoreReason || '', ADMIN_REASON_MAX_LENGTH) || null;
   return user;
 }
 
@@ -740,12 +751,21 @@ export function activeBansFor(store, user, deviceHash = null) {
 }
 
 export function banErrorFor(store, user, deviceHash = null) {
+  if (isUserArchived(user)) return 'This account has been archived by Golf 9 support.';
   const bans = activeBansFor(store, user, deviceHash);
   const hardBan = bans.find(ban => ban.type === 'account_ban' || ban.type === 'device_ban');
   if (hardBan) return 'This account or device cannot access Golf 9.';
   const suspension = bans.find(ban => ban.type === 'suspension');
   if (suspension) return 'This account is temporarily suspended.';
   return null;
+}
+
+export function isUserArchived(user) {
+  if (!user) return false;
+  normalizeUserAdminFields(user);
+  const archivedAt = Number(user.adminArchive?.archivedAt || 0);
+  const restoredAt = Number(user.adminArchive?.restoredAt || 0);
+  return archivedAt > 0 && restoredAt < archivedAt;
 }
 
 export function trackUserDevice(user, req, rawDeviceId = null) {
@@ -776,13 +796,17 @@ function publicUserForAdmin(user, rankedSeason, extras = {}, competitiveConfig =
     lastSeenAt,
     authProviderCount: Object.keys(user.authProviders || {}).length,
     moderation: user.moderation,
+    archived: isUserArchived(user),
+    adminArchive: user.adminArchive,
     ...extras,
   };
 }
 
-export function adminUserList(users, rankedSeason, query = '', competitiveConfig = null) {
+export function adminUserList(users, rankedSeason, query = '', competitiveConfig = null, options = {}) {
   const needle = safeString(query, 80).toLowerCase();
+  const includeArchived = options.archived === true || options.includeArchived === true;
   return [...users.values()]
+    .filter(user => includeArchived ? isUserArchived(user) : !isUserArchived(user))
     .filter(user => !needle || user.displayName.toLowerCase().includes(needle) || user.userId.toLowerCase().includes(needle))
     .slice(0, 100)
     .map(user => publicUserForAdmin(user, rankedSeason, {}, competitiveConfig));

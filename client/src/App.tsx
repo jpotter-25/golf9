@@ -23,6 +23,7 @@ import {
   PlayerProfileScreen,
   ClubScreen,
   ShopScreen,
+  InboxScreen,
 } from './screens';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import * as api from './services/api';
@@ -39,6 +40,7 @@ export type RootStackParamList = {
   Rules: undefined;
   Profile: undefined;
   Shop: undefined;
+  Inbox: undefined;
   Social: undefined;
   Club: undefined;
   PlayerProfile: { userId: string; fromActiveMatchRoomCode?: string };
@@ -240,6 +242,7 @@ function AppNavigator() {
             <Stack.Screen name="Rules" component={RulesScreen} />
             <Stack.Screen name="Profile" component={ProfileScreen} />
             <Stack.Screen name="Shop" component={ShopScreen} />
+            <Stack.Screen name="Inbox" component={InboxScreen} />
             <Stack.Screen name="Social" component={SocialScreen} />
             <Stack.Screen name="Club" component={ClubScreen} />
             <Stack.Screen name="PlayerProfile" component={PlayerProfileScreen} />

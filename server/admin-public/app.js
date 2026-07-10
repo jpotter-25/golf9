@@ -14,12 +14,16 @@ let playerSearchResults = [];
 let playerSort = { key: 'displayName', direction: 'asc' };
 let adminAccountsCache = [];
 let adminRolesCache = [];
+let mailHistory = [];
+let mailCosmetics = [];
+let catalogAssetRequirements = {};
 
 const NOTIFICATION_LABELS = {
   turn: 'Your Turn',
   dailyBonus: 'Daily Bonus',
   roomInvite: 'Room Invite',
   friendRequest: 'Friend Request',
+  mail: 'System Mail',
 };
 
 const PLAYER_TABLE_COLUMNS = [
@@ -80,6 +84,7 @@ function bindTabs() {
       button.classList.add('active');
       document.querySelector(`#${button.dataset.tab}`)?.classList.add('active');
       if (button.dataset.tab === 'invites') loadInvites();
+      if (button.dataset.tab === 'mail') loadMail();
       if (button.dataset.tab === 'economy') loadEconomy();
       if (button.dataset.tab === 'notifications') loadNotifications();
       if (button.dataset.tab === 'competitive') loadCompetitive();
@@ -98,9 +103,12 @@ function bindConsoleActions() {
     if (event.key === 'Enter') searchPlayers();
   });
   document.querySelector('#playerResultFilter').addEventListener('input', renderPlayerResults);
+  document.querySelector('#showArchivedPlayers').addEventListener('change', searchPlayers);
   document.querySelector('#loadInvites').addEventListener('click', loadInvites);
   document.querySelector('#inviteEditor').addEventListener('submit', createInvite);
   document.querySelector('#loadTickets').addEventListener('click', loadTickets);
+  document.querySelector('#loadMail').addEventListener('click', loadMail);
+  document.querySelector('#mailComposer').addEventListener('submit', sendSystemMail);
   document.querySelector('#loadEconomy').addEventListener('click', loadEconomy);
   document.querySelector('#addWagerTable').addEventListener('click', addWagerTable);
   document.querySelector('#addClubPrestigeTier').addEventListener('click', addClubPrestigeTier);
@@ -121,6 +129,8 @@ function bindConsoleActions() {
   document.querySelector('#catalogFilter').addEventListener('change', renderCatalog);
   document.querySelector('#catalogStateFilter').addEventListener('change', renderCatalog);
   document.querySelector('#catalogEditor').addEventListener('submit', saveCatalogItem);
+  document.querySelector('#catalogEditor select[name="type"]').addEventListener('change', () => renderCatalogAssetHelp());
+  document.querySelector('#catalogAsset').addEventListener('change', previewCatalogAsset);
   document.querySelector('#uploadCatalogAsset').addEventListener('click', uploadCatalogAsset);
   document.querySelector('#duplicateCatalogItem').addEventListener('click', duplicateCatalogItem);
   document.querySelector('#archiveCatalogItem').addEventListener('click', archiveCatalogItem);
@@ -145,7 +155,8 @@ async function loadMetrics() {
 
 async function searchPlayers() {
   const q = document.querySelector('#playerSearch').value.trim();
-  const { users } = await api(`/users?q=${encodeURIComponent(q)}`);
+  const archived = document.querySelector('#showArchivedPlayers')?.checked ? '1' : '0';
+  const { users } = await api(`/users?q=${encodeURIComponent(q)}&archived=${archived}`);
   playerSearchResults = users || [];
   renderPlayerResults();
 }
@@ -302,6 +313,7 @@ function playerRawValue(user, key) {
 }
 
 function moderationStatus(user) {
+  if (user.archived) return 'Archived';
   const moderation = user.moderation || {};
   const currentTime = Date.now();
   if (moderation.accountBannedAt) return 'Banned';
@@ -329,6 +341,7 @@ function renderUserDetail(user) {
     <h2>${escapeHtml(user.displayName)}</h2>
     <p class="muted">${escapeHtml(user.userId)}</p>
     <div class="statline">
+      ${user.archived ? '<span class="chip danger-chip">Archived</span>' : ''}
       <span class="chip">Coins ${money(user.currency?.coins)}</span>
       <span class="chip">Level ${user.progression?.level ?? 1}</span>
       <span class="chip">${Number(progression.totalXp || 0).toLocaleString()} XP</span>
@@ -389,6 +402,9 @@ function renderUserDetail(user) {
       <button data-action="ban" class="danger">Ban Account</button>
       <button data-action="deviceBan" class="danger">Ban Device</button>
       <button data-action="clear">Clear Moderation</button>
+      ${user.archived
+        ? '<button data-action="restore">Restore Player</button>'
+        : '<button data-action="archive" class="danger">Archive Player</button>'}
     </div>
   `;
   node.querySelector('#playerProgressionEditor')?.addEventListener('submit', adjustPlayerProgression);
@@ -496,6 +512,17 @@ async function runUserAction(action) {
       const durationMs = action === 'mute' || action === 'suspend' ? Number(prompt('Duration hours', '24')) * 60 * 60 * 1000 : 0;
       await api(`/users/${selectedUser.userId}/moderation`, { method: 'POST', body: JSON.stringify({ action: map[action], durationMs, reason }) });
     }
+    if (action === 'archive') {
+      const reason = prompt('Reason for archiving this player');
+      if (!reason) return;
+      if (!confirm(`Archive ${selectedUser.displayName}? This disables login and game access but keeps records.`)) return;
+      await api(`/users/${selectedUser.userId}/archive`, { method: 'POST', body: JSON.stringify({ reason }) });
+    }
+    if (action === 'restore') {
+      const reason = prompt('Reason for restoring this player');
+      if (!reason) return;
+      await api(`/users/${selectedUser.userId}/restore`, { method: 'POST', body: JSON.stringify({ reason }) });
+    }
     status('Action completed.', 'ok');
     await loadUser(selectedUser.userId);
   } catch (error) {
@@ -581,6 +608,85 @@ async function loadTickets() {
     });
     return card;
   }));
+}
+
+async function loadMail() {
+  const data = await api('/mail');
+  mailHistory = data.history || [];
+  mailCosmetics = data.cosmetics || [];
+  renderMailComposer();
+  renderMailHistory();
+}
+
+function renderMailComposer() {
+  const select = document.querySelector('#mailComposer select[name="cosmeticId"]');
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = `
+    <option value="">No cosmetic</option>
+    ${mailCosmetics.map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} - ${escapeHtml(item.type)}</option>`).join('')}
+  `;
+  select.value = mailCosmetics.some(item => item.id === current) ? current : '';
+}
+
+function mailAttachmentLabel(attachment) {
+  if (attachment.type === 'coins') return `${Number(attachment.amount || 0).toLocaleString()} coins`;
+  if (attachment.type === 'cosmetic') return `Cosmetic ${attachment.cosmeticId}`;
+  return attachment.type || 'Reward';
+}
+
+function renderMailHistory() {
+  const output = document.querySelector('#mailHistory');
+  if (!output) return;
+  if (!mailHistory.length) {
+    output.innerHTML = '<div class="empty-state">No mail has been sent yet.</div>';
+    return;
+  }
+  output.replaceChildren(...mailHistory.map(entry => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="split-header">
+        <div>
+          <strong>${escapeHtml(entry.title)}</strong>
+          <p class="muted">${escapeHtml(entry.createdByAdminName || 'system')} - ${new Date(entry.createdAt).toLocaleString()}</p>
+        </div>
+        <span class="chip">${Number(entry.recipientCount || 0).toLocaleString()} recipients</span>
+      </div>
+      <p>${escapeHtml(entry.body)}</p>
+      <div class="statline">
+        <span class="chip">Read ${Number(entry.readCount || 0).toLocaleString()}</span>
+        <span class="chip">Claimed ${Number(entry.claimedCount || 0).toLocaleString()}</span>
+        <span class="chip">Deleted ${Number(entry.deletedCount || 0).toLocaleString()}</span>
+        ${(entry.attachments || []).map(item => `<span class="chip gold">${escapeHtml(mailAttachmentLabel(item))}</span>`).join('')}
+        ${entry.expiresAt ? `<span class="chip">Expires ${new Date(entry.expiresAt).toLocaleDateString()}</span>` : ''}
+      </div>
+      <p class="muted">${(entry.recipients || []).map(item => escapeHtml(item.displayName || item.userId)).join(', ')}</p>
+    `;
+    return card;
+  }));
+}
+
+async function sendSystemMail(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const expiresAt = form.elements.expiresAt.value ? new Date(`${form.elements.expiresAt.value}T23:59:59`).toISOString() : null;
+  const payload = {
+    targetType: form.elements.targetMode.value === 'single' ? 'one' : form.elements.targetMode.value,
+    targetUsers: form.elements.targets.value,
+    title: form.elements.title.value,
+    message: form.elements.message.value,
+    coins: Number(form.elements.coins.value || 0),
+    cosmeticId: form.elements.cosmeticId.value || null,
+    expiresAt,
+    reason: form.elements.reason.value,
+  };
+  const data = await api('/mail', { method: 'POST', body: JSON.stringify(payload) });
+  mailHistory = data.history || [];
+  form.reset();
+  renderMailComposer();
+  renderMailHistory();
+  status(`Mail sent to ${Number(data.count || 0).toLocaleString()} player${data.count === 1 ? '' : 's'}.`, 'ok');
 }
 
 async function loadEconomy() {
@@ -1107,6 +1213,7 @@ async function loadCatalog() {
   const data = await api('/catalog/cosmetics');
   catalogDraft = data.draft || data.cosmetics || [];
   catalogLive = data.live || [];
+  catalogAssetRequirements = data.assetRequirements || {};
   renderCatalog();
 }
 
@@ -1180,6 +1287,8 @@ function editCatalogItem(id) {
   form.elements.enabled.checked = item.enabled !== false;
   form.elements.sale.checked = !!item.sale;
   form.elements.featured.checked = !!item.featured;
+  form.querySelector('#catalogAsset').value = '';
+  renderCatalogAssetHelp(item);
 }
 
 function createCatalogItemDraft() {
@@ -1243,6 +1352,12 @@ async function uploadCatalogAsset() {
   if (!selectedCatalogItem) return;
   const file = document.querySelector('#catalogAsset').files?.[0];
   if (!file) return alert('Choose an image file first.');
+  const uploadType = document.querySelector('#catalogEditor select[name="type"]')?.value || selectedCatalogItem.type;
+  const validation = await validateCatalogAssetFile(file, uploadType);
+  if (validation.error) {
+    setCatalogAssetError(validation.error);
+    return;
+  }
   const reason = prompt('Reason for audit log');
   if (!reason) return;
   const data = await fileToBase64(file);
@@ -1253,6 +1368,100 @@ async function uploadCatalogAsset() {
   status('Asset uploaded to draft item.', 'ok');
   await loadCatalog();
   editCatalogItem(selectedCatalogItem.id);
+}
+
+function assetSpecFor(type) {
+  return catalogAssetRequirements[type] || null;
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+  return `${value} B`;
+}
+
+function renderCatalogAssetHelp(item = selectedCatalogItem) {
+  const type = document.querySelector('#catalogEditor select[name="type"]')?.value || item?.type || '';
+  const spec = assetSpecFor(type);
+  const help = document.querySelector('#catalogAssetRequirement');
+  const preview = document.querySelector('#catalogAssetPreview');
+  setCatalogAssetError('');
+  if (!help) return;
+  if (!spec) {
+    help.innerHTML = '<span class="chip danger-chip">No uploads supported for this item type.</span>';
+  } else {
+    help.innerHTML = `
+      <strong>${escapeHtml(type)} asset requirements</strong>
+      <p class="muted">Exact size ${spec.width}x${spec.height}. Accepted: ${(spec.mimeTypes || []).map(type => type.replace('image/', '').toUpperCase()).join(', ')}. Max ${formatBytes(spec.maxBytes)}.</p>
+    `;
+  }
+  if (preview) {
+    if (item?.asset?.url) {
+      preview.classList.remove('empty');
+      preview.innerHTML = `<img src="${escapeHtml(item.asset.url)}" alt="" /><span>${escapeHtml(item.asset.width || spec?.width || '?')}x${escapeHtml(item.asset.height || spec?.height || '?')}</span>`;
+    } else {
+      preview.classList.add('empty');
+      preview.textContent = 'Choose an asset to preview it here.';
+    }
+  }
+}
+
+function setCatalogAssetError(message) {
+  const node = document.querySelector('#catalogAssetError');
+  if (node) node.textContent = message || '';
+}
+
+async function previewCatalogAsset() {
+  const file = document.querySelector('#catalogAsset').files?.[0];
+  const preview = document.querySelector('#catalogAssetPreview');
+  setCatalogAssetError('');
+  if (!file || !preview) {
+    renderCatalogAssetHelp();
+    return;
+  }
+  const validation = await validateCatalogAssetFile(file, document.querySelector('#catalogEditor select[name="type"]')?.value || selectedCatalogItem?.type);
+  if (validation.error) {
+    preview.classList.add('empty');
+    preview.textContent = 'Asset cannot be uploaded.';
+    setCatalogAssetError(validation.error);
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  preview.classList.remove('empty');
+  preview.innerHTML = `<img src="${url}" alt="" /><span>${validation.width}x${validation.height} - ${formatBytes(file.size)}</span>`;
+}
+
+function readImageSize(file) {
+  return new Promise(resolve => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      const size = { width: image.naturalWidth, height: image.naturalHeight };
+      URL.revokeObjectURL(url);
+      resolve(size);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(null);
+    };
+    image.src = url;
+  });
+}
+
+async function validateCatalogAssetFile(file, type) {
+  const spec = assetSpecFor(type);
+  if (!spec) return { error: 'This cosmetic type does not support image uploads yet.' };
+  if (!(spec.mimeTypes || []).includes(file.type)) {
+    return { error: `Use ${(spec.mimeTypes || []).map(value => value.replace('image/', '').toUpperCase()).join(', ')} for this asset.` };
+  }
+  if (file.size > Number(spec.maxBytes || 0)) return { error: `Image is too large. Max size is ${formatBytes(spec.maxBytes)}.` };
+  const size = await readImageSize(file);
+  if (!size) return { error: 'Could not read this image. Try a PNG, WebP, or JPEG file.' };
+  if (size.width !== spec.width || size.height !== spec.height) {
+    return { error: `Image must be exactly ${spec.width}x${spec.height}. This file is ${size.width}x${size.height}.` };
+  }
+  return size;
 }
 
 async function duplicateCatalogItem() {

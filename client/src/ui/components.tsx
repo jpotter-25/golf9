@@ -12,11 +12,12 @@ import {
   ViewStyle,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Bell, BookOpen, Coins, GraduationCap, Home, LogOut, Music2, Settings, Volume2, X, Zap } from 'lucide-react-native';
+import { Bell, BookOpen, Coins, GraduationCap, Home, LogOut, Mail, Music2, Settings, Volume2, X, Zap } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { useNavigation, useRoute, type NavigationProp, type ParamListBase } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
+import * as api from '../services/api';
 import { getGameplayPreferences, setGameplayPreferences, subscribeGameplayPreferences } from '../services/preferences';
 import { RankEmblem } from '../components/AvatarDecorations';
 import { PlayerAvatar } from '../components/PlayerAvatar';
@@ -88,14 +89,33 @@ function GlobalTopBar() {
   const insets = useSafeAreaInsets();
   const route = useRoute();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
-  const { user, signOut } = useAuth();
+  const { token, user, signOut } = useAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prefs, setPrefs] = useState(getGameplayPreferences());
+  const [mailSummary, setMailSummary] = useState<api.MailSummary | null>(null);
   const isLobby = route.name === 'Lobby';
   const progress = Math.max(0.06, Math.min(1, user?.progression.levelProgress ?? 0));
   const ranked = user?.competitive;
 
   useEffect(() => subscribeGameplayPreferences(setPrefs), []);
+
+  useEffect(() => {
+    if (!token) {
+      setMailSummary(null);
+      return undefined;
+    }
+    let cancelled = false;
+    api.mailSummary(token)
+      .then(response => {
+        if (!cancelled) setMailSummary(response.summary);
+      })
+      .catch(() => {
+        if (!cancelled) setMailSummary(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [route.name, token]);
 
   const updatePrefs = (next: Partial<typeof prefs>) => setGameplayPreferences(next);
 
@@ -131,6 +151,15 @@ function GlobalTopBar() {
           onPress={() => navigation.navigate('Profile')}
         >
           <RankEmblem league={ranked?.league} size={32} />
+        </Pressable>
+
+        <Pressable accessibilityRole="button" accessibilityLabel="Open inbox" style={styles.topIconButton} onPress={() => navigation.navigate('Inbox')}>
+          <Mail size={20} color={ui.text.primary} strokeWidth={2.8} />
+          {(mailSummary?.unread || mailSummary?.claimable) ? (
+            <View style={styles.topIconBadge}>
+              <Text style={styles.topIconBadgeText}>{Math.min(99, Number(mailSummary?.unread || mailSummary?.claimable || 0))}</Text>
+            </View>
+          ) : null}
         </Pressable>
 
         <Pressable accessibilityRole="button" accessibilityLabel="Open settings" style={styles.topIconButton} onPress={() => setSettingsOpen(true)}>
@@ -413,6 +442,25 @@ const styles = StyleSheet.create({
     backgroundColor: ui.surface.glass,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  topIconBadge: {
+    position: 'absolute',
+    right: -4,
+    top: -5,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: ui.surface.base,
+    backgroundColor: ui.feedback.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  topIconBadgeText: {
+    color: ui.text.primary,
+    fontSize: 10,
+    fontWeight: '900',
   },
   modalBackdrop: {
     flex: 1,

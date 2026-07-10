@@ -350,6 +350,37 @@ export type CosmeticItem = {
   canAfford: boolean;
 };
 
+export type MailAttachment =
+  | { type: 'coins'; amount: number }
+  | { type: 'cosmetic'; cosmeticId: string };
+
+export type MailEntry = {
+  mailId: string;
+  batchId: string;
+  title: string;
+  body: string;
+  attachments: MailAttachment[];
+  createdAt: number;
+  createdByAdminName: string;
+  expiresAt: number | null;
+  readAt: number | null;
+  claimedAt: number | null;
+  deletedAt: number | null;
+  read: boolean;
+  claimed: boolean;
+  expired: boolean;
+  claimable: boolean;
+};
+
+export type MailSummary = {
+  total: number;
+  unread: number;
+  claimable: number;
+  latest: MailEntry | null;
+};
+
+export type MailFeedbackCategory = 'bug' | 'suggestion' | 'account' | 'gameplay' | 'other';
+
 export type LocalResultPayload = {
   mode: 'solo' | 'passplay';
   totalRounds: 5 | 9;
@@ -702,6 +733,49 @@ export function createSupportTicket(
 ): Promise<{ ticket: { ticketId: string; status: string; subject: string; createdAt: number } }> {
   return request<{ ticket: { ticketId: string; status: string; subject: string; createdAt: number } }>(
     '/support/tickets',
+    { method: 'POST', body: JSON.stringify(payload) },
+    token
+  );
+}
+
+export function mailSummary(token: string): Promise<{ summary: MailSummary }> {
+  return request<{ summary: MailSummary }>('/mail/summary', {}, token);
+}
+
+export function mailList(token: string): Promise<{ mail: MailEntry[]; summary: MailSummary }> {
+  return request<{ mail: MailEntry[]; summary: MailSummary }>('/mail', {}, token);
+}
+
+export function markMailRead(token: string, mailId: string): Promise<{ mail: MailEntry; summary: MailSummary }> {
+  return request<{ mail: MailEntry; summary: MailSummary }>(
+    `/mail/${encodeURIComponent(mailId)}/read`,
+    { method: 'POST' },
+    token
+  );
+}
+
+export function claimMail(token: string, mailId: string): Promise<{ mail: MailEntry; rewards: MailAttachment[]; alreadyClaimed?: boolean; user?: UserProfile; summary: MailSummary }> {
+  return request<{ mail: MailEntry; rewards: MailAttachment[]; alreadyClaimed?: boolean; user?: UserProfile; summary: MailSummary }>(
+    `/mail/${encodeURIComponent(mailId)}/claim`,
+    { method: 'POST' },
+    token
+  );
+}
+
+export function deleteMail(token: string, mailId: string): Promise<{ ok: boolean; mail: MailEntry; summary: MailSummary }> {
+  return request<{ ok: boolean; mail: MailEntry; summary: MailSummary }>(
+    `/mail/${encodeURIComponent(mailId)}`,
+    { method: 'DELETE' },
+    token
+  );
+}
+
+export function submitMailboxFeedback(
+  token: string,
+  payload: { category: MailFeedbackCategory; subject?: string; message: string }
+): Promise<{ ticket: { ticketId: string; status: string; subject: string; createdAt: number } }> {
+  return request<{ ticket: { ticketId: string; status: string; subject: string; createdAt: number } }>(
+    '/mail/feedback',
     { method: 'POST', body: JSON.stringify(payload) },
     token
   );

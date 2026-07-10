@@ -15,3 +15,4 @@ export { default as RankedQueueScreen } from './RankedQueueScreen';
 export { default as SocialScreen } from './SocialScreen';
 export { default as PlayerProfileScreen } from './PlayerProfileScreen';
 export { default as ClubScreen } from './ClubScreen';
+export { default as InboxScreen } from './InboxScreen';
