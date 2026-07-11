@@ -5,7 +5,7 @@ import { io, Socket } from 'socket.io-client';
 import { SOCKET_URL } from '../config';
 import { getInstallIdSync } from '../utils/deviceIdentity';
 import type { GameState } from '../game/types';
-import type { ClubAnnouncement, ClubChatMessage, ClubProfile, RoomSummary, SocialSummary } from './api';
+import type { ClubAnnouncement, ClubChatMessage, ClubProfile, MailSummary, RoomSummary, SocialSummary } from './api';
 
 export type ChatMessage = {
   id: string;
@@ -125,6 +125,11 @@ export function onSocialUpdate(cb: (social: SocialSummary) => void) {
   return () => { socket?.off('social:update', cb); };
 }
 
+export function onMailUpdate(cb: (summary: MailSummary) => void) {
+  socket?.on('mail:update', cb);
+  return () => { socket?.off('mail:update', cb); };
+}
+
 export function joinClubSocket(token: string, clubId: string): Promise<{ club: ClubProfile; chat: ClubChatMessage[] }> {
   const s = connect(token);
   return new Promise((resolve, reject) => {
@@ -153,6 +158,21 @@ export function onClubChatMessage(cb: (message: ClubChatMessage) => void) {
 export function onClubAnnouncement(cb: (announcement: ClubAnnouncement) => void) {
   socket?.on('club:announcement', cb);
   return () => { socket?.off('club:announcement', cb); };
+}
+
+export function updateClubPresence(token: string, foreground: boolean): Promise<void> {
+  const s = connect(token);
+  return new Promise((resolve, reject) => {
+    s.emit('club:presence:state', { foreground }, (res: { error?: string }) => {
+      if (res.error) reject(new Error(res.error));
+      else resolve();
+    });
+  });
+}
+
+export function onClubPresence(cb: (presence: { clubId: string; onlineUserIds: string[]; onlineMemberCount: number }) => void) {
+  socket?.on('club:presence', cb);
+  return () => { socket?.off('club:presence', cb); };
 }
 
 export function sendClubChatMessage(token: string, clubId: string, type: ChatMessageType, text: string): Promise<{ message: ClubChatMessage }> {

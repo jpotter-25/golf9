@@ -11,6 +11,9 @@ const CLUB_LEVEL_THRESHOLDS = [
 const CLUB_ANNOUNCEMENT_LIMIT = 20;
 const CLUB_PROCESSED_RESULT_LIMIT = 500;
 const CLUB_DONATION_LEDGER_LIMIT = 200;
+const CLUB_TREASURY_GOAL_TITLE_MAX = 60;
+const CLUB_TREASURY_GOAL_DESCRIPTION_MAX = 180;
+const CLUB_TREASURY_GOAL_MAX = 100_000_000;
 
 export const CLUB_ROLES = ['owner', 'officer', 'member', 'rookie'];
 
@@ -177,6 +180,22 @@ function normalizeClubTreasury(club, now = Date.now()) {
   };
 }
 
+function normalizeClubTreasuryGoal(goal, now = Date.now()) {
+  if (!goal || typeof goal !== 'object') return null;
+  const title = clampText(goal.title, CLUB_TREASURY_GOAL_TITLE_MAX);
+  const description = clampText(goal.description, CLUB_TREASURY_GOAL_DESCRIPTION_MAX);
+  const targetAmount = Math.min(CLUB_TREASURY_GOAL_MAX, Math.max(0, safeInteger(goal.targetAmount, 0)));
+  if (!title || !targetAmount) return null;
+  return {
+    title,
+    description,
+    targetAmount,
+    createdBy: goal.createdBy ? String(goal.createdBy) : null,
+    createdAt: safeInteger(goal.createdAt, now) || now,
+    updatedAt: safeInteger(goal.updatedAt, now) || now,
+  };
+}
+
 function targetScale(memberCap) {
   return Math.max(1, Math.ceil(Number(memberCap || 15) / 15));
 }
@@ -257,6 +276,7 @@ export function normalizeClubRecord(club, now = Date.now(), rankedSeason = null,
   club.updatedAt = Number(club.updatedAt || club.createdAt) || club.createdAt;
   club.prestige = normalizeClubPrestige(club, now);
   club.treasury = normalizeClubTreasury(club, now);
+  club.treasuryGoal = normalizeClubTreasuryGoal(club.treasuryGoal, now);
   const activePrestigeTier = prestigeTierFor(config, club.prestige.tier);
   const progression = clubProgressionSnapshot(club.progression?.totalXp ?? club.totalXp ?? 0, activePrestigeTier.memberCap);
   const memberCap = progression.memberCap;
@@ -321,6 +341,7 @@ export function createClubRecord(owner, payload, now = Date.now(), clubConfig = 
       }],
     },
     treasury: { balance: 0, lifetimeDonated: 0, donations: [] },
+    treasuryGoal: null,
     progression: { totalXp: 0 },
     members: [{
       userId: owner.userId,
@@ -452,10 +473,11 @@ export function publicClubPrestigeStatus(club, clubConfig = DEFAULT_CLUB_CONFIG)
   };
 }
 
-export function publicClubSummary(club, viewerUserId = null, now = Date.now(), rankedSeason = null, clubConfig = DEFAULT_CLUB_CONFIG) {
+export function publicClubSummary(club, viewerUserId = null, now = Date.now(), rankedSeason = null, clubConfig = DEFAULT_CLUB_CONFIG, onlineUserIds = null) {
   const normalized = normalizeClubRecord(club, now, rankedSeason, clubConfig);
   const member = viewerUserId ? findClubMember(normalized, viewerUserId) : null;
   const prestige = publicClubPrestigeStatus(normalized, clubConfig);
+  const online = onlineUserIds instanceof Set ? onlineUserIds : new Set();
   return {
     clubId: normalized.clubId,
     name: normalized.name,
@@ -464,6 +486,7 @@ export function publicClubSummary(club, viewerUserId = null, now = Date.now(), r
     level: normalized.progression.level,
     memberCount: normalized.members.length,
     memberCap: normalized.progression.memberCap,
+    onlineMemberCount: normalized.members.filter(item => online.has(item.userId)).length,
     role: member?.role ?? null,
     prestige: {
       tier: normalized.prestige.tier,
@@ -497,8 +520,9 @@ function publicGoal(goal) {
   };
 }
 
-function publicMember(club, users, member) {
+function publicMember(club, users, member, onlineUserIds = null) {
   const user = users.get(member.userId);
+  const online = onlineUserIds instanceof Set ? onlineUserIds.has(member.userId) : false;
   return {
     userId: member.userId,
     displayName: user?.displayName || 'Unknown Player',
@@ -508,6 +532,7 @@ function publicMember(club, users, member) {
     contributionXp: member.contributionXp,
     coinContribution: member.coinContribution || 0,
     contribution: member.contribution,
+    isOnline: online,
   };
 }
 
@@ -563,14 +588,14 @@ function publicDonationStats(club, users, viewerUserId = null) {
   };
 }
 
-export function publicClubProfile(club, users, viewerUserId, rankedSeason = null, now = Date.now(), clubConfig = DEFAULT_CLUB_CONFIG) {
+export function publicClubProfile(club, users, viewerUserId, rankedSeason = null, now = Date.now(), clubConfig = DEFAULT_CLUB_CONFIG, onlineUserIds = null) {
   normalizeClubRecord(club, now, rankedSeason, clubConfig);
   const viewerMember = findClubMember(club, viewerUserId);
   const viewerRole = viewerMember?.role ?? null;
   const prestige = publicClubPrestigeStatus(club, clubConfig);
   const canPrestige = canManageRequests(viewerRole) && prestige.eligible && !prestige.maxed;
   return {
-    ...publicClubSummary(club, viewerUserId, now, rankedSeason, clubConfig),
+    ...publicClubSummary(club, viewerUserId, now, rankedSeason, clubConfig, onlineUserIds),
     createdAt: club.createdAt,
     updatedAt: club.updatedAt,
     progression: club.progression,
@@ -578,6 +603,7 @@ export function publicClubProfile(club, users, viewerUserId, rankedSeason = null
       balance: club.treasury.balance,
       lifetimeDonated: club.treasury.lifetimeDonated,
     },
+    treasuryGoal: club.treasuryGoal ? { ...club.treasuryGoal } : null,
     donationStats: publicDonationStats(club, users, viewerUserId),
     nextPrestige: prestige.maxed ? null : {
       tier: prestige.next.tier,
@@ -590,7 +616,7 @@ export function publicClubProfile(club, users, viewerUserId, rankedSeason = null
       eligible: prestige.eligible,
     },
     canPrestige,
-    members: club.members.map(member => publicMember(club, users, member)),
+    members: club.members.map(member => publicMember(club, users, member, onlineUserIds)),
     joinRequests: canManageRequests(viewerRole) ? club.joinRequests.map(request => publicJoinRequest(users, request)) : [],
     invites: canManageRequests(viewerRole) ? club.invites.map(invite => publicJoinRequest(users, invite)) : [],
     announcements: club.announcements.slice().reverse(),
@@ -736,6 +762,35 @@ export function donateToClubTreasury(user, club, amount, now = Date.now(), clubC
   return { donation, treasury: club.treasury };
 }
 
+export function setClubTreasuryGoal(user, club, payload = {}, now = Date.now()) {
+  normalizeClubRecord(club, now);
+  const member = findClubMember(club, user.userId);
+  if (!member) return { error: 'Join this club before updating its treasury goal.' };
+  if (!canManageRequests(member.role)) return { error: 'Only club owners and officers can update the treasury goal.' };
+  const goal = normalizeClubTreasuryGoal({
+    title: payload.title,
+    description: payload.description,
+    targetAmount: payload.targetAmount,
+    createdBy: club.treasuryGoal?.createdBy || user.userId,
+    createdAt: club.treasuryGoal?.createdAt || now,
+    updatedAt: now,
+  }, now);
+  if (!goal) return { error: 'Treasury goal title and a positive target amount are required.' };
+  club.treasuryGoal = goal;
+  club.updatedAt = now;
+  return { treasuryGoal: goal };
+}
+
+export function clearClubTreasuryGoal(user, club, now = Date.now()) {
+  normalizeClubRecord(club, now);
+  const member = findClubMember(club, user.userId);
+  if (!member) return { error: 'Join this club before updating its treasury goal.' };
+  if (!canManageRequests(member.role)) return { error: 'Only club owners and officers can update the treasury goal.' };
+  club.treasuryGoal = null;
+  club.updatedAt = now;
+  return { treasuryGoal: null };
+}
+
 export function purchaseClubPrestige(user, club, clubConfig = DEFAULT_CLUB_CONFIG, now = Date.now()) {
   normalizeClubRecord(club, now, null, clubConfig);
   const member = findClubMember(club, user.userId);
@@ -763,6 +818,47 @@ export function purchaseClubPrestige(user, club, clubConfig = DEFAULT_CLUB_CONFI
   return { prestige: club.prestige, treasury: club.treasury };
 }
 
+export function syncClubRewards(club, users, now = Date.now()) {
+  normalizeClubRecord(club, now);
+  const userMap = users instanceof Map
+    ? users
+    : new Map((Array.isArray(users) ? users : []).filter(Boolean).map(user => [user.userId, user]));
+  const clubRewards = [];
+  const memberRewards = [];
+  let changed = false;
+
+  for (const reward of CLUB_REWARD_CATALOG) {
+    if (club.progression.level < reward.minLevel) continue;
+    if (reward.scope === 'club') {
+      if (!club.rewards.unlocked.includes(reward.id)) {
+        club.rewards.unlocked.push(reward.id);
+        clubRewards.push(reward.id);
+        changed = true;
+      }
+      continue;
+    }
+
+    for (const member of club.members) {
+      if (Number(member.contributionXp || 0) < Number(reward.minContributionXp || 0)) continue;
+      const user = userMap.get(member.userId);
+      if (!user) continue;
+      club.rewards.memberClaims[member.userId] ||= [];
+      if (club.rewards.memberClaims[member.userId].includes(reward.id)) continue;
+      user.inventory ||= {};
+      user.inventory.cosmetics ||= [];
+      if (reward.cosmeticId && !user.inventory.cosmetics.includes(reward.cosmeticId)) {
+        user.inventory.cosmetics.push(reward.cosmeticId);
+      }
+      club.rewards.memberClaims[member.userId].push(reward.id);
+      memberRewards.push({ userId: member.userId, rewardId: reward.id, cosmeticId: reward.cosmeticId || null });
+      changed = true;
+    }
+  }
+
+  if (changed) club.updatedAt = now;
+  return { changed, clubRewards, memberRewards };
+}
+
 export function claimClubReward(user, club, rewardId, now = Date.now()) {
   normalizeClubRecord(club, now);
   const reward = CLUB_REWARD_CATALOG.find(item => item.id === rewardId);
@@ -771,23 +867,16 @@ export function claimClubReward(user, club, rewardId, now = Date.now()) {
   if (!member) return { error: 'You are not in this club.' };
   if (club.progression.level < reward.minLevel) return { error: 'Club level is not high enough yet.' };
 
-  if (reward.scope === 'club') {
-    if (club.rewards.unlocked.includes(reward.id)) return { error: 'Club reward already unlocked.' };
-    if (member.role !== 'owner' && member.role !== 'officer') return { error: 'Only club officers can claim shared club rewards.' };
-    club.rewards.unlocked.push(reward.id);
-    club.updatedAt = now;
-    return { reward: { ...reward, eligible: true, claimed: true }, granted: null };
+  if (reward.scope === 'member' && member.contributionXp < Number(reward.minContributionXp || 0)) {
+    return { error: 'Contribute more to earn this member reward.' };
   }
-
-  if (member.contributionXp < Number(reward.minContributionXp || 0)) return { error: 'Contribute more to claim this member reward.' };
-  club.rewards.memberClaims[user.userId] ||= [];
-  if (club.rewards.memberClaims[user.userId].includes(reward.id)) return { error: 'Member reward already claimed.' };
-  user.inventory ||= {};
-  user.inventory.cosmetics ||= [];
-  if (reward.cosmeticId && !user.inventory.cosmetics.includes(reward.cosmeticId)) {
-    user.inventory.cosmetics.push(reward.cosmeticId);
-  }
-  club.rewards.memberClaims[user.userId].push(reward.id);
-  club.updatedAt = now;
-  return { reward: { ...reward, eligible: true, claimed: true }, granted: reward.cosmeticId || null };
+  const wasClaimed = reward.scope === 'club'
+    ? club.rewards.unlocked.includes(reward.id)
+    : (club.rewards.memberClaims[user.userId] || []).includes(reward.id);
+  syncClubRewards(club, new Map([[user.userId, user]]), now);
+  return {
+    reward: { ...reward, eligible: true, claimed: true },
+    granted: reward.scope === 'member' ? reward.cosmeticId || null : null,
+    alreadyClaimed: wasClaimed,
+  };
 }

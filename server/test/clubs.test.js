@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   applyClubMatchContribution,
+  clearClubTreasuryGoal,
   claimClubReward,
   clubProgressionSnapshot,
   createClubRecord,
@@ -9,7 +10,10 @@ import {
   findClubMember,
   memberCapForLevel,
   normalizeClubRecord,
+  publicClubProfile,
   purchaseClubPrestige,
+  setClubTreasuryGoal,
+  syncClubRewards,
 } from '../clubs.js';
 
 test('club levels and member caps scale at planned thresholds', () => {
@@ -93,7 +97,84 @@ test('club reward claim grants member cosmetics once', () => {
   assert.equal(user.inventory.cosmetics.includes('club-crest-card-back'), true);
 
   const duplicate = claimClubReward(user, club, 'club-crest-card-back', 4000);
-  assert.equal(duplicate.error, 'Member reward already claimed.');
+  assert.equal(duplicate.error, undefined);
+  assert.equal(duplicate.alreadyClaimed, true);
+  assert.equal(user.inventory.cosmetics.filter(item => item === 'club-crest-card-back').length, 1);
+});
+
+test('eligible club rewards synchronize automatically and idempotently', () => {
+  const user = {
+    userId: 'owner-1',
+    displayName: 'Owner',
+    inventory: { cosmetics: [], equipped: {} },
+  };
+  const users = new Map([[user.userId, user]]);
+  const { club } = createClubRecord(user, { clubId: 'club-1', name: 'Auto Reward Club', tag: 'AUTO' }, 1000);
+  club.progression.totalXp = 4000;
+  normalizeClubRecord(club, 2000);
+  findClubMember(club, user.userId).contributionXp = 600;
+
+  const first = syncClubRewards(club, users, 3000);
+  const second = syncClubRewards(club, users, 4000);
+
+  assert.equal(first.changed, true);
+  assert.deepEqual(first.clubRewards.sort(), ['club-level-2-banner', 'club-level-3-badge']);
+  assert.equal(first.memberRewards.some(item => item.rewardId === 'club-regular-title'), true);
+  assert.equal(first.memberRewards.some(item => item.rewardId === 'club-crest-card-back'), true);
+  assert.equal(second.changed, false);
+  assert.equal(user.inventory.cosmetics.filter(item => item === 'club-crest-card-back').length, 1);
+});
+
+test('treasury goals validate permissions, persist in profiles, and clear', () => {
+  const owner = { userId: 'owner-1', displayName: 'Owner' };
+  const member = { userId: 'member-1', displayName: 'Member' };
+  const users = new Map([[owner.userId, owner], [member.userId, member]]);
+  const { club } = createClubRecord(owner, { clubId: 'club-1', name: 'Goal Club', tag: 'GOAL' }, 1000);
+  club.members.push({
+    userId: member.userId,
+    role: 'member',
+    joinedAt: 1000,
+    contributionXp: 0,
+    coinContribution: 0,
+    contribution: { matches: 0, wins: 0, columnClears: 0, rankedOrWager: 0 },
+  });
+
+  const forbidden = setClubTreasuryGoal(member, club, { title: 'Nope', targetAmount: 1000 }, 2000);
+  assert.match(forbidden.error, /owners and officers/);
+
+  const created = setClubTreasuryGoal(owner, club, {
+    title: 'Tournament entry',
+    description: 'Fund our next club event.',
+    targetAmount: 12500,
+  }, 3000);
+  assert.equal(created.error, undefined);
+  assert.equal(created.treasuryGoal.targetAmount, 12500);
+  normalizeClubRecord(club, 3500);
+  assert.equal(publicClubProfile(club, users, owner.userId, null, 3500).treasuryGoal.title, 'Tournament entry');
+
+  const cleared = clearClubTreasuryGoal(owner, club, 4000);
+  assert.equal(cleared.error, undefined);
+  assert.equal(publicClubProfile(club, users, owner.userId, null, 4000).treasuryGoal, null);
+});
+
+test('public club presence exposes online member count and per-member state', () => {
+  const owner = { userId: 'owner-1', displayName: 'Owner' };
+  const member = { userId: 'member-1', displayName: 'Member' };
+  const users = new Map([[owner.userId, owner], [member.userId, member]]);
+  const { club } = createClubRecord(owner, { clubId: 'club-1', name: 'Presence Club', tag: 'LIVE' }, 1000);
+  club.members.push({
+    userId: member.userId,
+    role: 'member',
+    joinedAt: 1000,
+    contributionXp: 0,
+    coinContribution: 0,
+    contribution: { matches: 0, wins: 0, columnClears: 0, rankedOrWager: 0 },
+  });
+
+  const profile = publicClubProfile(club, users, owner.userId, null, 2000, undefined, new Set([owner.userId]));
+  assert.equal(profile.onlineMemberCount, 1);
+  assert.equal(profile.members.find(item => item.userId === owner.userId).isOnline, true);
+  assert.equal(profile.members.find(item => item.userId === member.userId).isOnline, false);
 });
 
 test('club donations fund treasury and prestige purchases persist member cap', () => {

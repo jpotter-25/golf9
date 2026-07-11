@@ -26,6 +26,7 @@ import {
   InboxScreen,
 } from './screens';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ClubRealtimeProvider } from './context/ClubRealtimeContext';
 import * as api from './services/api';
 import { getGameplayPreferences, subscribeGameplayPreferences, type GameplayPreferences } from './services/preferences';
 import { registerPushNotifications, unregisterPushNotifications } from './services/pushNotifications';
@@ -285,8 +286,10 @@ export default function App() {
       {/* Hide the OS status bar */}
       <StatusBar hidden />
       <AuthProvider>
-        <PushNotificationRegistration />
-        <AppNavigator />
+        <ClubRealtimeProvider>
+          <PushNotificationRegistration />
+          <AppNavigator />
+        </ClubRealtimeProvider>
       </AuthProvider>
     </SafeAreaProvider>
   );

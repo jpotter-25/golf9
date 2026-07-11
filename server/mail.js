@@ -106,6 +106,7 @@ export function mailSummaryForUser(entries, userId) {
     total: mail.length,
     unread: mail.filter(entry => !entry.read).length,
     claimable: mail.filter(entry => entry.claimable).length,
+    attention: mail.filter(entry => !entry.read || entry.claimable).length,
     latest: mail[0] || null,
   };
 }

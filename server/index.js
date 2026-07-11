@@ -92,6 +92,7 @@ import {
   canManageRequests,
   canPostAnnouncement,
   canUpdateClub,
+  clearClubTreasuryGoal,
   claimClubReward,
   CLUB_ROLES,
   createClubRecord,
@@ -103,6 +104,8 @@ import {
   publicClubProfile as buildPublicClubProfile,
   publicClubSummary as buildPublicClubSummary,
   purchaseClubPrestige,
+  setClubTreasuryGoal,
+  syncClubRewards,
 } from './clubs.js';
 import {
   devTestAccountForDisplayName,
@@ -365,6 +368,8 @@ const rooms = new Map();
 const sockets = new Map();
 /** @type {Map<string, Set<string>>} */
 const userSockets = new Map();
+/** @type {Map<string, Set<string>>} */
+const clubForegroundSockets = new Map();
 /** @type {Map<string, any>} */
 const rankedQueue = new Map();
 /** @type {Map<string, any>} */
@@ -383,6 +388,7 @@ const googleOAuthClient = new OAuth2Client();
 let storeReady = false;
 let storeLoadError = null;
 let lastDailyPushScanAt = 0;
+let storeMigrationPending = false;
 
 function storageStatus() {
   return {
@@ -433,12 +439,18 @@ function normalizeClub(club, now = Date.now(), season = rankedSeason) {
   return normalizeClubRecord(club, now, season, clubConfig());
 }
 
+function onlineClubUserIds() {
+  return new Set([...clubForegroundSockets.entries()]
+    .filter(([, socketIds]) => socketIds.size > 0)
+    .map(([userId]) => userId));
+}
+
 function publicClubSummary(club, viewerUserId = null, now = Date.now(), season = rankedSeason) {
-  return buildPublicClubSummary(club, viewerUserId, now, season, clubConfig());
+  return buildPublicClubSummary(club, viewerUserId, now, season, clubConfig(), onlineClubUserIds());
 }
 
 function publicClubProfile(club, clubUsers, viewerUserId, season = rankedSeason, now = Date.now()) {
-  return buildPublicClubProfile(club, clubUsers, viewerUserId, season, now, clubConfig());
+  return buildPublicClubProfile(club, clubUsers, viewerUserId, season, now, clubConfig(), onlineClubUserIds());
 }
 
 function uniqueByUserId(items) {
@@ -805,6 +817,7 @@ function normalizeUserRecord(user, now = Date.now()) {
 }
 
 function reconcileClubMemberships(now = Date.now()) {
+  let changed = false;
   for (const club of clubs.values()) normalizeClub(club, now, rankedSeason);
   for (const user of users.values()) normalizeUserClub(user);
 
@@ -828,6 +841,10 @@ function reconcileClubMemberships(now = Date.now()) {
     const club = clubs.get(user.clubId);
     if (!club || !findClubMember(club, user.userId)) user.clubId = null;
   }
+  for (const club of clubs.values()) {
+    if (syncClubRewards(club, users, now).changed) changed = true;
+  }
+  return changed;
 }
 
 function applyStoreState(parsed = {}) {
@@ -861,7 +878,7 @@ function applyStoreState(parsed = {}) {
   }
   results.push(...(parsed.results || []));
   mailEntries.push(...normalizeMailEntries(parsed.mailEntries || []));
-  reconcileClubMemberships();
+  storeMigrationPending = reconcileClubMemberships() || storeMigrationPending;
 }
 
 function loadJsonStore() {
@@ -1504,14 +1521,30 @@ function clubSocketRoom(clubId) {
   return `club:${clubId}`;
 }
 
+function emitClubPresence(clubId) {
+  const club = clubs.get(clubId);
+  if (!club) return;
+  const online = onlineClubUserIds();
+  const onlineUserIds = club.members.map(member => member.userId).filter(userId => online.has(userId));
+  io.to(clubSocketRoom(clubId)).emit('club:presence', {
+    clubId,
+    onlineUserIds,
+    onlineMemberCount: onlineUserIds.length,
+  });
+}
+
 function emitClubUpdate(clubId) {
   const club = clubs.get(clubId);
   if (!club) return;
-  io.to(clubSocketRoom(clubId)).emit('club:update', {
-    clubId,
-    club: publicClubProfile(club, users, null, rankedSeason),
-  });
-  for (const member of club.members || []) emitSocialUpdate(member.userId);
+  if (syncClubRewards(club, users, Date.now()).changed) saveStore();
+  for (const member of club.members || []) {
+    io.to(`user:${member.userId}`).emit('club:update', {
+      clubId,
+      club: publicClubProfile(club, users, member.userId, rankedSeason),
+    });
+    emitSocialUpdate(member.userId);
+  }
+  emitClubPresence(clubId);
 }
 
 function userClubApplications(userId) {
@@ -1523,6 +1556,19 @@ function userClubApplications(userId) {
         club: publicClubSummary(club, userId),
         createdAt: request.createdAt,
         message: request.message || '',
+      })));
+}
+
+function userClubInvitations(userId) {
+  return [...clubs.values()]
+    .flatMap(club => (club.invites || [])
+      .filter(invite => invite.userId === userId)
+      .map(invite => ({
+        id: invite.id,
+        club: publicClubSummary(club, userId),
+        createdAt: invite.createdAt,
+        fromUserId: invite.fromUserId || null,
+        fromDisplayName: users.get(invite.fromUserId)?.displayName || 'Club officer',
       })));
 }
 
@@ -2380,6 +2426,7 @@ function applyClubContributions(room, result) {
     club.processedResultIds.push(result.resultId);
     club.updatedAt = result.completedAt;
     normalizeClub(club, result.completedAt, rankedSeason);
+    syncClubRewards(club, users, result.completedAt);
     emitClubUpdate(club.clubId);
     if (summaries.some(summary => summary.completedGoals?.length)) {
       for (const { player } of players) {
@@ -4112,13 +4159,19 @@ app.get('/clubs/me', requireAuth, (req, res) => {
     return res.json({
       club: null,
       applications: userClubApplications(req.auth.user.userId),
+      invitations: userClubInvitations(req.auth.user.userId),
       recommended: [...clubs.values()]
         .sort((a, b) => b.progression.totalXp - a.progression.totalXp)
         .slice(0, 8)
         .map(item => publicClubSummary(item, req.auth.user.userId)),
     });
   }
-  return res.json({ club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason), applications: [] });
+  if (syncClubRewards(club, users, Date.now()).changed) saveStore();
+  return res.json({
+    club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason),
+    applications: [],
+    invitations: [],
+  });
 });
 
 app.post('/clubs', requireAuth, (req, res) => {
@@ -4287,6 +4340,59 @@ app.post('/clubs/:clubId/invites', requireAuth, (req, res) => {
   return res.json({ invite, club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason) });
 });
 
+app.post('/clubs/:clubId/invites/:inviteId/accept', requireAuth, (req, res) => {
+  const club = clubById(req.params.clubId);
+  if (!club) return res.status(404).json({ error: 'Club invitation not found.' });
+  if (frozenClubResponse(club, res)) return;
+  normalizeClub(club);
+  const invite = club.invites.find(item => item.id === req.params.inviteId && item.userId === req.auth.user.userId);
+  if (!invite) return res.status(404).json({ error: 'Club invitation not found.' });
+  const access = clubAccessError(req.auth.user, 'join');
+  if (access) return res.status(access.status).json(access);
+  if (req.auth.user.clubId && clubs.has(req.auth.user.clubId)) return res.status(409).json({ error: 'Leave your current club before joining another.' });
+  if (club.members.length >= club.progression.memberCap) return res.status(409).json({ error: 'Club is full.' });
+
+  club.invites = club.invites.filter(item => item.id !== invite.id);
+  club.joinRequests = club.joinRequests.filter(item => item.userId !== req.auth.user.userId);
+  for (const otherClub of clubs.values()) {
+    if (otherClub.clubId === club.clubId) continue;
+    otherClub.joinRequests = otherClub.joinRequests.filter(item => item.userId !== req.auth.user.userId);
+    otherClub.invites = otherClub.invites.filter(item => item.userId !== req.auth.user.userId);
+  }
+  club.members.push({
+    userId: req.auth.user.userId,
+    role: 'rookie',
+    joinedAt: Date.now(),
+    contributionXp: 0,
+    coinContribution: 0,
+    contribution: { matches: 0, wins: 0, columnClears: 0, rankedOrWager: 0 },
+  });
+  req.auth.user.clubId = club.clubId;
+  club.updatedAt = Date.now();
+  io.in(`user:${req.auth.user.userId}`).socketsJoin(clubSocketRoom(club.clubId));
+  saveStore();
+  emitClubUpdate(club.clubId);
+  emitSocialUpdate(req.auth.user.userId);
+  return res.json({
+    club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason),
+    user: safeUser(req.auth.user),
+    invitations: [],
+  });
+});
+
+app.delete('/clubs/:clubId/invites/:inviteId', requireAuth, (req, res) => {
+  const club = clubById(req.params.clubId);
+  if (!club) return res.status(404).json({ error: 'Club invitation not found.' });
+  const before = club.invites.length;
+  club.invites = club.invites.filter(item => !(item.id === req.params.inviteId && item.userId === req.auth.user.userId));
+  if (before === club.invites.length) return res.status(404).json({ error: 'Club invitation not found.' });
+  club.updatedAt = Date.now();
+  saveStore();
+  emitClubUpdate(club.clubId);
+  emitSocialUpdate(req.auth.user.userId);
+  return res.json({ ok: true, invitations: userClubInvitations(req.auth.user.userId) });
+});
+
 app.post('/clubs/:clubId/donate', requireAuth, (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
@@ -4300,6 +4406,28 @@ app.post('/clubs/:clubId/donate', requireAuth, (req, res) => {
     club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason),
     user: safeUser(req.auth.user),
   });
+});
+
+app.put('/clubs/:clubId/treasury-goal', requireAuth, (req, res) => {
+  const club = clubById(req.params.clubId);
+  if (!club) return res.status(404).json({ error: 'Club not found.' });
+  if (frozenClubResponse(club, res)) return;
+  const result = setClubTreasuryGoal(req.auth.user, club, req.body || {}, Date.now());
+  if (result.error) return res.status(result.error.startsWith('Only ') ? 403 : 400).json({ error: result.error });
+  saveStore();
+  emitClubUpdate(club.clubId);
+  return res.json({ ...result, club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason) });
+});
+
+app.delete('/clubs/:clubId/treasury-goal', requireAuth, (req, res) => {
+  const club = clubById(req.params.clubId);
+  if (!club) return res.status(404).json({ error: 'Club not found.' });
+  if (frozenClubResponse(club, res)) return;
+  const result = clearClubTreasuryGoal(req.auth.user, club, Date.now());
+  if (result.error) return res.status(result.error.startsWith('Only ') ? 403 : 400).json({ error: result.error });
+  saveStore();
+  emitClubUpdate(club.clubId);
+  return res.json({ ...result, club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason) });
 });
 
 app.post('/clubs/:clubId/prestige', requireAuth, (req, res) => {
@@ -4323,6 +4451,7 @@ app.post('/clubs/:clubId/leave', requireAuth, (req, res) => {
   const member = findClubMember(club, req.auth.user.userId);
   if (member.role === 'owner' && club.members.length > 1) return res.status(409).json({ error: 'Transfer ownership before leaving.' });
   removeUserFromClub(club, req.auth.user.userId);
+  io.in(`user:${req.auth.user.userId}`).socketsLeave(clubSocketRoom(club.clubId));
   if (!club.members.length) clubs.delete(club.clubId);
   else club.updatedAt = Date.now();
   saveStore();
@@ -4898,6 +5027,13 @@ io.on('connection', (socket) => {
   socket.join(`user:${connectedUserId}`);
   if (!userSockets.has(connectedUserId)) userSockets.set(connectedUserId, new Set());
   userSockets.get(connectedUserId).add(socket.id);
+  if (!clubForegroundSockets.has(connectedUserId)) clubForegroundSockets.set(connectedUserId, new Set());
+  clubForegroundSockets.get(connectedUserId).add(socket.id);
+  const connectedClub = socket.auth.user.clubId ? clubById(socket.auth.user.clubId) : null;
+  if (connectedClub && findClubMember(connectedClub, connectedUserId)) {
+    socket.join(clubSocketRoom(connectedClub.clubId));
+    emitClubPresence(connectedClub.clubId);
+  }
 
   socket.on('room:join', ({ code }, cb = () => {}) => {
     const room = rooms.get(String(code || '').toUpperCase());
@@ -5008,11 +5144,27 @@ io.on('connection', (socket) => {
     const userId = socket.auth.user.userId;
     if (!club || !findClubMember(club, userId)) return cb({ error: 'Club not found.' });
     socket.join(clubSocketRoom(club.clubId));
+    if (!clubForegroundSockets.has(userId)) clubForegroundSockets.set(userId, new Set());
+    clubForegroundSockets.get(userId).add(socket.id);
     socket.emit('club:chat:history', []);
+    emitClubPresence(club.clubId);
     return cb({
       club: publicClubProfile(club, users, userId, rankedSeason),
       chat: [],
     });
+  });
+
+  socket.on('club:presence:state', ({ foreground }, cb = () => {}) => {
+    const user = socket.auth.user;
+    const club = user.clubId ? clubById(user.clubId) : null;
+    if (!club || !findClubMember(club, user.userId)) return cb({ error: 'Club not found.' });
+    if (!clubForegroundSockets.has(user.userId)) clubForegroundSockets.set(user.userId, new Set());
+    const foregroundSockets = clubForegroundSockets.get(user.userId);
+    if (foreground === false) foregroundSockets.delete(socket.id);
+    else foregroundSockets.add(socket.id);
+    if (!foregroundSockets.size) clubForegroundSockets.delete(user.userId);
+    emitClubPresence(club.clubId);
+    return cb({ ok: true });
   });
 
   socket.on('club:chat:send', ({ clubId, type = 'text', text }, cb = () => {}) => {
@@ -5147,6 +5299,11 @@ io.on('connection', (socket) => {
     const activeSockets = userSockets.get(connectedUserId);
     activeSockets?.delete(socket.id);
     if (activeSockets && !activeSockets.size) userSockets.delete(connectedUserId);
+    const foregroundSockets = clubForegroundSockets.get(connectedUserId);
+    foregroundSockets?.delete(socket.id);
+    if (foregroundSockets && !foregroundSockets.size) clubForegroundSockets.delete(connectedUserId);
+    const club = socket.auth.user.clubId ? clubById(socket.auth.user.clubId) : null;
+    if (club) emitClubPresence(club.clubId);
     const link = sockets.get(socket.id);
     if (!link) return;
     const room = rooms.get(link.roomCode);
@@ -5209,6 +5366,10 @@ async function initializePersistence() {
     await loadStore();
     seedLocalTestAccounts();
     seedAdminAccounts();
+    if (storeMigrationPending) {
+      storeMigrationPending = false;
+      saveStore();
+    }
     storeReady = true;
     storeLoadError = null;
     console.log('Golf9 persistence loaded.');

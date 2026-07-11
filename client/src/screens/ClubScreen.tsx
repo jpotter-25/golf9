@@ -1,31 +1,50 @@
 // src/screens/ClubScreen.tsx
-// Purpose: Club discovery, dashboard, shared goals, rewards, members, announcements, and chat.
+// Purpose: Compact club hub with focused chat, progress, treasury, roster, news, and management sheets.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ChevronLeft, Lock } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  Check,
+  ChevronLeft,
+  Clock3,
+  Landmark,
+  Lock,
+  Megaphone,
+  MessageCircle,
+  Settings2,
+  Target,
+  Trophy,
+  Users,
+  X,
+} from 'lucide-react-native';
+import type { LucideIcon } from 'lucide-react-native';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
+import { useClubRealtime } from '../context/ClubRealtimeContext';
 import * as api from '../services/api';
 import { ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
-import {
-  joinClubSocket,
-  onClubAnnouncement,
-  onClubChatHistory,
-  onClubChatMessage,
-  onClubUpdate,
-  sendClubChatMessage,
-} from '../services/network';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Club'>;
+type ClubSection = 'chat' | 'progress' | 'treasury' | 'members' | 'news' | 'manage' | null;
 
 const COLOR_PAIRS = ['emerald', 'gold', 'sky', 'crimson', 'violet'] as const;
 const BADGE_SHAPES = ['shield', 'crest', 'diamond', 'circle'] as const;
 const BANNER_STYLES = ['classic', 'night', 'fairway', 'champion'] as const;
-const QUICK_CHATS = ['Nice play!', 'Good luck!', 'Huge clear!', 'Good game!'];
 const DEFAULT_CLUB_CONFIG: api.ClubEconomyConfig = {
   minJoinLevel: 10,
   minCreateLevel: 10,
@@ -46,99 +65,71 @@ const BRAND_COLORS: Record<string, { accent: string; background: string; soft: s
 
 export default function ClubScreen({ navigation }: Props) {
   const { token, user, refreshProfile } = useAuth();
-  const [club, setClub] = useState<api.ClubProfile | null>(null);
+  const realtime = useClubRealtime();
+  const { club, applications, invitations, recommended } = realtime;
   const [economy, setEconomy] = useState<api.EconomyCatalog | null>(null);
-  const [applications, setApplications] = useState<api.ClubApplication[]>([]);
-  const [recommended, setRecommended] = useState<api.ClubSummary[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<api.ClubSummary[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<ClubSection>(null);
   const [name, setName] = useState('');
   const [tag, setTag] = useState('');
   const [motto, setMotto] = useState('');
-  const [branding, setBranding] = useState<api.ClubBranding>({
-    colorPair: 'emerald',
-    badgeShape: 'shield',
-    bannerStyle: 'classic',
-  });
+  const [branding, setBranding] = useState<api.ClubBranding>({ colorPair: 'emerald', badgeShape: 'shield', bannerStyle: 'classic' });
   const [announcementText, setAnnouncementText] = useState('');
   const [chatInput, setChatInput] = useState('');
-  const [chat, setChat] = useState<api.ClubChatMessage[]>([]);
   const [donationAmount, setDonationAmount] = useState('500');
+  const [goalTitle, setGoalTitle] = useState('');
+  const [goalDescription, setGoalDescription] = useState('');
+  const [goalAmount, setGoalAmount] = useState('');
+  const [editName, setEditName] = useState('');
+  const [editTag, setEditTag] = useState('');
+  const [editMotto, setEditMotto] = useState('');
   const clubConfig = economy?.clubConfig || DEFAULT_CLUB_CONFIG;
 
-  const loadClub = useCallback(async () => {
+  const load = useCallback(async () => {
     if (!token) return;
-    const [response, economyResponse] = await Promise.all([
-      api.clubMe(token),
-      api.economyCatalog(token),
+    await Promise.all([
+      realtime.refresh(),
+      api.economyCatalog(token).then(setEconomy),
     ]);
-    setEconomy(economyResponse);
-    setClub(response.club);
-    setApplications(response.applications);
-    setRecommended(response.recommended ?? []);
-    setChat(response.club?.chat ?? []);
-  }, [token]);
+  }, [realtime.refresh, token]);
 
   useFocusEffect(useCallback(() => {
-    loadClub().catch(() => {
-      setClub(null);
-      setApplications([]);
-      setRecommended([]);
-    });
-  }, [loadClub]));
+    void load().catch(() => {});
+  }, [load]));
 
   useEffect(() => {
-    if (!token || !club) return undefined;
-    let cancelled = false;
-    joinClubSocket(token, club.clubId)
-      .then(response => {
-        if (!cancelled) {
-          setClub(response.club);
-          setChat(response.chat);
-        }
-      })
-      .catch(() => {});
-    const unsubHistory = onClubChatHistory(messages => setChat(messages));
-    const unsubMessage = onClubChatMessage(message => {
-      if (message.clubId !== club.clubId) return;
-      setChat(prev => [...prev.filter(item => item.id !== message.id), message].slice(-80));
-    });
-    const unsubUpdate = onClubUpdate(update => {
-      if (update.clubId === club.clubId) loadClub().catch(() => {});
-    });
-    const unsubAnnouncement = onClubAnnouncement(() => loadClub().catch(() => {}));
-    return () => {
-      cancelled = true;
-      unsubHistory();
-      unsubMessage();
-      unsubUpdate();
-      unsubAnnouncement();
-    };
-  }, [club?.clubId, loadClub, token]);
+    if (!club) return;
+    setGoalTitle(club.treasuryGoal?.title ?? '');
+    setGoalDescription(club.treasuryGoal?.description ?? '');
+    setGoalAmount(club.treasuryGoal?.targetAmount ? String(club.treasuryGoal.targetAmount) : '');
+    setEditName(club.name);
+    setEditTag(club.tag);
+    setEditMotto(club.motto);
+  }, [club?.clubId, club?.treasuryGoal?.updatedAt]);
 
   useEffect(() => {
-    if (!token || club || searchQuery.trim().length < 2) {
+    realtime.setClubChatVisible(activeSection === 'chat');
+    return () => realtime.setClubChatVisible(false);
+  }, [activeSection, realtime.setClubChatVisible]);
+
+  useEffect(() => {
+    if (club || searchQuery.trim().length < 2 || !token) {
       setSearchResults([]);
       return undefined;
     }
     let cancelled = false;
-    const timeout = setTimeout(() => {
+    const timer = setTimeout(() => {
       api.searchClubs(token, searchQuery.trim())
-        .then(response => {
-          if (!cancelled) setSearchResults(response.clubs);
-        })
-        .catch(() => {
-          if (!cancelled) setSearchResults([]);
-        });
+        .then(response => { if (!cancelled) setSearchResults(response.clubs); })
+        .catch(() => { if (!cancelled) setSearchResults([]); });
     }, 250);
     return () => {
       cancelled = true;
-      clearTimeout(timeout);
+      clearTimeout(timer);
     };
   }, [club, searchQuery, token]);
-
-  const activeColors = useMemo(() => colorsFor(club?.branding.colorPair || branding.colorPair), [branding.colorPair, club?.branding.colorPair]);
 
   const runAction = async (id: string, action: () => Promise<void>) => {
     if (busyId || !token) return;
@@ -152,166 +143,551 @@ export default function ClubScreen({ navigation }: Props) {
     }
   };
 
+  const setClubFrom = (response: { club: api.ClubProfile }) => realtime.replaceClub(response.club);
+
   const create = () => runAction('create', async () => {
     const response = await api.createClub(token!, { name, tag, motto, branding });
-    setClub(response.club);
-    setChat(response.club.chat);
+    setClubFrom(response);
     setName('');
     setTag('');
     setMotto('');
     await refreshProfile();
+    await realtime.refresh();
+  });
+
+  const apply = (target: api.ClubSummary) => runAction(`apply:${target.clubId}`, async () => {
+    await api.requestJoinClub(token!, target.clubId);
+    await realtime.refresh();
+  });
+
+  const acceptInvitation = (invitation: api.ClubInvitation) => runAction(`invite:${invitation.id}:accept`, async () => {
+    await realtime.acceptInvitation(invitation);
+  });
+
+  const declineInvitation = (invitation: api.ClubInvitation) => runAction(`invite:${invitation.id}:decline`, async () => {
+    await realtime.declineInvitation(invitation);
   });
 
   const donate = (amount: number) => runAction(`donate:${amount}`, async () => {
     if (!club) return;
-    const response = await api.donateToClub(token!, club.clubId, amount);
-    setClub(response.club);
+    setClubFrom(await api.donateToClub(token!, club.clubId, amount));
     await refreshProfile();
   });
 
   const buyPrestige = () => runAction('prestige', async () => {
     if (!club) return;
-    const response = await api.purchaseClubPrestige(token!, club.clubId);
-    setClub(response.club);
+    setClubFrom(await api.purchaseClubPrestige(token!, club.clubId));
   });
 
-  const apply = (target: api.ClubSummary) => runAction(`apply:${target.clubId}`, async () => {
-    await api.requestJoinClub(token!, target.clubId);
-    await loadClub();
+  const saveGoal = () => runAction('goal:save', async () => {
+    if (!club) return;
+    setClubFrom(await api.updateClubTreasuryGoal(token!, club.clubId, {
+      title: goalTitle,
+      description: goalDescription,
+      targetAmount: Number(goalAmount),
+    }));
   });
 
-  const claimReward = (reward: api.ClubReward) => runAction(`reward:${reward.id}`, async () => {
-    const response = await api.claimClubReward(token!, reward.id);
-    setClub(response.club);
-    await refreshProfile();
+  const clearGoal = () => runAction('goal:clear', async () => {
+    if (!club) return;
+    setClubFrom(await api.clearClubTreasuryGoal(token!, club.clubId));
   });
 
   const postAnnouncement = () => runAction('announcement', async () => {
-    const response = await api.postClubAnnouncement(token!, club!.clubId, announcementText);
-    setClub(response.club);
+    if (!club || !announcementText.trim()) return;
+    setClubFrom(await api.postClubAnnouncement(token!, club.clubId, announcementText));
     setAnnouncementText('');
   });
 
-  const sendChat = (type: api.ClubChatMessage['type'], text: string) => runAction(`chat:${type}:${text}`, async () => {
-    if (!club) return;
-    const response = await sendClubChatMessage(token!, club.clubId, type, text);
-    setChat(prev => [...prev.filter(item => item.id !== response.message.id), response.message].slice(-80));
-    if (type === 'text') setChatInput('');
+  const sendChat = () => runAction('chat', async () => {
+    await realtime.sendClubMessage(chatInput);
+    setChatInput('');
   });
 
   const acceptRequest = (request: api.ClubJoinRequest) => runAction(`accept:${request.id}`, async () => {
-    const response = await api.acceptClubRequest(token!, club!.clubId, request.id);
-    setClub(response.club);
+    if (!club) return;
+    setClubFrom(await api.acceptClubRequest(token!, club.clubId, request.id));
   });
 
   const rejectRequest = (request: api.ClubJoinRequest) => runAction(`reject:${request.id}`, async () => {
-    const response = await api.rejectClubRequest(token!, club!.clubId, request.id);
-    setClub(response.club);
+    if (!club) return;
+    setClubFrom(await api.rejectClubRequest(token!, club.clubId, request.id));
   });
 
   const updateRole = (member: api.ClubMember, role: api.ClubRole) => runAction(`role:${member.userId}:${role}`, async () => {
-    const response = await api.updateClubMember(token!, club!.clubId, member.userId, role);
-    setClub(response.club);
+    if (!club) return;
+    setClubFrom(await api.updateClubMember(token!, club.clubId, member.userId, role));
   });
 
   const removeMember = (member: api.ClubMember) => runAction(`remove:${member.userId}`, async () => {
-    const response = await api.removeClubMember(token!, club!.clubId, member.userId);
-    setClub(response.club);
+    if (!club) return;
+    setClubFrom(await api.removeClubMember(token!, club.clubId, member.userId));
+  });
+
+  const updateIdentity = () => runAction('identity', async () => {
+    if (!club) return;
+    setClubFrom(await api.updateClub(token!, club.clubId, { name: editName, tag: editTag, motto: editMotto }));
   });
 
   const leave = () => runAction('leave', async () => {
-    await api.leaveClub(token!, club!.clubId);
-    setClub(null);
-    setChat([]);
+    if (!club) return;
+    await api.leaveClub(token!, club.clubId);
+    realtime.replaceClub(null);
+    setActiveSection(null);
     await refreshProfile();
-    await loadClub();
+    await realtime.refresh();
   });
+
+  const activeColors = useMemo(() => colorsFor(club?.branding.colorPair || branding.colorPair), [branding.colorPair, club?.branding.colorPair]);
 
   return (
     <ScreenShell scroll>
-      <ScreenHeader
-        eyebrow="Clubs"
-        title="Clubhouse"
-        subtitle="Build a club, chase goals, and stay connected."
-        right={
-          <Pressable style={styles.headerIcon} onPress={() => navigation.goBack()}>
-            <ChevronLeft size={22} color={ui.text.primary} strokeWidth={2.5} />
-          </Pressable>
-        }
-      />
-      {club ? <StatusBadge label={`${club.tag} Lv ${club.level}`} tone="gold" style={styles.clubStatus} /> : null}
-
       {club ? (
         <JoinedClub
           club={club}
-          chat={chat}
+          messages={realtime.chatMessages}
+          unread={realtime.clubChatUnread}
           activeColors={activeColors}
+          activeSection={activeSection}
           busyId={busyId}
-          announcementText={announcementText}
+          viewerCoins={user?.currency.coins ?? 0}
           chatInput={chatInput}
+          announcementText={announcementText}
           donationAmount={donationAmount}
-          viewerCoins={user?.currency.coins || 0}
-          setAnnouncementText={setAnnouncementText}
+          goalTitle={goalTitle}
+          goalDescription={goalDescription}
+          goalAmount={goalAmount}
+          editName={editName}
+          editTag={editTag}
+          editMotto={editMotto}
+          setActiveSection={setActiveSection}
           setChatInput={setChatInput}
+          setAnnouncementText={setAnnouncementText}
           setDonationAmount={setDonationAmount}
-          postAnnouncement={postAnnouncement}
+          setGoalTitle={setGoalTitle}
+          setGoalDescription={setGoalDescription}
+          setGoalAmount={setGoalAmount}
+          setEditName={setEditName}
+          setEditTag={setEditTag}
+          setEditMotto={setEditMotto}
+          goBack={() => navigation.goBack()}
           sendChat={sendChat}
           donate={donate}
           buyPrestige={buyPrestige}
-          claimReward={claimReward}
+          saveGoal={saveGoal}
+          clearGoal={clearGoal}
+          postAnnouncement={postAnnouncement}
           acceptRequest={acceptRequest}
           rejectRequest={rejectRequest}
           updateRole={updateRole}
           removeMember={removeMember}
+          updateIdentity={updateIdentity}
           leave={leave}
         />
       ) : (
-        <NoClub
-          applications={applications}
-          recommended={recommended}
-          searchQuery={searchQuery}
-          searchResults={searchResults}
-          name={name}
-          tag={tag}
-          motto={motto}
-          branding={branding}
-          user={user}
-          clubConfig={clubConfig}
-          busyId={busyId}
-          setSearchQuery={setSearchQuery}
-          setName={setName}
-          setTag={setTag}
-          setMotto={setMotto}
-          setBranding={setBranding}
-          create={create}
-          apply={apply}
-        />
+        <>
+          <ScreenHeader
+            eyebrow="Clubs"
+            title="Clubhouse"
+            subtitle="Build a club, chase goals, and stay connected."
+            right={<BackButton onPress={() => navigation.goBack()} />}
+          />
+          <NoClub
+            applications={applications}
+            invitations={invitations}
+            recommended={recommended}
+            searchQuery={searchQuery}
+            searchResults={searchResults}
+            name={name}
+            tag={tag}
+            motto={motto}
+            branding={branding}
+            user={user}
+            clubConfig={clubConfig}
+            busyId={busyId}
+            setSearchQuery={setSearchQuery}
+            setName={setName}
+            setTag={setTag}
+            setMotto={setMotto}
+            setBranding={setBranding}
+            create={create}
+            apply={apply}
+            acceptInvitation={acceptInvitation}
+            declineInvitation={declineInvitation}
+          />
+        </>
       )}
     </ScreenShell>
   );
 }
 
-function NoClub({
-  applications,
-  recommended,
-  searchQuery,
-  searchResults,
-  name,
-  tag,
-  motto,
-  branding,
-  user,
-  clubConfig,
-  busyId,
-  setSearchQuery,
-  setName,
-  setTag,
-  setMotto,
-  setBranding,
-  create,
-  apply,
-}: {
+function JoinedClub(props: {
+  club: api.ClubProfile;
+  messages: api.ClubChatMessage[];
+  unread: number;
+  activeColors: { accent: string; background: string; soft: string };
+  activeSection: ClubSection;
+  busyId: string | null;
+  viewerCoins: number;
+  chatInput: string;
+  announcementText: string;
+  donationAmount: string;
+  goalTitle: string;
+  goalDescription: string;
+  goalAmount: string;
+  editName: string;
+  editTag: string;
+  editMotto: string;
+  setActiveSection: (section: ClubSection) => void;
+  setChatInput: (value: string) => void;
+  setAnnouncementText: (value: string) => void;
+  setDonationAmount: (value: string) => void;
+  setGoalTitle: (value: string) => void;
+  setGoalDescription: (value: string) => void;
+  setGoalAmount: (value: string) => void;
+  setEditName: (value: string) => void;
+  setEditTag: (value: string) => void;
+  setEditMotto: (value: string) => void;
+  goBack: () => void;
+  sendChat: () => void;
+  donate: (amount: number) => void;
+  buyPrestige: () => void;
+  saveGoal: () => void;
+  clearGoal: () => void;
+  postAnnouncement: () => void;
+  acceptRequest: (request: api.ClubJoinRequest) => void;
+  rejectRequest: (request: api.ClubJoinRequest) => void;
+  updateRole: (member: api.ClubMember, role: api.ClubRole) => void;
+  removeMember: (member: api.ClubMember) => void;
+  updateIdentity: () => void;
+  leave: () => void;
+}) {
+  const { club, activeColors } = props;
+  const canManage = club.permissions.canManageRequests || club.permissions.canEdit;
+  const latestAnnouncement = club.announcements[0];
+  const nextReward = club.rewards.find(reward => !reward.claimed);
+  return (
+    <>
+      <View style={[styles.clubHero, { backgroundColor: activeColors.background, borderColor: activeColors.accent }]}>
+        <BackButton onPress={props.goBack} style={styles.heroBack} />
+        <View style={[styles.clubBadge, { borderColor: activeColors.accent, backgroundColor: activeColors.soft }]}>
+          <Text style={styles.clubBadgeText}>{club.tag}</Text>
+        </View>
+        <View style={styles.flex}>
+          <Text style={styles.clubName} numberOfLines={1}>{club.name}</Text>
+          <Text style={styles.heroMotto} numberOfLines={1}>{club.motto || 'Playing lower together.'}</Text>
+          <View style={styles.heroMetaRow}>
+            <Text style={[styles.heroMeta, { color: activeColors.accent }]}>Lv {club.level}</Text>
+            <Text style={styles.heroMeta}>{club.memberCount}/{club.memberCap} members</Text>
+            <Text style={styles.heroMeta}>{club.onlineMemberCount} online</Text>
+          </View>
+          <ProgressBar progress={club.progression.levelProgress} color={activeColors.accent} />
+          <Text style={styles.heroProgress}>{club.progression.currentLevelXp}/{club.progression.nextLevelXp} XP - {club.prestige.name} - {capitalize(club.role || 'member')}</Text>
+        </View>
+      </View>
+
+      <View style={styles.actionGrid}>
+        <HubAction title="Chat" detail="Live club conversation" Icon={MessageCircle} accent={activeColors.accent} badge={props.unread} onPress={() => props.setActiveSection('chat')} />
+        <HubAction title="Progress" detail={nextReward ? `Next: ${nextReward.name}` : 'All rewards earned'} Icon={Target} accent="#4DA3FF" onPress={() => props.setActiveSection('progress')} />
+        <HubAction title="Treasury" detail={`${formatCoins(club.treasury.balance)} available`} Icon={Landmark} accent={ui.palette.gold} onPress={() => props.setActiveSection('treasury')} />
+        <HubAction title="Members" detail={`${club.onlineMemberCount} online now`} Icon={Users} accent="#B99CFF" onPress={() => props.setActiveSection('members')} />
+        <HubAction title="News" detail={latestAnnouncement?.text || club.event.title} Icon={Megaphone} accent="#FF8D8D" onPress={() => props.setActiveSection('news')} />
+        {canManage ? <HubAction title="Manage" detail={`${club.joinRequests.length} join request${club.joinRequests.length === 1 ? '' : 's'}`} Icon={Settings2} accent="#E8ECF1" badge={club.joinRequests.length} onPress={() => props.setActiveSection('manage')} /> : null}
+      </View>
+
+      <View style={styles.hubBand}>
+        <View style={styles.hubBandIcon}><Trophy size={24} color={ui.palette.gold} /></View>
+        <View style={styles.flex}>
+          <Text style={styles.rowTitle}>{club.event.title}</Text>
+          <Text style={styles.metaText}>Live event score: {club.event.leaderboardScore}</Text>
+        </View>
+        <StatusBadge label={`Tier ${club.prestige.tier}`} tone="gold" />
+      </View>
+
+      <ClubSheet title="Club Chat" subtitle="Live while you are online" visible={props.activeSection === 'chat'} onClose={() => props.setActiveSection(null)}>
+        <ChatSection messages={props.messages} input={props.chatInput} busy={props.busyId === 'chat'} setInput={props.setChatInput} send={props.sendChat} />
+      </ClubSheet>
+
+      <ClubSheet title="Club Progress" subtitle="Goals, event progress, and the reward journey" visible={props.activeSection === 'progress'} onClose={() => props.setActiveSection(null)}>
+        <ProgressSection club={club} accent={activeColors.accent} />
+      </ClubSheet>
+
+      <ClubSheet title="Treasury" subtitle="Fund prestige and shared club goals" visible={props.activeSection === 'treasury'} onClose={() => props.setActiveSection(null)}>
+        <TreasurySection {...props} />
+      </ClubSheet>
+
+      <ClubSheet title="Members" subtitle={`${club.memberCount} members - ${club.onlineMemberCount} online`} visible={props.activeSection === 'members'} onClose={() => props.setActiveSection(null)}>
+        <MembersSection {...props} />
+      </ClubSheet>
+
+      <ClubSheet title="Club News" subtitle="Announcements and the current live event" visible={props.activeSection === 'news'} onClose={() => props.setActiveSection(null)}>
+        <NewsSection club={club} />
+      </ClubSheet>
+
+      <ClubSheet title="Manage Club" subtitle="Owner and officer controls" visible={props.activeSection === 'manage'} onClose={() => props.setActiveSection(null)}>
+        <ManageSection {...props} />
+      </ClubSheet>
+    </>
+  );
+}
+
+function ChatSection({ messages, input, busy, setInput, send }: { messages: api.ClubChatMessage[]; input: string; busy: boolean; setInput: (value: string) => void; send: () => void }) {
+  return (
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={styles.messageList}>
+        {messages.length ? messages.map(message => (
+          <View key={message.id} style={styles.messageRow}>
+            <Text style={styles.chatName}>{message.displayName}</Text>
+            <Text style={styles.chatText}>{message.text}</Text>
+          </View>
+        )) : <Empty text="Club chat is live. Messages appear here while you are online." />}
+      </View>
+      <View style={styles.inlineForm}>
+        <TextInput
+          style={[styles.input, styles.inlineInput]}
+          value={input}
+          onChangeText={setInput}
+          placeholder="Message your club"
+          placeholderTextColor={ui.text.muted}
+          maxLength={160}
+          multiline
+        />
+        <SmallButton label="Send" busy={busy} disabled={!input.trim()} onPress={send} />
+      </View>
+      <Text style={styles.helperText}>{input.length}/160 - Live messages are not saved after the session.</Text>
+    </KeyboardAvoidingView>
+  );
+}
+
+function ProgressSection({ club, accent }: { club: api.ClubProfile; accent: string }) {
+  const nextIndexRaw = club.rewards.findIndex(reward => !reward.claimed);
+  const nextIndex = nextIndexRaw < 0 ? Math.max(0, club.rewards.length - 1) : nextIndexRaw;
+  return (
+    <>
+      <SectionBlock title={`Club Level ${club.level}`}>
+        <ProgressBar progress={club.progression.levelProgress} color={accent} />
+        <Text style={styles.metaText}>{club.progression.currentLevelXp} / {club.progression.nextLevelXp} XP toward Level {club.level + 1}</Text>
+      </SectionBlock>
+      <SectionBlock title="Reward Journey">
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentOffset={{ x: Math.max(0, nextIndex * 202 - 12), y: 0 }}
+          contentContainerStyle={styles.rewardRail}
+        >
+          {club.rewards.map((reward, index) => {
+            const status = reward.claimed ? 'Earned' : index === nextIndex ? 'Next' : 'Locked';
+            return (
+              <View key={reward.id} style={[styles.rewardCard, status === 'Next' && styles.rewardCardNext, status === 'Earned' && styles.rewardCardEarned]}>
+                <Text style={styles.rewardScope}>{reward.scope === 'club' ? 'CLUB UNLOCK' : 'YOUR REWARD'}</Text>
+                <Text style={styles.rewardName}>{reward.name}</Text>
+                <Text style={styles.rewardDescription}>{reward.description}</Text>
+                <StatusBadge label={status} tone={status === 'Earned' ? 'emerald' : status === 'Next' ? 'gold' : 'muted'} />
+                <Text style={styles.rewardRequirement}>Club Lv {reward.minLevel}{reward.minContributionXp ? ` - ${reward.minContributionXp} contribution XP` : ''}</Text>
+              </View>
+            );
+          })}
+        </ScrollView>
+      </SectionBlock>
+      <SectionBlock title="Weekly Goals">
+        {club.goals.weekly.map(goal => <GoalRow key={goal.id} goal={goal} color={accent} />)}
+      </SectionBlock>
+      <SectionBlock title="Season Objectives">
+        {club.goals.season.map(goal => <GoalRow key={goal.id} goal={goal} color={accent} />)}
+      </SectionBlock>
+      <SectionBlock title="Live Event">
+        <Text style={styles.rowTitle}>{club.event.title}</Text>
+        <Text style={styles.metaText}>Club score: {club.event.leaderboardScore}</Text>
+      </SectionBlock>
+    </>
+  );
+}
+
+function TreasurySection(props: Parameters<typeof JoinedClub>[0]) {
+  const club = props.club;
+  const customGoalProgress = club.treasuryGoal ? club.treasury.balance / Math.max(1, club.treasuryGoal.targetAmount) : 0;
+  return (
+    <>
+      <SectionBlock title="Next Prestige">
+        {club.nextPrestige ? (
+          <>
+            <View style={styles.prestigeHeader}>
+              <View style={styles.flex}>
+                <Text style={styles.rowTitle}>{club.nextPrestige.name}</Text>
+                <Text style={styles.metaText}>{club.nextPrestige.memberCap} member seats and new club perks</Text>
+              </View>
+              <StatusBadge label={formatCoins(club.nextPrestige.treasuryCost)} tone="gold" />
+            </View>
+            <ProgressBar progress={club.treasury.balance / Math.max(1, club.nextPrestige.treasuryCost)} color={ui.palette.gold} />
+            <Text style={styles.metaText}>{formatCoins(club.treasury.balance)} funded - {formatCoins(club.nextPrestige.treasuryNeeded)} still needed</Text>
+            {club.nextPrestige.requirements.map(requirement => (
+              <View key={requirement.id} style={styles.requirementRow}>
+                {requirement.complete ? <Check size={16} color={ui.palette.emerald} /> : <Clock3 size={16} color={ui.text.muted} />}
+                <Text style={styles.metaText}>{requirement.label}</Text>
+                <Text style={styles.metaText}>{requirement.current}/{requirement.target}</Text>
+              </View>
+            ))}
+            {club.permissions.canManageRequests ? <PrimaryButton label={props.busyId === 'prestige' ? 'Purchasing...' : 'Purchase Prestige'} disabled={!club.canPrestige || props.busyId === 'prestige'} onPress={props.buyPrestige} /> : null}
+          </>
+        ) : <Empty text="This club has reached the highest prestige tier." />}
+      </SectionBlock>
+
+      <SectionBlock title="Club Goal">
+        {club.treasuryGoal ? (
+          <>
+            <Text style={styles.rowTitle}>{club.treasuryGoal.title}</Text>
+            {club.treasuryGoal.description ? <Text style={styles.metaText}>{club.treasuryGoal.description}</Text> : null}
+            <ProgressBar progress={customGoalProgress} color="#4DA3FF" />
+            <Text style={styles.metaText}>{formatCoins(club.treasury.balance)} / {formatCoins(club.treasuryGoal.targetAmount)}</Text>
+          </>
+        ) : <Empty text="No optional club goal is set. Donations still fund the next prestige." />}
+        {club.permissions.canManageRequests ? (
+          <View style={styles.formStack}>
+            <TextInput style={styles.input} value={props.goalTitle} onChangeText={props.setGoalTitle} placeholder="Goal name" placeholderTextColor={ui.text.muted} maxLength={60} />
+            <TextInput style={styles.input} value={props.goalDescription} onChangeText={props.setGoalDescription} placeholder="What is the club funding?" placeholderTextColor={ui.text.muted} maxLength={180} />
+            <TextInput style={styles.input} value={props.goalAmount} onChangeText={text => props.setGoalAmount(text.replace(/[^0-9]/g, '').slice(0, 9))} placeholder="Coin target" placeholderTextColor={ui.text.muted} keyboardType="number-pad" />
+            <View style={styles.buttonRow}>
+              <SmallButton label="Save Goal" busy={props.busyId === 'goal:save'} disabled={!props.goalTitle.trim() || !Number(props.goalAmount)} onPress={props.saveGoal} />
+              {club.treasuryGoal ? <SmallButton label="Clear" tone="ghost" busy={props.busyId === 'goal:clear'} onPress={props.clearGoal} /> : null}
+            </View>
+          </View>
+        ) : null}
+      </SectionBlock>
+
+      <SectionBlock title="Donate Coins">
+        <View style={styles.statGrid}>
+          <StatTile label="Treasury" value={formatCoins(club.treasury.balance)} />
+          <StatTile label="You Donated" value={formatCoins(club.donationStats.viewerDonated)} />
+          <StatTile label="Your Coins" value={formatCoins(props.viewerCoins)} />
+          <StatTile label="Lifetime" value={formatCoins(club.treasury.lifetimeDonated)} />
+        </View>
+        <View style={styles.quickRow}>
+          {[100, 500, 1000].map(amount => (
+            <Pressable key={amount} style={[styles.quickChip, props.viewerCoins < amount && styles.disabled]} disabled={props.viewerCoins < amount} onPress={() => props.donate(amount)}>
+              <Text style={styles.quickChipText}>{amount.toLocaleString()}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <View style={styles.inlineForm}>
+          <TextInput style={[styles.input, styles.inlineInput]} value={props.donationAmount} onChangeText={text => props.setDonationAmount(text.replace(/[^0-9]/g, '').slice(0, 7))} placeholder="Custom amount" keyboardType="number-pad" placeholderTextColor={ui.text.muted} />
+          <SmallButton label="Donate" busy={props.busyId === `donate:${Number(props.donationAmount || 0)}`} disabled={!Number(props.donationAmount || 0) || Number(props.donationAmount) > props.viewerCoins} onPress={() => props.donate(Number(props.donationAmount || 0))} />
+        </View>
+      </SectionBlock>
+
+      <SectionBlock title="Top Donors">
+        {club.donationStats.topDonors.length ? club.donationStats.topDonors.map((donor, index) => (
+          <View key={donor.userId} style={styles.listRow}>
+            <Text style={styles.listIndex}>{index + 1}</Text>
+            <Text style={[styles.rowTitle, styles.flex]} numberOfLines={1}>{donor.displayName}</Text>
+            <Text style={styles.coinText}>{formatCoins(donor.amount)}</Text>
+          </View>
+        )) : <Empty text="No donations yet." />}
+      </SectionBlock>
+
+      <SectionBlock title="Recent Donations">
+        {club.donationStats.recent.length ? club.donationStats.recent.map(donation => (
+          <View key={donation.id} style={styles.listRow}>
+            <Text style={[styles.rowTitle, styles.flex]} numberOfLines={1}>{donation.displayName}</Text>
+            <View style={styles.memberActions}>
+              <Text style={styles.coinText}>{formatCoins(donation.amount)}</Text>
+              <Text style={styles.helperText}>{new Date(donation.createdAt).toLocaleDateString()}</Text>
+            </View>
+          </View>
+        )) : <Empty text="No recent donations." />}
+      </SectionBlock>
+    </>
+  );
+}
+
+function MembersSection(props: Parameters<typeof JoinedClub>[0]) {
+  const club = props.club;
+  return (
+    <>
+      <SectionBlock title="Roster">
+        {club.members.map(member => (
+          <View key={member.userId} style={styles.memberRow}>
+            <View style={[styles.onlineDot, !member.isOnline && styles.offlineDot]} />
+            <View style={styles.flex}>
+              <Text style={styles.rowTitle} numberOfLines={1}>{member.displayName}</Text>
+              <Text style={styles.metaText}>{capitalize(member.role)} - {member.contributionXp} XP - {formatCoins(member.coinContribution)} donated</Text>
+            </View>
+            {club.permissions.canManageMembers && member.role !== 'owner' && member.role !== club.role ? (
+              <View style={styles.memberActions}>
+                {club.role === 'owner' ? <SmallButton label={member.role === 'officer' ? 'Member' : 'Officer'} onPress={() => props.updateRole(member, member.role === 'officer' ? 'member' : 'officer')} /> : null}
+                <SmallButton label="Remove" tone="ghost" busy={props.busyId === `remove:${member.userId}`} onPress={() => props.removeMember(member)} />
+              </View>
+            ) : null}
+          </View>
+        ))}
+      </SectionBlock>
+      <Pressable style={styles.leaveButton} onPress={props.leave}>
+        <Text style={styles.leaveButtonText}>{props.busyId === 'leave' ? 'Leaving...' : 'Leave Club'}</Text>
+      </Pressable>
+    </>
+  );
+}
+
+function NewsSection({ club }: { club: api.ClubProfile }) {
+  return (
+    <>
+      <SectionBlock title="Live Event">
+        <Text style={styles.rowTitle}>{club.event.title}</Text>
+        <Text style={styles.metaText}>Club score: {club.event.leaderboardScore}</Text>
+      </SectionBlock>
+      <SectionBlock title="Announcements">
+        {club.announcements.length ? club.announcements.map(item => (
+          <View key={item.id} style={styles.announcementRow}>
+            <Text style={styles.chatName}>{item.displayName}</Text>
+            <Text style={styles.chatText}>{item.text}</Text>
+            <Text style={styles.helperText}>{new Date(item.createdAt).toLocaleDateString()}</Text>
+          </View>
+        )) : <Empty text="No club announcements yet." />}
+      </SectionBlock>
+    </>
+  );
+}
+
+function ManageSection(props: Parameters<typeof JoinedClub>[0]) {
+  const club = props.club;
+  return (
+    <>
+      {club.permissions.canPostAnnouncement ? (
+        <SectionBlock title="Post Announcement">
+          <View style={styles.inlineForm}>
+            <TextInput style={[styles.input, styles.inlineInput]} value={props.announcementText} onChangeText={props.setAnnouncementText} placeholder="Announcement" placeholderTextColor={ui.text.muted} maxLength={160} />
+            <SmallButton label="Post" busy={props.busyId === 'announcement'} disabled={!props.announcementText.trim()} onPress={props.postAnnouncement} />
+          </View>
+        </SectionBlock>
+      ) : null}
+      {club.permissions.canManageRequests ? (
+        <SectionBlock title={`Join Requests (${club.joinRequests.length})`}>
+          {club.joinRequests.length ? club.joinRequests.map(request => (
+            <View key={request.id} style={styles.requestRow}>
+              <View style={styles.flex}>
+                <Text style={styles.rowTitle}>{request.displayName}</Text>
+                <Text style={styles.metaText}>{request.message || 'Wants to join.'}</Text>
+              </View>
+              <SmallButton label="Accept" busy={props.busyId === `accept:${request.id}`} onPress={() => props.acceptRequest(request)} />
+              <SmallButton label="Reject" tone="ghost" busy={props.busyId === `reject:${request.id}`} onPress={() => props.rejectRequest(request)} />
+            </View>
+          )) : <Empty text="No pending requests." />}
+        </SectionBlock>
+      ) : null}
+      {club.permissions.canEdit ? (
+        <SectionBlock title="Club Identity">
+          <TextInput style={styles.input} value={props.editName} onChangeText={props.setEditName} placeholder="Club name" placeholderTextColor={ui.text.muted} maxLength={28} />
+          <TextInput style={styles.input} value={props.editTag} onChangeText={text => props.setEditTag(text.toUpperCase())} placeholder="Tag" placeholderTextColor={ui.text.muted} maxLength={5} autoCapitalize="characters" />
+          <TextInput style={styles.input} value={props.editMotto} onChangeText={props.setEditMotto} placeholder="Motto" placeholderTextColor={ui.text.muted} maxLength={80} />
+          <PrimaryButton label={props.busyId === 'identity' ? 'Saving...' : 'Save Club Identity'} disabled={props.busyId === 'identity'} onPress={props.updateIdentity} />
+        </SectionBlock>
+      ) : null}
+    </>
+  );
+}
+
+function NoClub(props: {
   applications: api.ClubApplication[];
+  invitations: api.ClubInvitation[];
   recommended: api.ClubSummary[];
   searchQuery: string;
   searchResults: api.ClubSummary[];
@@ -329,355 +705,144 @@ function NoClub({
   setBranding: (value: api.ClubBranding) => void;
   create: () => void;
   apply: (club: api.ClubSummary) => void;
+  acceptInvitation: (invitation: api.ClubInvitation) => void;
+  declineInvitation: (invitation: api.ClubInvitation) => void;
 }) {
-  const clubsToShow = searchQuery.trim().length >= 2 ? searchResults : recommended;
-  const level = user?.progression.level || 1;
-  const coins = user?.currency.coins || 0;
-  const joinLocked = level < clubConfig.minJoinLevel;
-  const createLocked = level < clubConfig.minCreateLevel;
-  const canAffordCreate = coins >= clubConfig.createCost;
-  const clubAccessLevel = Math.max(clubConfig.minJoinLevel, clubConfig.minCreateLevel);
-  const sharedLevelRequirement = clubConfig.minJoinLevel === clubConfig.minCreateLevel;
+  const level = props.user?.progression.level || 1;
+  const coins = props.user?.currency.coins || 0;
+  const joinLocked = level < props.clubConfig.minJoinLevel;
+  const createLocked = level < props.clubConfig.minCreateLevel;
+  const canAffordCreate = coins >= props.clubConfig.createCost;
+  const accessLevel = Math.max(props.clubConfig.minJoinLevel, props.clubConfig.minCreateLevel);
+  const clubsToShow = props.searchQuery.trim().length >= 2 ? props.searchResults : props.recommended;
+
   if (joinLocked) {
     return (
       <Panel title="Clubhouse Locked">
-        <Text style={styles.lockTitle}>Reach Level {clubAccessLevel} to unlock clubs.</Text>
-        <Text style={styles.metaText}>
-          You are Level {level}. Clubs are meant to be earned into, then built with players who are already active at the tables.
-        </Text>
+        <Text style={styles.lockTitle}>Reach Level {accessLevel} to unlock clubs.</Text>
+        <Text style={styles.metaText}>You are Level {level}. Join and create access unlock together.</Text>
         <View style={styles.statGrid}>
-          <StatTile
-            label={sharedLevelRequirement ? 'Join + Create Clubs' : `Join Lv ${clubConfig.minJoinLevel} / Create Lv ${clubConfig.minCreateLevel}`}
-            value={`Lv ${clubAccessLevel}`}
-            locked
-            style={styles.statTileWide}
-          />
+          <StatTile label="Join + Create Clubs" value={`Lv ${accessLevel}`} locked style={styles.statTileWide} />
           <StatTile label="Your Level" value={`Lv ${level}`} />
-          <StatTile label="Create Cost" value={formatCoins(clubConfig.createCost)} dimmed={!canAffordCreate} locked={!canAffordCreate} />
+          <StatTile label="Create Cost" value={formatCoins(props.clubConfig.createCost)} dimmed={!canAffordCreate} locked={!canAffordCreate} />
         </View>
       </Panel>
     );
   }
+
   return (
     <>
-      <Panel title="Create Club">
-        <View style={styles.costStrip}>
-          <Text style={styles.metaText}>Creation cost</Text>
-          <Text style={styles.costText}>{formatCoins(clubConfig.createCost)}</Text>
-          <Text style={styles.metaText}>Your balance: {formatCoins(coins)}</Text>
-        </View>
-        <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Club name" placeholderTextColor="#9BA3C7" />
-        <TextInput style={styles.input} value={tag} onChangeText={text => setTag(text.toUpperCase())} placeholder="Tag" placeholderTextColor="#9BA3C7" autoCapitalize="characters" maxLength={5} />
-        <TextInput style={styles.input} value={motto} onChangeText={setMotto} placeholder="Motto" placeholderTextColor="#9BA3C7" maxLength={80} />
-        <PresetRow label="Color" items={COLOR_PAIRS} selected={branding.colorPair} onSelect={colorPair => setBranding({ ...branding, colorPair })} />
-        <PresetRow label="Badge" items={BADGE_SHAPES} selected={branding.badgeShape} onSelect={badgeShape => setBranding({ ...branding, badgeShape })} />
-        <PresetRow label="Banner" items={BANNER_STYLES} selected={branding.bannerStyle} onSelect={bannerStyle => setBranding({ ...branding, bannerStyle })} />
-        {createLocked ? <Text style={styles.warningText}>Reach Level {clubConfig.minCreateLevel} before creating a club.</Text> : null}
-        {!canAffordCreate ? <Text style={styles.warningText}>You need {formatCoins(clubConfig.createCost - coins)} more to create a club.</Text> : null}
-        <PrimaryButton label={busyId === 'create' ? 'Creating...' : 'Create Club'} disabled={busyId === 'create' || createLocked || !canAffordCreate} onPress={create} />
-      </Panel>
-
-      {applications.length ? (
-        <Panel title="Pending Applications">
-          {applications.map(application => (
-            <Text key={application.id} style={styles.metaText}>[{application.club.tag}] {application.club.name}</Text>
+      {props.invitations.length ? (
+        <Panel title="Club Invitations">
+          {props.invitations.map(invitation => (
+            <View key={invitation.id} style={styles.invitationRow}>
+              <View style={styles.flex}>
+                <Text style={styles.rowTitle}>[{invitation.club.tag}] {invitation.club.name}</Text>
+                <Text style={styles.metaText}>Invited by {invitation.fromDisplayName} - {invitation.club.memberCount}/{invitation.club.memberCap} members</Text>
+              </View>
+              <SmallButton label="Join" busy={props.busyId === `invite:${invitation.id}:accept`} onPress={() => props.acceptInvitation(invitation)} />
+              <SmallButton label="Decline" tone="ghost" busy={props.busyId === `invite:${invitation.id}:decline`} onPress={() => props.declineInvitation(invitation)} />
+            </View>
           ))}
         </Panel>
       ) : null}
-
+      <Panel title="Create Club">
+        <View style={styles.costStrip}>
+          <Text style={styles.metaText}>Creation cost</Text>
+          <Text style={styles.costText}>{formatCoins(props.clubConfig.createCost)}</Text>
+          <Text style={styles.metaText}>Your balance: {formatCoins(coins)}</Text>
+        </View>
+        <TextInput style={styles.input} value={props.name} onChangeText={props.setName} placeholder="Club name" placeholderTextColor={ui.text.muted} />
+        <TextInput style={styles.input} value={props.tag} onChangeText={text => props.setTag(text.toUpperCase())} placeholder="Tag" placeholderTextColor={ui.text.muted} autoCapitalize="characters" maxLength={5} />
+        <TextInput style={styles.input} value={props.motto} onChangeText={props.setMotto} placeholder="Motto" placeholderTextColor={ui.text.muted} maxLength={80} />
+        <PresetRow label="Color" items={COLOR_PAIRS} selected={props.branding.colorPair} onSelect={colorPair => props.setBranding({ ...props.branding, colorPair })} />
+        <PresetRow label="Badge" items={BADGE_SHAPES} selected={props.branding.badgeShape} onSelect={badgeShape => props.setBranding({ ...props.branding, badgeShape })} />
+        <PresetRow label="Banner" items={BANNER_STYLES} selected={props.branding.bannerStyle} onSelect={bannerStyle => props.setBranding({ ...props.branding, bannerStyle })} />
+        {!canAffordCreate ? <Text style={styles.warningText}>You need {formatCoins(props.clubConfig.createCost - coins)} more.</Text> : null}
+        <PrimaryButton label={props.busyId === 'create' ? 'Creating...' : 'Create Club'} disabled={createLocked || !canAffordCreate || props.busyId === 'create'} onPress={props.create} />
+      </Panel>
+      {props.applications.length ? (
+        <Panel title="Pending Applications">
+          {props.applications.map(application => <Text key={application.id} style={styles.metaText}>[{application.club.tag}] {application.club.name}</Text>)}
+        </Panel>
+      ) : null}
       <Panel title="Find Clubs">
-        <TextInput style={styles.input} value={searchQuery} onChangeText={setSearchQuery} placeholder="Search by name or tag" placeholderTextColor="#9BA3C7" />
+        <TextInput style={styles.input} value={props.searchQuery} onChangeText={props.setSearchQuery} placeholder="Search by name or tag" placeholderTextColor={ui.text.muted} />
         {clubsToShow.length ? clubsToShow.map(item => (
-          <ClubSearchRow
-            key={item.clubId}
-            club={item}
-            busy={busyId === `apply:${item.clubId}`}
-            pending={applications.some(application => application.club.clubId === item.clubId)}
-            onApply={() => apply(item)}
-          />
+          <View key={item.clubId} style={styles.searchRow}>
+            <View style={[styles.searchBadge, { borderColor: colorsFor(item.branding.colorPair).accent }]}><Text style={styles.searchBadgeText}>{item.tag}</Text></View>
+            <View style={styles.flex}>
+              <Text style={styles.rowTitle}>{item.name}</Text>
+              <Text style={styles.metaText}>Lv {item.level} - {item.memberCount}/{item.memberCap} members - {item.onlineMemberCount} online</Text>
+            </View>
+            <SmallButton label={props.applications.some(application => application.club.clubId === item.clubId) ? 'Pending' : 'Apply'} disabled={props.applications.some(application => application.club.clubId === item.clubId)} busy={props.busyId === `apply:${item.clubId}`} onPress={() => props.apply(item)} />
+          </View>
         )) : <Empty text="No clubs found yet." />}
       </Panel>
     </>
   );
 }
 
-function JoinedClub({
-  club,
-  chat,
-  activeColors,
-  busyId,
-  announcementText,
-  chatInput,
-  donationAmount,
-  viewerCoins,
-  setAnnouncementText,
-  setChatInput,
-  setDonationAmount,
-  postAnnouncement,
-  sendChat,
-  donate,
-  buyPrestige,
-  claimReward,
-  acceptRequest,
-  rejectRequest,
-  updateRole,
-  removeMember,
-  leave,
-}: {
-  club: api.ClubProfile;
-  chat: api.ClubChatMessage[];
-  activeColors: { accent: string; background: string; soft: string };
-  busyId: string | null;
-  announcementText: string;
-  chatInput: string;
-  donationAmount: string;
-  viewerCoins: number;
-  setAnnouncementText: (value: string) => void;
-  setChatInput: (value: string) => void;
-  setDonationAmount: (value: string) => void;
-  postAnnouncement: () => void;
-  sendChat: (type: api.ClubChatMessage['type'], text: string) => void;
-  donate: (amount: number) => void;
-  buyPrestige: () => void;
-  claimReward: (reward: api.ClubReward) => void;
-  acceptRequest: (request: api.ClubJoinRequest) => void;
-  rejectRequest: (request: api.ClubJoinRequest) => void;
-  updateRole: (member: api.ClubMember, role: api.ClubRole) => void;
-  removeMember: (member: api.ClubMember) => void;
-  leave: () => void;
-}) {
+function ClubSheet({ title, subtitle, visible, onClose, children }: { title: string; subtitle: string; visible: boolean; onClose: () => void; children: React.ReactNode }) {
+  const insets = useSafeAreaInsets();
   return (
-    <>
-      <View style={[styles.banner, { backgroundColor: activeColors.background, borderColor: activeColors.accent }]}>
-        <View style={[styles.clubBadge, { borderColor: activeColors.accent, backgroundColor: activeColors.soft }]}>
-          <Text style={styles.clubBadgeText}>{club.tag}</Text>
-        </View>
-        <View style={styles.flex}>
-          <Text style={styles.clubName} numberOfLines={1}>{club.name}</Text>
-          <Text style={styles.metaText} numberOfLines={2}>{club.motto || 'No motto set yet.'}</Text>
-          <Text style={[styles.accentText, { color: activeColors.accent }]}>Level {club.level} - {club.memberCount}/{club.memberCap} members - {club.role}</Text>
-        </View>
-      </View>
-
-      <Panel title="Club Progress">
-        <ProgressBar progress={club.progression.levelProgress} color={activeColors.accent} />
-        <Text style={styles.metaText}>{club.progression.currentLevelXp} / {club.progression.nextLevelXp} XP toward Level {club.level + 1}</Text>
-      </Panel>
-
-      <Panel title="Club Treasury">
-        <View style={styles.statGrid}>
-          <StatTile label="Treasury" value={formatCoins(club.treasury.balance)} />
-          <StatTile label="Lifetime" value={formatCoins(club.treasury.lifetimeDonated)} />
-          <StatTile label="You Donated" value={formatCoins(club.donationStats.viewerDonated)} />
-          <StatTile label="Your Coins" value={formatCoins(viewerCoins)} />
-        </View>
-        <View style={styles.quickRow}>
-          {[100, 500, 1000].map(amount => (
-            <Pressable key={amount} style={[styles.quickChip, viewerCoins < amount && styles.disabled]} disabled={viewerCoins < amount} onPress={() => donate(amount)}>
-              <Text style={styles.quickChipText}>Donate {amount}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={styles.inlineForm}>
-          <TextInput
-            style={[styles.input, styles.inlineInput]}
-            value={donationAmount}
-            onChangeText={text => setDonationAmount(text.replace(/[^0-9]/g, '').slice(0, 7))}
-            placeholder="Amount"
-            keyboardType="number-pad"
-            placeholderTextColor="#9BA3C7"
-          />
-          <SmallButton label="Donate" busy={busyId === `donate:${Number(donationAmount || 0)}`} disabled={!Number(donationAmount || 0)} onPress={() => donate(Number(donationAmount || 0))} />
-        </View>
-        {club.donationStats.topDonors.length ? club.donationStats.topDonors.slice(0, 5).map((donor, index) => (
-          <Text key={donor.userId} style={styles.metaText}>{index + 1}. {donor.displayName} - {formatCoins(donor.amount)}</Text>
-        )) : <Empty text="No donations yet. Treasury starts with members pitching in." />}
-      </Panel>
-
-      <Panel title="Prestige">
-        <Text style={styles.rowTitle}>{club.prestige.name} - Tier {club.prestige.tier}</Text>
-        <Text style={styles.metaText}>{club.memberCount}/{club.memberCap} member seats unlocked. Purchased perks never decay.</Text>
-        {club.nextPrestige ? (
-          <>
-            <View style={styles.nextPrestigeCard}>
-              <Text style={styles.rowTitle}>Next: {club.nextPrestige.name}</Text>
-              <Text style={styles.metaText}>{formatCoins(club.nextPrestige.treasuryCost)} treasury cost - {club.nextPrestige.memberCap} member seats</Text>
-              {club.nextPrestige.perks.map(perk => <Text key={perk} style={styles.metaText}>+ {perk}</Text>)}
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.sheetBackdrop}>
+        <Pressable style={styles.sheetDismiss} onPress={onClose} />
+        <View style={[styles.sheet, { paddingBottom: Math.max(16, insets.bottom + 8) }]}>
+          <View style={styles.sheetHeader}>
+            <View style={styles.flex}>
+              <Text style={styles.sheetTitle}>{title}</Text>
+              <Text style={styles.sheetSubtitle}>{subtitle}</Text>
             </View>
-            {club.nextPrestige.requirements.map(requirement => (
-              <View key={requirement.id} style={styles.requirementRow}>
-                <Text style={styles.metaText}>{requirement.complete ? 'Ready' : 'Needed'} - {requirement.label}</Text>
-                <Text style={styles.metaText}>{requirement.current}/{requirement.target}</Text>
-              </View>
-            ))}
-            <PrimaryButton label={busyId === 'prestige' ? 'Buying...' : 'Buy Prestige'} disabled={!club.canPrestige || busyId === 'prestige'} onPress={buyPrestige} />
-          </>
-        ) : <Empty text="This club is already at the highest prestige tier." />}
-      </Panel>
-
-      <Panel title="Weekly Goals">
-        {club.goals.weekly.map(goal => <GoalRow key={goal.id} goal={goal} color={activeColors.accent} />)}
-      </Panel>
-
-      <Panel title="Season Objectives">
-        {club.goals.season.map(goal => <GoalRow key={goal.id} goal={goal} color={activeColors.accent} />)}
-      </Panel>
-
-      <Panel title="Live Event">
-        <Text style={styles.rowTitle}>{club.event.title}</Text>
-        <Text style={styles.metaText}>Club score: {club.event.leaderboardScore}</Text>
-      </Panel>
-
-      <Panel title="Announcements">
-        {club.permissions.canPostAnnouncement ? (
-          <View style={styles.inlineForm}>
-            <TextInput style={[styles.input, styles.inlineInput]} value={announcementText} onChangeText={setAnnouncementText} placeholder="Post announcement" placeholderTextColor="#9BA3C7" />
-            <SmallButton label="Post" busy={busyId === 'announcement'} onPress={postAnnouncement} />
+            <Pressable style={styles.closeButton} onPress={onClose}><X size={22} color={ui.text.primary} strokeWidth={3} /></Pressable>
           </View>
-        ) : null}
-        {club.announcements.length ? club.announcements.slice(0, 5).map(item => (
-          <Text key={item.id} style={styles.metaText}>{item.displayName}: {item.text}</Text>
-        )) : <Empty text="No announcements yet." />}
-      </Panel>
-
-      {club.permissions.canManageRequests ? (
-        <Panel title="Join Requests">
-          {club.joinRequests.length ? club.joinRequests.map(request => (
-            <View key={request.id} style={styles.requestRow}>
-              <View style={styles.flex}>
-                <Text style={styles.rowTitle}>{request.displayName}</Text>
-                <Text style={styles.metaText}>{request.message || 'Wants to join.'}</Text>
-              </View>
-              <SmallButton label="Accept" busy={busyId === `accept:${request.id}`} onPress={() => acceptRequest(request)} />
-              <SmallButton label="Reject" tone="ghost" busy={busyId === `reject:${request.id}`} onPress={() => rejectRequest(request)} />
-            </View>
-          )) : <Empty text="No pending requests." />}
-        </Panel>
-      ) : null}
-
-      <Panel title="Club Chat">
-        <View style={styles.quickRow}>
-          {QUICK_CHATS.map(text => (
-            <Pressable key={text} style={styles.quickChip} onPress={() => sendChat('preset', text)}>
-              <Text style={styles.quickChipText}>{text}</Text>
-            </Pressable>
-          ))}
+          <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">{children}</ScrollView>
         </View>
-        <View style={styles.inlineForm}>
-          <TextInput style={[styles.input, styles.inlineInput]} value={chatInput} onChangeText={setChatInput} placeholder="Message club" placeholderTextColor="#9BA3C7" />
-          <SmallButton label="Send" busy={busyId === `chat:text:${chatInput}`} onPress={() => sendChat('text', chatInput)} />
-        </View>
-        {chat.length ? chat.slice(-8).reverse().map(message => (
-          <Text key={message.id} style={styles.chatLine}><Text style={styles.chatName}>{message.displayName}: </Text>{message.text}</Text>
-        )) : <Empty text="Club chat starts here." />}
-      </Panel>
-
-      <Panel title="Rewards">
-        {club.rewards.map(reward => (
-          <RewardRow key={reward.id} reward={reward} busy={busyId === `reward:${reward.id}`} onClaim={() => claimReward(reward)} />
-        ))}
-      </Panel>
-
-      <Panel title="Members">
-        {club.members.map(member => (
-          <MemberRow
-            key={member.userId}
-            member={member}
-            canManage={club.permissions.canManageMembers && member.role !== 'owner' && member.role !== club.role}
-            viewerRole={club.role}
-            busyId={busyId}
-            onRole={role => updateRole(member, role)}
-            onRemove={() => removeMember(member)}
-          />
-        ))}
-      </Panel>
-
-      <Pressable style={styles.leaveButton} onPress={leave}>
-        <Text style={styles.leaveButtonText}>Leave Club</Text>
-      </Pressable>
-    </>
+      </View>
+    </Modal>
   );
 }
 
-function ClubSearchRow({ club, busy, pending, onApply }: { club: api.ClubSummary; busy: boolean; pending: boolean; onApply: () => void }) {
-  const colors = colorsFor(club.branding.colorPair);
+function HubAction({ title, detail, Icon, accent, badge = 0, onPress }: { title: string; detail: string; Icon: LucideIcon; accent: string; badge?: number; onPress: () => void }) {
   return (
-    <View style={styles.searchRow}>
-      <View style={[styles.searchBadge, { borderColor: colors.accent, backgroundColor: colors.background }]}>
-        <Text style={styles.searchBadgeText}>{club.tag}</Text>
-      </View>
+    <Pressable style={styles.hubAction} onPress={onPress}>
+      <View style={[styles.hubActionIcon, { borderColor: accent }]}><Icon size={24} color={accent} strokeWidth={2.5} /></View>
       <View style={styles.flex}>
-        <Text style={styles.rowTitle}>{club.name}</Text>
-        <Text style={styles.metaText}>Level {club.level} - Tier {club.prestige?.tier || 1} - {club.memberCount}/{club.memberCap} members</Text>
+        <Text style={styles.hubActionTitle}>{title}</Text>
+        <Text style={styles.hubActionDetail} numberOfLines={2}>{detail}</Text>
       </View>
-      <SmallButton label={pending ? 'Pending' : 'Apply'} busy={busy} disabled={pending} onPress={onApply} />
-    </View>
+      {badge > 0 ? <View style={styles.notificationBadge}><Text style={styles.notificationBadgeText}>{Math.min(99, badge)}</Text></View> : null}
+    </Pressable>
   );
 }
 
-function MemberRow({
-  member,
-  canManage,
-  viewerRole,
-  busyId,
-  onRole,
-  onRemove,
-}: {
-  member: api.ClubMember;
-  canManage: boolean;
-  viewerRole: api.ClubRole | null;
-  busyId: string | null;
-  onRole: (role: api.ClubRole) => void;
-  onRemove: () => void;
-}) {
-  return (
-    <View style={styles.memberRow}>
-      <View style={styles.avatar}>
-        <Text style={styles.avatarText}>{member.avatarInitial}</Text>
-      </View>
-      <View style={styles.flex}>
-        <Text style={styles.rowTitle}>{member.displayName}</Text>
-        <Text style={styles.metaText}>{member.role} - {member.contributionXp} club XP - {formatCoins(member.coinContribution || 0)} donated</Text>
-      </View>
-      {canManage ? (
-        <View style={styles.memberActions}>
-          {viewerRole === 'owner' ? <SmallButton label="Transfer" busy={busyId === `role:${member.userId}:owner`} onPress={() => onRole('owner')} /> : null}
-          {member.role === 'rookie' ? <SmallButton label="Member" busy={busyId === `role:${member.userId}:member`} onPress={() => onRole('member')} /> : null}
-          {member.role === 'member' ? <SmallButton label="Officer" busy={busyId === `role:${member.userId}:officer`} onPress={() => onRole('officer')} /> : null}
-          {member.role === 'officer' ? <SmallButton label="Member" busy={busyId === `role:${member.userId}:member`} onPress={() => onRole('member')} /> : null}
-          <SmallButton label="Remove" tone="danger" busy={busyId === `remove:${member.userId}`} onPress={onRemove} />
-        </View>
-      ) : null}
-    </View>
-  );
+function SectionBlock({ title, children }: { title: string; children: React.ReactNode }) {
+  return <View style={styles.sectionBlock}><Text style={styles.sectionTitle}>{title}</Text>{children}</View>;
 }
 
 function GoalRow({ goal, color }: { goal: api.ClubGoal; color: string }) {
   return (
     <View style={styles.goalRow}>
-      <View style={styles.goalHeader}>
+      <View style={styles.flex}>
         <Text style={styles.rowTitle}>{goal.title}</Text>
-        <Text style={styles.metaText}>{goal.progress}/{goal.target}</Text>
+        <ProgressBar progress={goal.progress / Math.max(1, goal.target)} color={color} />
+        <Text style={styles.metaText}>{goal.progress}/{goal.target} - +{goal.reward.clubXp} club XP</Text>
       </View>
-      <ProgressBar progress={goal.target ? goal.progress / goal.target : 0} color={goal.complete ? '#52E5A7' : color} />
+      {goal.complete ? <Check size={20} color={ui.palette.emerald} /> : null}
     </View>
   );
 }
 
-function RewardRow({ reward, busy, onClaim }: { reward: api.ClubReward; busy: boolean; onClaim: () => void }) {
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+  return <View style={styles.panel}><Text style={styles.panelTitle}>{title}</Text>{children}</View>;
+}
+
+function StatTile({ label, value, style, locked, dimmed }: { label: string; value: string; style?: StyleProp<ViewStyle>; locked?: boolean; dimmed?: boolean }) {
   return (
-    <View style={styles.rewardRow}>
-      <View style={styles.flex}>
-        <Text style={styles.rowTitle}>{reward.name}</Text>
-        <Text style={styles.metaText}>{reward.description}</Text>
-        <Text style={styles.metaText}>Level {reward.minLevel}{reward.minContributionXp ? ` - ${reward.minContributionXp} club XP` : ''}</Text>
-      </View>
-      <SmallButton
-        label={reward.claimed ? 'Claimed' : reward.eligible ? 'Claim' : 'Locked'}
-        busy={busy}
-        disabled={reward.claimed || !reward.eligible}
-        onPress={onClaim}
-      />
+    <View style={[styles.statTile, dimmed && styles.statTileDimmed, style]}>
+      <View style={styles.statValueRow}>{locked ? <Lock size={16} color={ui.text.muted} /> : null}<Text style={styles.statValue}>{value}</Text></View>
+      <Text style={styles.statLabel}>{label}</Text>
     </View>
   );
 }
@@ -686,276 +851,137 @@ function PresetRow<T extends string>({ label, items, selected, onSelect }: { lab
   return (
     <View style={styles.presetBlock}>
       <Text style={styles.metaText}>{label}</Text>
-      <View style={styles.presetRow}>
-        {items.map(item => (
-          <Pressable key={item} style={[styles.presetChip, selected === item && styles.presetChipActive]} onPress={() => onSelect(item)}>
-            <Text style={[styles.presetChipText, selected === item && styles.presetChipTextActive]}>{item}</Text>
-          </Pressable>
-        ))}
-      </View>
+      <View style={styles.quickRow}>{items.map(item => <Pressable key={item} style={[styles.quickChip, item === selected && styles.quickChipSelected]} onPress={() => onSelect(item)}><Text style={styles.quickChipText}>{capitalize(item)}</Text></Pressable>)}</View>
     </View>
-  );
-}
-
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={styles.panel}>
-      <Text style={styles.panelTitle}>{title}</Text>
-      {children}
-    </View>
-  );
-}
-
-function PrimaryButton({ label, disabled, onPress }: { label: string; disabled?: boolean; onPress: () => void }) {
-  return (
-    <Pressable style={[styles.primaryButton, disabled && styles.disabled]} disabled={disabled} onPress={onPress}>
-      <Text style={styles.primaryButtonText}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function SmallButton({ label, busy, disabled, tone = 'primary', onPress }: { label: string; busy?: boolean; disabled?: boolean; tone?: 'primary' | 'ghost' | 'danger'; onPress: () => void }) {
-  return (
-    <Pressable
-      style={[styles.smallButton, tone === 'ghost' && styles.smallButtonGhost, tone === 'danger' && styles.smallButtonDanger, (busy || disabled) && styles.disabled]}
-      disabled={busy || disabled}
-      onPress={onPress}
-    >
-      <Text style={[styles.smallButtonText, tone !== 'primary' && styles.smallButtonGhostText]}>{busy ? '...' : label}</Text>
-    </Pressable>
   );
 }
 
 function ProgressBar({ progress, color }: { progress: number; color: string }) {
-  return (
-    <View style={styles.progressTrack}>
-      <View style={[styles.progressFill, { width: `${Math.max(0, Math.min(1, progress)) * 100}%`, backgroundColor: color }]} />
-    </View>
-  );
+  return <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${Math.max(0, Math.min(1, progress)) * 100}%`, backgroundColor: color }]} /></View>;
+}
+
+function PrimaryButton({ label, disabled, onPress }: { label: string; disabled?: boolean; onPress: () => void }) {
+  return <Pressable style={[styles.primaryButton, disabled && styles.disabled]} disabled={disabled} onPress={onPress}><Text style={styles.primaryButtonText}>{label}</Text></Pressable>;
+}
+
+function SmallButton({ label, busy, disabled, tone = 'solid', onPress }: { label: string; busy?: boolean; disabled?: boolean; tone?: 'solid' | 'ghost'; onPress: () => void }) {
+  return <Pressable style={[styles.smallButton, tone === 'ghost' && styles.smallButtonGhost, (disabled || busy) && styles.disabled]} disabled={disabled || busy} onPress={onPress}><Text style={styles.smallButtonText}>{busy ? '...' : label}</Text></Pressable>;
+}
+
+function BackButton({ onPress, style }: { onPress: () => void; style?: StyleProp<ViewStyle> }) {
+  return <Pressable style={[styles.headerIcon, style]} onPress={onPress}><ChevronLeft size={24} color={ui.text.primary} strokeWidth={2.7} /></Pressable>;
 }
 
 function Empty({ text }: { text: string }) {
   return <Text style={styles.emptyText}>{text}</Text>;
 }
 
-function StatTile({
-  label,
-  value,
-  dimmed,
-  locked,
-  style,
-}: {
-  label: string;
-  value: string;
-  dimmed?: boolean;
-  locked?: boolean;
-  style?: StyleProp<ViewStyle>;
-}) {
-  return (
-    <View style={[styles.statTile, dimmed && styles.statTileDimmed, style]}>
-      <View style={styles.statValueRow}>
-        {locked ? <Lock size={13} color={dimmed ? '#687097' : '#9BA3C7'} /> : null}
-        <Text style={[styles.statValue, dimmed && styles.statValueDimmed]}>{value}</Text>
-      </View>
-      <Text style={[styles.statLabel, dimmed && styles.statLabelDimmed]}>{label}</Text>
-    </View>
-  );
+function colorsFor(name: string) {
+  return BRAND_COLORS[name] || BRAND_COLORS.emerald;
+}
+
+function capitalize(value: string) {
+  return value ? value.slice(0, 1).toUpperCase() + value.slice(1) : value;
 }
 
 function formatCoins(value: number) {
   return `${Math.max(0, Math.floor(Number(value) || 0)).toLocaleString()} coins`;
 }
 
-function colorsFor(colorPair?: string) {
-  return BRAND_COLORS[colorPair || 'emerald'] || BRAND_COLORS.emerald;
-}
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0B1023' },
-  content: { padding: 16, paddingBottom: 36 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, gap: 12 },
-  headerIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: ui.border.soft,
-    backgroundColor: ui.surface.glass,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  clubStatus: { alignSelf: 'flex-start', marginBottom: 12 },
-  title: { color: '#E8ECF1', fontSize: 34, fontWeight: '900' },
-  subtitle: { color: '#9BA3C7', fontSize: 13, fontWeight: '800', marginTop: 4, maxWidth: 260 },
-  backButton: { borderWidth: 1, borderColor: '#2A2F57', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12 },
-  backText: { color: '#9BA3C7', fontWeight: '900' },
-  banner: {
-    borderWidth: 2,
-    borderRadius: 8,
-    padding: 14,
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  clubBadge: {
-    width: 68,
-    height: 68,
-    borderRadius: 8,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  clubBadgeText: { color: '#E8ECF1', fontWeight: '900', fontSize: 18 },
-  clubName: { color: '#E8ECF1', fontSize: 24, fontWeight: '900' },
-  accentText: { fontSize: 12, fontWeight: '900', marginTop: 6 },
-  panel: {
-    backgroundColor: '#121737',
-    borderColor: '#2A2F57',
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 14,
-  },
-  panelTitle: { color: '#E8ECF1', fontSize: 18, fontWeight: '900', marginBottom: 10 },
-  lockTitle: { color: '#E8ECF1', fontSize: 22, fontWeight: '900', marginBottom: 8 },
-  input: {
-    backgroundColor: '#0F1430',
-    borderColor: '#2A2F57',
-    borderWidth: 1,
-    borderRadius: 8,
-    color: '#E8ECF1',
-    fontSize: 15,
-    fontWeight: '800',
-    padding: 12,
-    marginBottom: 10,
-  },
-  inlineForm: { flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 8 },
-  inlineInput: { flex: 1, marginBottom: 0 },
-  presetBlock: { marginBottom: 10 },
-  presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
-  presetChip: { borderWidth: 1, borderColor: '#2A2F57', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10 },
-  presetChipActive: { backgroundColor: '#52E5A7', borderColor: '#52E5A7' },
-  presetChipText: { color: '#E8ECF1', fontWeight: '900', fontSize: 12, textTransform: 'capitalize' },
-  presetChipTextActive: { color: '#0B1023' },
-  primaryButton: {
-    minHeight: 48,
-    borderRadius: 8,
-    backgroundColor: '#52E5A7',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 4,
-  },
-  primaryButtonText: { color: '#0B1023', fontWeight: '900', fontSize: 16 },
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#2A2F57' },
-  searchBadge: { width: 52, height: 52, borderRadius: 8, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  searchBadgeText: { color: '#E8ECF1', fontWeight: '900', fontSize: 13 },
-  rowTitle: { color: '#E8ECF1', fontSize: 15, fontWeight: '900' },
-  metaText: { color: '#9BA3C7', fontSize: 12, fontWeight: '800', lineHeight: 18 },
   flex: { flex: 1, minWidth: 0 },
-  progressTrack: { height: 10, borderRadius: 8, backgroundColor: '#0F1430', borderWidth: 1, borderColor: '#2A2F57', overflow: 'hidden', marginBottom: 8 },
-  progressFill: { height: '100%', borderRadius: 8 },
-  goalRow: { marginBottom: 10 },
-  goalHeader: { flexDirection: 'row', justifyContent: 'space-between', gap: 10, marginBottom: 6 },
-  requestRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
-  quickChip: { borderWidth: 1, borderColor: '#4DA3FF', borderRadius: 8, paddingVertical: 7, paddingHorizontal: 9 },
-  quickChipText: { color: '#BFD9FF', fontWeight: '900', fontSize: 12 },
-  costStrip: {
-    borderWidth: 1,
-    borderColor: '#3A3F73',
-    borderRadius: 8,
-    backgroundColor: '#0F1430',
-    padding: 12,
-    marginBottom: 10,
-  },
-  costText: { color: '#FFCC66', fontSize: 22, fontWeight: '900', marginVertical: 2 },
-  warningText: { color: '#FF9A9A', fontSize: 12, fontWeight: '900', marginBottom: 8 },
-  statGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 10,
-  },
-  statTile: {
-    flexGrow: 1,
-    minWidth: '45%',
-    borderWidth: 1,
-    borderColor: '#2A2F57',
-    borderRadius: 8,
-    backgroundColor: '#0F1430',
-    padding: 10,
-  },
+  headerIcon: { width: 48, height: 48, borderRadius: 8, borderWidth: 1, borderColor: ui.border.strong, backgroundColor: ui.surface.raised, alignItems: 'center', justifyContent: 'center' },
+  heroBack: { position: 'absolute', right: 12, top: 12, zIndex: 2, width: 42, height: 42 },
+  clubHero: { borderWidth: 1.5, borderRadius: 8, padding: 18, paddingRight: 60, flexDirection: 'row', gap: 14, alignItems: 'center', marginBottom: 14 },
+  clubBadge: { width: 72, height: 72, borderRadius: 8, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  clubBadgeText: { color: ui.text.primary, fontSize: 18, fontWeight: '900' },
+  clubName: { color: ui.text.primary, fontSize: 25, fontWeight: '900' },
+  heroMotto: { color: ui.text.secondary, fontSize: 13, fontWeight: '700', marginTop: 2 },
+  heroMetaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8 },
+  heroMeta: { color: ui.text.secondary, fontSize: 12, fontWeight: '900' },
+  heroProgress: { color: ui.text.muted, fontSize: 11, fontWeight: '800', marginTop: 5 },
+  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
+  hubAction: { width: '48.5%', minHeight: 104, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.panel, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  hubActionIcon: { width: 42, height: 42, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: ui.surface.raised },
+  hubActionTitle: { color: ui.text.primary, fontWeight: '900', fontSize: 16 },
+  hubActionDetail: { color: ui.text.muted, fontWeight: '700', fontSize: 11, marginTop: 3 },
+  notificationBadge: { position: 'absolute', right: 7, top: 7, minWidth: 22, height: 22, paddingHorizontal: 5, borderRadius: 11, backgroundColor: ui.palette.coral, alignItems: 'center', justifyContent: 'center' },
+  notificationBadgeText: { color: '#08111F', fontSize: 11, fontWeight: '900' },
+  hubBand: { borderTopWidth: 1, borderBottomWidth: 1, borderColor: ui.border.soft, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  hubBandIcon: { width: 44, height: 44, borderRadius: 8, backgroundColor: ui.surface.raised, alignItems: 'center', justifyContent: 'center' },
+  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(3, 7, 17, 0.72)', justifyContent: 'flex-end' },
+  sheetDismiss: { flex: 1 },
+  sheet: { maxHeight: '91%', minHeight: '65%', borderTopLeftRadius: 8, borderTopRightRadius: 8, borderWidth: 1, borderColor: ui.border.strong, backgroundColor: ui.surface.base },
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', padding: 18, borderBottomWidth: 1, borderColor: ui.border.soft },
+  sheetTitle: { color: ui.text.primary, fontSize: 25, fontWeight: '900' },
+  sheetSubtitle: { color: ui.text.secondary, fontSize: 12, fontWeight: '700', marginTop: 3 },
+  closeButton: { width: 42, height: 42, borderRadius: 8, borderWidth: 1, borderColor: ui.border.strong, alignItems: 'center', justifyContent: 'center' },
+  sheetContent: { padding: 18, gap: 18 },
+  sectionBlock: { paddingBottom: 18, borderBottomWidth: 1, borderColor: ui.border.soft, gap: 10 },
+  sectionTitle: { color: ui.text.primary, fontSize: 19, fontWeight: '900' },
+  panel: { borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.panel, padding: 16, marginBottom: 14 },
+  panelTitle: { color: ui.text.primary, fontSize: 20, fontWeight: '900', marginBottom: 12 },
+  input: { minHeight: 48, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.base, color: ui.text.primary, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, fontWeight: '700', marginBottom: 9 },
+  inlineForm: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  inlineInput: { flex: 1, marginBottom: 0, maxHeight: 100 },
+  formStack: { marginTop: 8 },
+  buttonRow: { flexDirection: 'row', gap: 8 },
+  primaryButton: { minHeight: 52, borderRadius: 8, backgroundColor: ui.palette.emerald, alignItems: 'center', justifyContent: 'center', marginTop: 8, paddingHorizontal: 14 },
+  primaryButtonText: { color: '#08111F', fontSize: 16, fontWeight: '900' },
+  smallButton: { minHeight: 42, borderRadius: 8, backgroundColor: ui.palette.emerald, paddingHorizontal: 13, alignItems: 'center', justifyContent: 'center' },
+  smallButtonGhost: { backgroundColor: ui.surface.raised, borderWidth: 1, borderColor: ui.border.soft },
+  smallButtonText: { color: ui.text.primary, fontWeight: '900', fontSize: 12 },
+  disabled: { opacity: 0.42 },
+  rowTitle: { color: ui.text.primary, fontSize: 15, fontWeight: '900' },
+  metaText: { color: ui.text.secondary, fontSize: 12, fontWeight: '700', lineHeight: 18 },
+  helperText: { color: ui.text.muted, fontSize: 11, fontWeight: '700' },
+  progressTrack: { height: 9, borderRadius: 5, overflow: 'hidden', backgroundColor: '#080E24', borderWidth: 1, borderColor: ui.border.soft, marginTop: 8 },
+  progressFill: { height: '100%', borderRadius: 5 },
+  messageList: { gap: 8, marginBottom: 12 },
+  messageRow: { paddingVertical: 10, borderBottomWidth: 1, borderColor: ui.border.soft },
+  chatName: { color: ui.palette.emerald, fontSize: 12, fontWeight: '900' },
+  chatText: { color: ui.text.primary, fontSize: 14, fontWeight: '700', marginTop: 3, lineHeight: 20 },
+  rewardRail: { gap: 10, paddingVertical: 4 },
+  rewardCard: { width: 192, minHeight: 198, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.raised, padding: 14 },
+  rewardCardNext: { borderColor: ui.palette.gold, backgroundColor: '#25203A' },
+  rewardCardEarned: { borderColor: ui.palette.emerald, backgroundColor: '#102A2B' },
+  rewardScope: { color: ui.text.muted, fontSize: 10, fontWeight: '900' },
+  rewardName: { color: ui.text.primary, fontSize: 16, fontWeight: '900', marginTop: 8 },
+  rewardDescription: { color: ui.text.secondary, fontSize: 12, lineHeight: 17, marginVertical: 8, flex: 1 },
+  rewardRequirement: { color: ui.text.muted, fontSize: 10, fontWeight: '800', marginTop: 8 },
+  goalRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+  prestigeHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  requirementRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
+  statTile: { width: '48.5%', minHeight: 86, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.raised, padding: 12, justifyContent: 'center' },
   statTileWide: { width: '100%' },
-  statTileDimmed: { opacity: 0.62 },
-  statValueRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  statValue: { color: '#E8ECF1', fontSize: 15, fontWeight: '900' },
-  statLabel: { color: '#9BA3C7', fontSize: 11, fontWeight: '800', marginTop: 2 },
-  statValueDimmed: { color: '#9BA3C7' },
-  statLabelDimmed: { color: '#687097' },
-  nextPrestigeCard: {
-    borderWidth: 1,
-    borderColor: '#FFCC66',
-    borderRadius: 8,
-    backgroundColor: '#2B2515',
-    padding: 10,
-    marginVertical: 10,
-  },
-  requirementRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#2A2F57',
-    paddingVertical: 8,
-  },
-  chatLine: { color: '#E8ECF1', fontSize: 13, fontWeight: '700', paddingVertical: 4 },
-  chatName: { color: '#52E5A7', fontWeight: '900' },
-  rewardRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#2A2F57' },
-  memberRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#2A2F57' },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#123B32',
-    borderWidth: 2,
-    borderColor: '#52E5A7',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: { color: '#E8ECF1', fontWeight: '900', fontSize: 16 },
-  memberActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 6, maxWidth: 180 },
-  smallButton: {
-    minWidth: 72,
-    minHeight: 38,
-    borderRadius: 8,
-    backgroundColor: '#52E5A7',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-  },
-  smallButtonGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#4DA3FF' },
-  smallButtonDanger: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#FF6B6B' },
-  smallButtonText: { color: '#0B1023', fontWeight: '900', fontSize: 12 },
-  smallButtonGhostText: { color: '#E8ECF1' },
-  emptyText: {
-    color: '#9BA3C7',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#0F1430',
-    padding: 12,
-    fontWeight: '800',
-  },
-  leaveButton: {
-    minHeight: 46,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#FF6B6B',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  leaveButtonText: { color: '#FF9A9A', fontWeight: '900', fontSize: 14 },
-  disabled: { opacity: 0.45 },
+  statTileDimmed: { opacity: 0.52 },
+  statValueRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  statValue: { color: ui.text.primary, fontSize: 18, fontWeight: '900' },
+  statLabel: { color: ui.text.muted, fontSize: 11, fontWeight: '800', marginTop: 5 },
+  quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  quickChip: { minHeight: 42, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.raised, paddingHorizontal: 13, alignItems: 'center', justifyContent: 'center' },
+  quickChipSelected: { borderColor: ui.palette.emerald, backgroundColor: '#143A35' },
+  quickChipText: { color: ui.text.primary, fontSize: 12, fontWeight: '900' },
+  listRow: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderColor: ui.border.soft },
+  listIndex: { color: ui.text.muted, fontWeight: '900', width: 22 },
+  coinText: { color: ui.palette.gold, fontWeight: '900' },
+  memberRow: { paddingVertical: 11, borderBottomWidth: 1, borderColor: ui.border.soft, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  onlineDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: ui.palette.emerald },
+  offlineDot: { backgroundColor: ui.palette.coral },
+  memberActions: { gap: 6, alignItems: 'flex-end' },
+  announcementRow: { paddingVertical: 10, borderBottomWidth: 1, borderColor: ui.border.soft },
+  requestRow: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 9, borderBottomWidth: 1, borderColor: ui.border.soft },
+  invitationRow: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 9, borderBottomWidth: 1, borderColor: ui.border.soft },
+  leaveButton: { minHeight: 48, borderRadius: 8, borderWidth: 1, borderColor: ui.palette.coral, alignItems: 'center', justifyContent: 'center' },
+  leaveButtonText: { color: ui.palette.coral, fontWeight: '900' },
+  costStrip: { padding: 12, borderRadius: 8, backgroundColor: ui.surface.raised, marginBottom: 12 },
+  costText: { color: ui.palette.gold, fontSize: 22, fontWeight: '900', marginVertical: 3 },
+  warningText: { color: ui.palette.coral, fontSize: 12, fontWeight: '800', marginTop: 6 },
+  lockTitle: { color: ui.text.primary, fontSize: 22, fontWeight: '900', marginBottom: 8 },
+  presetBlock: { marginTop: 8 },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderColor: ui.border.soft },
+  searchBadge: { width: 50, height: 50, borderRadius: 8, borderWidth: 2, alignItems: 'center', justifyContent: 'center', backgroundColor: ui.surface.raised },
+  searchBadgeText: { color: ui.text.primary, fontSize: 11, fontWeight: '900' },
+  emptyText: { color: ui.text.muted, fontSize: 13, fontWeight: '700', paddingVertical: 12 },
 });

@@ -8,6 +8,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CheckCircle2, Gift, Mail, Send, Trash2 } from 'lucide-react-native';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
+import { useClubRealtime } from '../context/ClubRealtimeContext';
 import * as api from '../services/api';
 import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, SectionTitle, StatusBadge, ui } from '../ui';
 
@@ -33,8 +34,8 @@ function formatWhen(timestamp: number) {
 
 export default function InboxScreen({ navigation }: Props) {
   const { token, refreshProfile } = useAuth();
+  const { mailSummary: summary, updateMailSummary } = useClubRealtime();
   const [mail, setMail] = useState<api.MailEntry[]>([]);
-  const [summary, setSummary] = useState<api.MailSummary | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [feedbackCategory, setFeedbackCategory] = useState<api.MailFeedbackCategory>('bug');
   const [feedbackSubject, setFeedbackSubject] = useState('');
@@ -45,13 +46,12 @@ export default function InboxScreen({ navigation }: Props) {
     if (!token) return;
     const response = await api.mailList(token);
     setMail(response.mail);
-    setSummary(response.summary);
-  }, [token]);
+    updateMailSummary(response.summary);
+  }, [token, updateMailSummary]);
 
   useFocusEffect(useCallback(() => {
     loadMail().catch(() => {
       setMail([]);
-      setSummary(null);
     });
   }, [loadMail]));
 
@@ -64,7 +64,7 @@ export default function InboxScreen({ navigation }: Props) {
     try {
       const response = await api.claimMail(token, entry.mailId);
       setMail(current => current.map(item => item.mailId === entry.mailId ? response.mail : item));
-      setSummary(response.summary);
+      updateMailSummary(response.summary);
       await refreshProfile().catch(() => {});
       const rewards = response.rewards.map(rewardLabel).join(', ');
       Alert.alert(response.alreadyClaimed ? 'Already claimed' : 'Reward claimed', rewards || 'Reward claimed.');
@@ -81,7 +81,7 @@ export default function InboxScreen({ navigation }: Props) {
     try {
       const response = await api.markMailRead(token, entry.mailId);
       setMail(current => current.map(item => item.mailId === entry.mailId ? response.mail : item));
-      setSummary(response.summary);
+      updateMailSummary(response.summary);
     } catch {
       await loadMail().catch(() => {});
     } finally {
@@ -95,7 +95,7 @@ export default function InboxScreen({ navigation }: Props) {
     try {
       const response = await api.deleteMail(token, entry.mailId);
       setMail(current => current.filter(item => item.mailId !== entry.mailId));
-      setSummary(response.summary);
+      updateMailSummary(response.summary);
     } catch (error) {
       Alert.alert('Delete failed', error instanceof Error ? error.message : 'Try again.');
     } finally {

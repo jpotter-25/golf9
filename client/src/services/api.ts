@@ -104,6 +104,7 @@ export type ClubSummary = {
   level: number;
   memberCount: number;
   memberCap: number;
+  onlineMemberCount: number;
   role: ClubRole | null;
   prestige: ClubPrestigeSummary;
   branding: ClubBranding;
@@ -376,6 +377,7 @@ export type MailSummary = {
   total: number;
   unread: number;
   claimable: number;
+  attention: number;
   latest: MailEntry | null;
 };
 
@@ -544,6 +546,15 @@ export type ClubTreasury = {
   lifetimeDonated: number;
 };
 
+export type ClubTreasuryGoal = {
+  title: string;
+  description: string;
+  targetAmount: number;
+  createdBy: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type ClubDonationStats = {
   topDonors: Array<{ userId: string; displayName: string; amount: number }>;
   viewerDonated: number;
@@ -559,6 +570,7 @@ export type ClubMember = {
   contributionXp: number;
   coinContribution: number;
   contribution: { matches: number; wins: number; columnClears: number; rankedOrWager: number };
+  isOnline: boolean;
 };
 
 export type ClubJoinRequest = {
@@ -638,6 +650,7 @@ export type ClubProfile = ClubSummary & {
   updatedAt: number;
   progression: ClubProgression;
   treasury: ClubTreasury;
+  treasuryGoal: ClubTreasuryGoal | null;
   donationStats: ClubDonationStats;
   nextPrestige: ClubNextPrestige | null;
   canPrestige: boolean;
@@ -663,6 +676,14 @@ export type ClubApplication = {
   club: ClubSummary;
   createdAt: number;
   message: string;
+};
+
+export type ClubInvitation = {
+  id: string;
+  club: ClubSummary;
+  createdAt: number;
+  fromUserId: string | null;
+  fromDisplayName: string;
 };
 
 export type ClubContributionSummary = {
@@ -821,8 +842,8 @@ export function publicProfile(token: string, userId: string): Promise<{ profile:
   return request<{ profile: PublicPlayerProfile }>(`/profiles/${encodeURIComponent(userId)}`, {}, token);
 }
 
-export function clubMe(token: string): Promise<{ club: ClubProfile | null; applications: ClubApplication[]; recommended?: ClubSummary[] }> {
-  return request<{ club: ClubProfile | null; applications: ClubApplication[]; recommended?: ClubSummary[] }>('/clubs/me', {}, token);
+export function clubMe(token: string): Promise<{ club: ClubProfile | null; applications: ClubApplication[]; invitations: ClubInvitation[]; recommended?: ClubSummary[] }> {
+  return request<{ club: ClubProfile | null; applications: ClubApplication[]; invitations: ClubInvitation[]; recommended?: ClubSummary[] }>('/clubs/me', {}, token);
 }
 
 export function createClub(token: string, payload: { name: string; tag: string; motto?: string; branding?: Partial<ClubBranding> }): Promise<{ club: ClubProfile }> {
@@ -877,6 +898,22 @@ export function inviteToClub(token: string, clubId: string, userId: string): Pro
   );
 }
 
+export function acceptClubInvitation(token: string, invitation: ClubInvitation): Promise<{ club: ClubProfile; user: UserProfile; invitations: ClubInvitation[] }> {
+  return request<{ club: ClubProfile; user: UserProfile; invitations: ClubInvitation[] }>(
+    `/clubs/${encodeURIComponent(invitation.club.clubId)}/invites/${encodeURIComponent(invitation.id)}/accept`,
+    { method: 'POST' },
+    token
+  );
+}
+
+export function declineClubInvitation(token: string, invitation: ClubInvitation): Promise<{ ok: boolean; invitations: ClubInvitation[] }> {
+  return request<{ ok: boolean; invitations: ClubInvitation[] }>(
+    `/clubs/${encodeURIComponent(invitation.club.clubId)}/invites/${encodeURIComponent(invitation.id)}`,
+    { method: 'DELETE' },
+    token
+  );
+}
+
 export function leaveClub(token: string, clubId: string): Promise<{ ok: boolean; club: null }> {
   return request<{ ok: boolean; club: null }>(`/clubs/${encodeURIComponent(clubId)}/leave`, { method: 'POST' }, token);
 }
@@ -885,6 +922,22 @@ export function donateToClub(token: string, clubId: string, amount: number): Pro
   return request<{ donation: { id: string; userId: string; amount: number; createdAt: number }; club: ClubProfile; user: UserProfile }>(
     `/clubs/${encodeURIComponent(clubId)}/donate`,
     { method: 'POST', body: JSON.stringify({ amount }) },
+    token
+  );
+}
+
+export function updateClubTreasuryGoal(token: string, clubId: string, goal: { title: string; description?: string; targetAmount: number }): Promise<{ treasuryGoal: ClubTreasuryGoal; club: ClubProfile }> {
+  return request<{ treasuryGoal: ClubTreasuryGoal; club: ClubProfile }>(
+    `/clubs/${encodeURIComponent(clubId)}/treasury-goal`,
+    { method: 'PUT', body: JSON.stringify(goal) },
+    token
+  );
+}
+
+export function clearClubTreasuryGoal(token: string, clubId: string): Promise<{ treasuryGoal: null; club: ClubProfile }> {
+  return request<{ treasuryGoal: null; club: ClubProfile }>(
+    `/clubs/${encodeURIComponent(clubId)}/treasury-goal`,
+    { method: 'DELETE' },
     token
   );
 }

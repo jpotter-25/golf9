@@ -26,22 +26,18 @@ import { AvatarCluster, rankEmblemForLeague } from '../components/AvatarDecorati
 import { PlayerAvatar } from '../components/PlayerAvatar';
 import { useBoardMetrics } from '../utils/scaling';
 import { useAuth } from '../context/AuthContext';
+import { useClubRealtime } from '../context/ClubRealtimeContext';
 import * as api from '../services/api';
 import {
   connect,
-  joinClubSocket,
   joinRoomSocket,
   onChatHistory,
   onChatMessage,
-  onClubChatHistory,
-  onClubChatMessage,
-  onClubUpdate,
   onGameCelebration,
   onGameUpdate,
   onRoomUpdate,
   onSocketConnect,
   sendChatMessage,
-  sendClubChatMessage,
   sendGameIntent,
   updateRoomPresence,
   type ChatMessage,
@@ -191,6 +187,13 @@ export default function GameScreen({ route, navigation }: Props) {
   const { players, mode, rounds, roomCode, aiDifficulty = 'easy', localPlayerNames } = route.params;
   const TOTAL_ROUNDS: number = rounds;
   const { token, user, refreshProfile } = useAuth();
+  const {
+    club: clubProfile,
+    chatMessages: clubChatMessages,
+    clubChatUnread,
+    setClubChatVisible,
+    sendClubMessage,
+  } = useClubRealtime();
   const isOnline = mode === 'online' && !!roomCode && !!token;
   const isFocused = useIsFocused();
 
@@ -228,12 +231,9 @@ export default function GameScreen({ route, navigation }: Props) {
   const [chatText, setChatText] = useState('');
   const [chatSending, setChatSending] = useState(false);
   const [chatUnread, setChatUnread] = useState(0);
-  const [clubChatMessages, setClubChatMessages] = useState<api.ClubChatMessage[]>([]);
   const [clubChatOpen, setClubChatOpen] = useState(false);
   const [clubChatText, setClubChatText] = useState('');
   const [clubChatSending, setClubChatSending] = useState(false);
-  const [clubChatUnread, setClubChatUnread] = useState(0);
-  const [clubProfile, setClubProfile] = useState<api.ClubProfile | null>(null);
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
   const [roomPlayers, setRoomPlayers] = useState<api.RoomPlayer[]>([]);
@@ -263,7 +263,6 @@ export default function GameScreen({ route, navigation }: Props) {
   const localEndingRound = useRef<number | null>(null);
   const recordedLocalRoundKey = useRef<string | null>(null);
   const chatOpenRef = useRef(false);
-  const clubChatOpenRef = useRef(false);
   const chatScrollRef = useRef<ScrollView | null>(null);
   const clubChatScrollRef = useRef<ScrollView | null>(null);
   const socialBurstTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -405,47 +404,9 @@ export default function GameScreen({ route, navigation }: Props) {
   }, [chatOpen]);
 
   useEffect(() => {
-    clubChatOpenRef.current = clubChatOpen;
-    if (clubChatOpen) setClubChatUnread(0);
-  }, [clubChatOpen]);
-
-  useEffect(() => {
-    const clubId = user?.club?.clubId;
-    if (!token || !clubId) {
-      setClubProfile(null);
-      setClubChatMessages([]);
-      setClubChatUnread(0);
-      return undefined;
-    }
-    let cancelled = false;
-    connect(token);
-    joinClubSocket(token, clubId)
-      .then(response => {
-        if (cancelled) return;
-        setClubProfile(response.club);
-        setClubChatMessages(response.chat);
-      })
-      .catch(() => {});
-    const cleanupHistory = onClubChatHistory(messages => {
-      if (!cancelled) setClubChatMessages(messages.filter(message => message.clubId === clubId));
-    });
-    const cleanupMessage = onClubChatMessage(message => {
-      if (cancelled || message.clubId !== clubId) return;
-      setClubChatMessages(prev => prev.some(item => item.id === message.id) ? prev : [...prev, message].slice(-80));
-      if (!clubChatOpenRef.current && message.userId !== user?.userId) {
-        setClubChatUnread(prev => Math.min(99, prev + 1));
-      }
-    });
-    const cleanupUpdate = onClubUpdate(update => {
-      if (!cancelled && update.clubId === clubId && update.club) setClubProfile(update.club);
-    });
-    return () => {
-      cancelled = true;
-      cleanupHistory();
-      cleanupMessage();
-      cleanupUpdate();
-    };
-  }, [token, user?.club?.clubId, user?.userId]);
+    setClubChatVisible(clubChatOpen && isFocused);
+    return () => setClubChatVisible(false);
+  }, [clubChatOpen, isFocused, setClubChatVisible]);
 
   const applyOnlineGameState = useCallback((next: GameState) => {
     setState(next);
@@ -1566,15 +1527,14 @@ export default function GameScreen({ route, navigation }: Props) {
     }
   };
 
-  const onSendClubChat = async (type: api.ClubChatMessage['type'], text: string) => {
-    const clubId = user?.club?.clubId;
-    if (!token || !clubId || clubChatSending) return;
+  const onSendClubChat = async (text: string) => {
+    if (!token || !user?.club?.clubId || clubChatSending) return;
     const clean = text.trim();
     if (!clean) return;
     setClubChatSending(true);
     try {
-      await sendClubChatMessage(token, clubId, type, clean);
-      if (type === 'text') setClubChatText('');
+      await sendClubMessage(clean);
+      setClubChatText('');
     } catch (error) {
       Alert.alert('Club chat not sent', error instanceof Error ? error.message : 'Try again.');
     } finally {
@@ -1790,10 +1750,7 @@ export default function GameScreen({ route, navigation }: Props) {
         {user?.club?.clubId ? (
           <Pressable
             style={[styles.chatButton, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }]}
-            onPress={() => {
-              setClubChatOpen(true);
-              setClubChatUnread(0);
-            }}
+            onPress={() => setClubChatOpen(true)}
           >
             <Users size={22} color={ui.palette.emerald} strokeWidth={2.5} />
             {clubChatUnread > 0 ? (
@@ -2488,47 +2445,6 @@ export default function GameScreen({ route, navigation }: Props) {
               )}
             </ScrollView>
 
-            <Text style={styles.chatSectionLabel}>Quick Club Chat</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickChatRow} keyboardShouldPersistTaps="handled">
-              {QUICK_CHAT_PRESETS.map(preset => (
-                <Pressable
-                  key={preset}
-                  style={[styles.quickChatChip, clubChatSending && styles.chatDisabled]}
-                  disabled={clubChatSending}
-                  onPress={() => onSendClubChat('preset', preset)}
-                >
-                  <Text style={styles.quickChatText}>{preset}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.emojiRow} keyboardShouldPersistTaps="handled">
-              {QUICK_CHAT_EMOJIS.map(emoji => (
-                <Pressable
-                  key={emoji}
-                  style={[styles.emojiChip, clubChatSending && styles.chatDisabled]}
-                  disabled={clubChatSending}
-                  onPress={() => onSendClubChat('emoji', emoji)}
-                >
-                  <Text style={styles.emojiText}>{emoji}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-
-            <Text style={styles.chatSectionLabel}>Stickers</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.stickerRow} keyboardShouldPersistTaps="handled">
-              {QUICK_CHAT_STICKERS.map(sticker => (
-                <Pressable
-                  key={sticker}
-                  style={[styles.stickerChip, clubChatSending && styles.chatDisabled]}
-                  disabled={clubChatSending}
-                  onPress={() => onSendClubChat('sticker', sticker)}
-                >
-                  <Text style={styles.stickerText}>{sticker}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-
             <View style={styles.chatInputRow}>
               <TextInput
                 value={clubChatText}
@@ -2542,7 +2458,7 @@ export default function GameScreen({ route, navigation }: Props) {
               <Pressable
                 style={[styles.chatSendButton, (!clubChatText.trim() || clubChatSending) && styles.chatSendButtonDisabled]}
                 disabled={!clubChatText.trim() || clubChatSending}
-                onPress={() => onSendClubChat('text', clubChatText)}
+                onPress={() => onSendClubChat(clubChatText)}
               >
                 <Text style={styles.chatSendText}>Send</Text>
               </Pressable>

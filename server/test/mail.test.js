@@ -35,7 +35,34 @@ test('system mail delivers notices and summarizes unread claimable rewards', () 
   assert.equal(summary.total, 1);
   assert.equal(summary.unread, 1);
   assert.equal(summary.claimable, 1);
+  assert.equal(summary.attention, 1);
   assert.equal(summary.latest.title, 'Welcome gift');
+});
+
+test('mail attention counts unread-or-claimable entries once until both resolve', () => {
+  const entries = [];
+  const account = player({ currency: { coins: 0, lifetimeCoins: 0 } });
+  createSystemMail(entries, [account], { displayName: 'Admin' }, {
+    title: 'One badge, two reasons',
+    message: 'Read this and collect the attached coins.',
+    coins: 25,
+  });
+  const mailId = entries[0].mailId;
+
+  assert.deepEqual(
+    (({ unread, claimable, attention }) => ({ unread, claimable, attention }))(mailSummaryForUser(entries, account.userId)),
+    { unread: 1, claimable: 1, attention: 1 },
+  );
+  markMailRead(entries, account.userId, mailId);
+  assert.deepEqual(
+    (({ unread, claimable, attention }) => ({ unread, claimable, attention }))(mailSummaryForUser(entries, account.userId)),
+    { unread: 0, claimable: 1, attention: 1 },
+  );
+  claimMailForUser(entries, account, [], mailId);
+  assert.deepEqual(
+    (({ unread, claimable, attention }) => ({ unread, claimable, attention }))(mailSummaryForUser(entries, account.userId)),
+    { unread: 0, claimable: 0, attention: 0 },
+  );
 });
 
 test('mail reward claims are idempotent', () => {

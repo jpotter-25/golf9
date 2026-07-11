@@ -12,13 +12,12 @@ import {
   ViewStyle,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Bell, BookOpen, Coins, GraduationCap, Home, LogOut, Mail, MessageCircle, Music2, Settings, Users, Volume2, X, Zap } from 'lucide-react-native';
+import { Bell, BookOpen, Coins, GraduationCap, Home, LogOut, Mail, Music2, Settings, Users, Volume2, X, Zap } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { useNavigation, useRoute, type NavigationProp, type ParamListBase } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
-import * as api from '../services/api';
-import { connect, joinClubSocket, onClubChatMessage, onClubUpdate } from '../services/network';
+import { useClubRealtime } from '../context/ClubRealtimeContext';
 import { getGameplayPreferences, setGameplayPreferences, subscribeGameplayPreferences } from '../services/preferences';
 import { RankEmblem } from '../components/AvatarDecorations';
 import { PlayerAvatar } from '../components/PlayerAvatar';
@@ -90,77 +89,19 @@ function GlobalTopBar() {
   const insets = useSafeAreaInsets();
   const route = useRoute();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
-  const { token, user, signOut } = useAuth();
+  const { user, signOut } = useAuth();
+  const { club, invitations, mailSummary, clubChatUnread, clubActionCount } = useClubRealtime();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prefs, setPrefs] = useState(getGameplayPreferences());
-  const [mailSummary, setMailSummary] = useState<api.MailSummary | null>(null);
-  const [clubMeta, setClubMeta] = useState<{ club: api.ClubProfile | null; applications: api.ClubApplication[] } | null>(null);
-  const [clubChatUnread, setClubChatUnread] = useState(0);
   const isLobby = route.name === 'Lobby';
   const progress = Math.max(0.06, Math.min(1, user?.progression.levelProgress ?? 0));
   const ranked = user?.competitive;
-  const club = clubMeta?.club ?? null;
-  const clubActionCount = club?.permissions.canManageRequests ? (club.joinRequests?.length ?? 0) + (club.invites?.length ?? 0) : 0;
+  const clubAttentionCount = Math.min(99, clubActionCount + clubChatUnread);
 
   useEffect(() => subscribeGameplayPreferences(setPrefs), []);
 
-  useEffect(() => {
-    if (!token) {
-      setMailSummary(null);
-      setClubMeta(null);
-      return undefined;
-    }
-    let cancelled = false;
-    Promise.all([
-      api.mailSummary(token).then(response => response.summary).catch(() => null),
-      api.clubMe(token).catch(() => null),
-    ])
-      .then(([mailResult, clubResult]) => {
-        if (cancelled) return;
-        setMailSummary(mailResult);
-        setClubMeta(clubResult);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [route.name, token]);
-
-  useEffect(() => {
-    if (route.name === 'Club') setClubChatUnread(0);
-  }, [route.name]);
-
-  useEffect(() => {
-    const clubId = user?.club?.clubId;
-    if (!token || !clubId) {
-      setClubChatUnread(0);
-      return undefined;
-    }
-    let cancelled = false;
-    connect(token);
-    joinClubSocket(token, clubId)
-      .then(response => {
-        if (!cancelled) setClubMeta(current => current ? { ...current, club: response.club } : { club: response.club, applications: [] });
-      })
-      .catch(() => {});
-    const cleanupMessage = onClubChatMessage(message => {
-      if (cancelled || message.clubId !== clubId || message.userId === user?.userId || route.name === 'Club') return;
-      setClubChatUnread(count => Math.min(99, count + 1));
-    });
-    const cleanupUpdate = onClubUpdate(update => {
-      if (!cancelled && update.clubId === clubId && update.club) {
-        setClubMeta(current => current ? { ...current, club: update.club ?? current.club } : { club: update.club ?? null, applications: [] });
-      }
-    });
-    return () => {
-      cancelled = true;
-      cleanupMessage();
-      cleanupUpdate();
-    };
-  }, [route.name, token, user?.club?.clubId, user?.userId]);
-
   const updatePrefs = (next: Partial<typeof prefs>) => setGameplayPreferences(next);
   const openClub = () => {
-    setClubChatUnread(0);
     navigation.navigate('Club');
   };
 
@@ -200,29 +141,24 @@ function GlobalTopBar() {
 
         <Pressable accessibilityRole="button" accessibilityLabel="Open inbox" style={styles.topIconButton} onPress={() => navigation.navigate('Inbox')}>
           <Mail size={20} color={ui.text.primary} strokeWidth={2.8} />
-          {(mailSummary?.unread || mailSummary?.claimable) ? (
+          {(mailSummary?.attention ?? 0) > 0 ? (
             <View style={styles.topIconBadge}>
-              <Text style={styles.topIconBadgeText}>{Math.min(99, Number(mailSummary?.unread || mailSummary?.claimable || 0))}</Text>
+              <Text style={styles.topIconBadgeText}>{Math.min(99, mailSummary?.attention ?? 0)}</Text>
             </View>
           ) : null}
         </Pressable>
 
-        {club ? (
+        {club || invitations.length ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Open club${clubActionCount ? `, ${clubActionCount} pending invite actions` : ''}${clubChatUnread ? `, ${clubChatUnread} new club chat message${clubChatUnread === 1 ? '' : 's'}` : ''}`}
+            accessibilityLabel={`Open club${clubActionCount ? `, ${clubActionCount} pending club action${clubActionCount === 1 ? '' : 's'}` : ''}${clubChatUnread ? `, ${clubChatUnread} new club chat message${clubChatUnread === 1 ? '' : 's'}` : ''}`}
             style={styles.topIconButton}
             onPress={openClub}
           >
             <Users size={20} color={ui.text.primary} strokeWidth={2.8} />
-            {clubActionCount > 0 ? (
+            {clubAttentionCount > 0 ? (
               <View style={styles.topIconBadge}>
-                <Text style={styles.topIconBadgeText}>{Math.min(99, clubActionCount)}</Text>
-              </View>
-            ) : null}
-            {clubChatUnread > 0 ? (
-              <View style={styles.clubChatBadge}>
-                <MessageCircle size={11} color={ui.text.primary} strokeWidth={3} />
+                <Text style={styles.topIconBadgeText}>{clubAttentionCount}</Text>
               </View>
             ) : null}
           </Pressable>

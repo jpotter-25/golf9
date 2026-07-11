@@ -1738,6 +1738,7 @@ test('clubs create, search, request, approve, chat, and ignore local matches', a
     const owner = await signup(baseUrl, `ClubOwner${Date.now()}`);
     const member = await signup(baseUrl, `ClubMember${Date.now()}`);
     const outsider = await signup(baseUrl, `ClubNope${Date.now()}`);
+    const lowLevelInvitee = await signup(baseUrl, `ClubLow${Date.now()}`);
     const admin = await adminLogin(baseUrl);
 
     const legacyDefault = await json(await fetch(`${baseUrl}/auth/me`, { headers: authHeaders(owner.token) }));
@@ -1771,6 +1772,13 @@ test('clubs create, search, request, approve, chat, and ignore local matches', a
     assert.equal(created.club.prestige.tier, 1);
     assert.equal(created.club.progression.memberCap, 15);
     assert.equal(created.user.currency.coins >= 0, true);
+
+    const lockedInvite = await fetch(`${baseUrl}/clubs/${created.club.clubId}/invites`, {
+      method: 'POST',
+      headers: authHeaders(owner.token),
+      body: JSON.stringify({ userId: lowLevelInvitee.user.userId }),
+    });
+    assert.equal(lockedInvite.status, 403);
 
     const bulkClubFreeze = await json(await fetch(`${baseUrl}/admin/api/clubs/bulk`, {
       method: 'POST',
@@ -1838,6 +1846,58 @@ test('clubs create, search, request, approve, chat, and ignore local matches', a
     assert.equal(accept.club.memberCount, 2);
     assert.equal(accept.club.members.some(item => item.userId === member.user.userId && item.role === 'rookie'), true);
 
+    const memberGoal = await fetch(`${baseUrl}/clubs/${created.club.clubId}/treasury-goal`, {
+      method: 'PUT',
+      headers: authHeaders(member.token),
+      body: JSON.stringify({ title: 'Not allowed', targetAmount: 1000 }),
+    });
+    assert.equal(memberGoal.status, 403);
+    const goal = await json(await fetch(`${baseUrl}/clubs/${created.club.clubId}/treasury-goal`, {
+      method: 'PUT',
+      headers: authHeaders(owner.token),
+      body: JSON.stringify({ title: 'Club tournament', description: 'Fund the next event.', targetAmount: 12500 }),
+    }));
+    assert.equal(goal.club.treasuryGoal.title, 'Club tournament');
+    const clearedGoal = await json(await fetch(`${baseUrl}/clubs/${created.club.clubId}/treasury-goal`, {
+      method: 'DELETE',
+      headers: authHeaders(owner.token),
+    }));
+    assert.equal(clearedGoal.club.treasuryGoal, null);
+
+    const invitation = await json(await fetch(`${baseUrl}/clubs/${created.club.clubId}/invites`, {
+      method: 'POST',
+      headers: authHeaders(owner.token),
+      body: JSON.stringify({ userId: outsider.user.userId }),
+    }));
+    const outsiderInbox = await json(await fetch(`${baseUrl}/clubs/me`, { headers: authHeaders(outsider.token) }));
+    assert.equal(outsiderInbox.club, null);
+    assert.equal(outsiderInbox.invitations.some(item => item.id === invitation.invite.id), true);
+    const declined = await json(await fetch(`${baseUrl}/clubs/${created.club.clubId}/invites/${invitation.invite.id}`, {
+      method: 'DELETE',
+      headers: authHeaders(outsider.token),
+    }));
+    assert.equal(declined.invitations.length, 0);
+
+    const secondInvitation = await json(await fetch(`${baseUrl}/clubs/${created.club.clubId}/invites`, {
+      method: 'POST',
+      headers: authHeaders(owner.token),
+      body: JSON.stringify({ userId: outsider.user.userId }),
+    }));
+    const duplicateInvitation = await json(await fetch(`${baseUrl}/clubs/${created.club.clubId}/invites`, {
+      method: 'POST',
+      headers: authHeaders(owner.token),
+      body: JSON.stringify({ userId: outsider.user.userId }),
+    }));
+    assert.equal(duplicateInvitation.invite.id, secondInvitation.invite.id);
+    const duplicateInbox = await json(await fetch(`${baseUrl}/clubs/me`, { headers: authHeaders(outsider.token) }));
+    assert.equal(duplicateInbox.invitations.length, 1);
+    const invitationAccepted = await json(await fetch(`${baseUrl}/clubs/${created.club.clubId}/invites/${secondInvitation.invite.id}/accept`, {
+      method: 'POST',
+      headers: authHeaders(outsider.token),
+    }));
+    assert.equal(invitationAccepted.club.memberCount, 3);
+    assert.equal(invitationAccepted.invitations.length, 0);
+
     const forbiddenEdit = await fetch(`${baseUrl}/clubs/${created.club.clubId}`, {
       method: 'PATCH',
       headers: authHeaders(member.token),
@@ -1884,6 +1944,15 @@ test('clubs create, search, request, approve, chat, and ignore local matches', a
       const memberJoin = await emitAck(socketMember, 'club:join', { clubId: created.club.clubId });
       assert.equal(ownerJoin.club.clubId, created.club.clubId);
       assert.equal(memberJoin.chat.length, 0);
+      assert.equal(ownerJoin.club.onlineMemberCount >= 2, true);
+      assert.equal(ownerJoin.club.members.find(item => item.userId === owner.user.userId).isOnline, true);
+
+      const presenceUpdate = once(socketOwner, 'club:presence');
+      const backgrounded = await emitAck(socketMember, 'club:presence:state', { foreground: false });
+      assert.equal(backgrounded.ok, true);
+      const presence = (await presenceUpdate)[0];
+      assert.equal(presence.onlineUserIds.includes(member.user.userId), false);
+      await emitAck(socketMember, 'club:presence:state', { foreground: true });
 
       const blocked = await emitAck(socketMember, 'club:chat:send', { clubId: created.club.clubId, type: 'text', text: 'f u c k this' });
       assert.equal(blocked.error, 'Message blocked by chat filter.');
