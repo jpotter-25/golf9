@@ -88,7 +88,6 @@ import {
 } from './economy.js';
 import {
   applyClubMatchContribution,
-  appendClubChatMessage,
   canManageMember,
   canManageRequests,
   canPostAnnouncement,
@@ -5009,10 +5008,10 @@ io.on('connection', (socket) => {
     const userId = socket.auth.user.userId;
     if (!club || !findClubMember(club, userId)) return cb({ error: 'Club not found.' });
     socket.join(clubSocketRoom(club.clubId));
-    socket.emit('club:chat:history', club.chat || []);
+    socket.emit('club:chat:history', []);
     return cb({
       club: publicClubProfile(club, users, userId, rankedSeason),
-      chat: club.chat || [],
+      chat: [],
     });
   });
 
@@ -5029,9 +5028,6 @@ io.on('connection', (socket) => {
     const result = makeClubChatMessage(club, user, type, text);
     if (result.error) return cb({ error: result.error });
     clubChatRate.set(rateKey, now);
-    appendClubChatMessage(club, result.message);
-    club.updatedAt = now;
-    saveStore();
     io.to(clubSocketRoom(club.clubId)).emit('club:chat:message', result.message);
     return cb({ ok: true, message: result.message });
   });

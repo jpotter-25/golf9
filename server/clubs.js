@@ -8,7 +8,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const CLUB_LEVEL_THRESHOLDS = [
   0, 1500, 3500, 6500, 10000, 14500, 19500, 25000, 31500, 39000, 47500, 57000,
 ];
-const CLUB_CHAT_HISTORY_LIMIT = 80;
 const CLUB_ANNOUNCEMENT_LIMIT = 20;
 const CLUB_PROCESSED_RESULT_LIMIT = 500;
 const CLUB_DONATION_LEDGER_LIMIT = 200;
@@ -282,7 +281,7 @@ export function normalizeClubRecord(club, now = Date.now(), rankedSeason = null,
   club.joinRequests = Array.isArray(club.joinRequests) ? club.joinRequests.filter(request => request?.id && request?.userId) : [];
   club.invites = Array.isArray(club.invites) ? club.invites.filter(invite => invite?.id && invite?.userId) : [];
   club.announcements = Array.isArray(club.announcements) ? club.announcements.slice(-CLUB_ANNOUNCEMENT_LIMIT) : [];
-  club.chat = Array.isArray(club.chat) ? club.chat.slice(-CLUB_CHAT_HISTORY_LIMIT) : [];
+  club.chat = [];
   club.processedResultIds = Array.isArray(club.processedResultIds) ? club.processedResultIds.slice(-CLUB_PROCESSED_RESULT_LIMIT) : [];
   club.goals ||= {};
   const weekStart = utcWeekStart(now);
@@ -604,7 +603,7 @@ export function publicClubProfile(club, users, viewerUserId, rankedSeason = null
       leaderboardScore: club.events.active.score,
     },
     rewards: publicClubRewards(club, viewerUserId),
-    chat: club.chat.slice(-CLUB_CHAT_HISTORY_LIMIT),
+    chat: [],
     permissions: {
       canEdit: canUpdateClub(viewerRole),
       canManageRequests: canManageRequests(viewerRole),
@@ -710,12 +709,6 @@ export function applyClubMatchContribution(club, contribution, rankedSeason = nu
     completedGoals,
     club: publicClubSummary(club, contribution.userId, contribution.completedAt, rankedSeason),
   };
-}
-
-export function appendClubChatMessage(club, message) {
-  club.chat ||= [];
-  club.chat.push(message);
-  if (club.chat.length > CLUB_CHAT_HISTORY_LIMIT) club.chat.splice(0, club.chat.length - CLUB_CHAT_HISTORY_LIMIT);
 }
 
 export function donateToClubTreasury(user, club, amount, now = Date.now(), clubConfig = DEFAULT_CLUB_CONFIG) {

@@ -18,12 +18,11 @@ import { useNavigation, useRoute, type NavigationProp, type ParamListBase } from
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
+import { connect, joinClubSocket, onClubChatMessage, onClubUpdate } from '../services/network';
 import { getGameplayPreferences, setGameplayPreferences, subscribeGameplayPreferences } from '../services/preferences';
 import { RankEmblem } from '../components/AvatarDecorations';
 import { PlayerAvatar } from '../components/PlayerAvatar';
 import { gradients, ui } from './theme';
-
-const seenClubChatAtByClub: Record<string, number> = {};
 
 type ShellProps = {
   children: React.ReactNode;
@@ -96,13 +95,12 @@ function GlobalTopBar() {
   const [prefs, setPrefs] = useState(getGameplayPreferences());
   const [mailSummary, setMailSummary] = useState<api.MailSummary | null>(null);
   const [clubMeta, setClubMeta] = useState<{ club: api.ClubProfile | null; applications: api.ClubApplication[] } | null>(null);
+  const [clubChatUnread, setClubChatUnread] = useState(0);
   const isLobby = route.name === 'Lobby';
   const progress = Math.max(0.06, Math.min(1, user?.progression.levelProgress ?? 0));
   const ranked = user?.competitive;
   const club = clubMeta?.club ?? null;
-  const latestClubChat = club?.chat?.[club.chat.length - 1];
   const clubActionCount = club?.permissions.canManageRequests ? (club.joinRequests?.length ?? 0) + (club.invites?.length ?? 0) : 0;
-  const clubChatUnread = !!club && !!latestClubChat && latestClubChat.userId !== user?.userId && latestClubChat.createdAt > (seenClubChatAtByClub[club.clubId] ?? 0);
 
   useEffect(() => subscribeGameplayPreferences(setPrefs), []);
 
@@ -128,15 +126,41 @@ function GlobalTopBar() {
   }, [route.name, token]);
 
   useEffect(() => {
-    if (route.name !== 'Club' || !club || !latestClubChat) return;
-    seenClubChatAtByClub[club.clubId] = Math.max(seenClubChatAtByClub[club.clubId] ?? 0, latestClubChat.createdAt);
-  }, [club, latestClubChat, route.name]);
+    if (route.name === 'Club') setClubChatUnread(0);
+  }, [route.name]);
+
+  useEffect(() => {
+    const clubId = user?.club?.clubId;
+    if (!token || !clubId) {
+      setClubChatUnread(0);
+      return undefined;
+    }
+    let cancelled = false;
+    connect(token);
+    joinClubSocket(token, clubId)
+      .then(response => {
+        if (!cancelled) setClubMeta(current => current ? { ...current, club: response.club } : { club: response.club, applications: [] });
+      })
+      .catch(() => {});
+    const cleanupMessage = onClubChatMessage(message => {
+      if (cancelled || message.clubId !== clubId || message.userId === user?.userId || route.name === 'Club') return;
+      setClubChatUnread(count => Math.min(99, count + 1));
+    });
+    const cleanupUpdate = onClubUpdate(update => {
+      if (!cancelled && update.clubId === clubId && update.club) {
+        setClubMeta(current => current ? { ...current, club: update.club ?? current.club } : { club: update.club ?? null, applications: [] });
+      }
+    });
+    return () => {
+      cancelled = true;
+      cleanupMessage();
+      cleanupUpdate();
+    };
+  }, [route.name, token, user?.club?.clubId, user?.userId]);
 
   const updatePrefs = (next: Partial<typeof prefs>) => setGameplayPreferences(next);
   const openClub = () => {
-    if (club && latestClubChat) {
-      seenClubChatAtByClub[club.clubId] = Math.max(seenClubChatAtByClub[club.clubId] ?? 0, latestClubChat.createdAt);
-    }
+    setClubChatUnread(0);
     navigation.navigate('Club');
   };
 
@@ -186,7 +210,7 @@ function GlobalTopBar() {
         {club ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Open club${clubActionCount ? `, ${clubActionCount} pending invite actions` : ''}${clubChatUnread ? ', new club chat message' : ''}`}
+            accessibilityLabel={`Open club${clubActionCount ? `, ${clubActionCount} pending invite actions` : ''}${clubChatUnread ? `, ${clubChatUnread} new club chat message${clubChatUnread === 1 ? '' : 's'}` : ''}`}
             style={styles.topIconButton}
             onPress={openClub}
           >
@@ -196,7 +220,7 @@ function GlobalTopBar() {
                 <Text style={styles.topIconBadgeText}>{Math.min(99, clubActionCount)}</Text>
               </View>
             ) : null}
-            {clubChatUnread ? (
+            {clubChatUnread > 0 ? (
               <View style={styles.clubChatBadge}>
                 <MessageCircle size={11} color={ui.text.primary} strokeWidth={3} />
               </View>

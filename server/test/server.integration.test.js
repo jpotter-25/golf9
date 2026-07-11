@@ -1893,6 +1893,17 @@ test('clubs create, search, request, approve, chat, and ignore local matches', a
       assert.equal(sent.ok, true);
       assert.equal(sent.message.text, 'Nice play!');
       assert.deepEqual((await received)[0], sent.message);
+
+      const socketLate = io(baseUrl, { transports: ['websocket'], auth: { token: owner.token }, forceNew: true });
+      await once(socketLate, 'connect');
+      try {
+        const lateJoin = await emitAck(socketLate, 'club:join', { clubId: created.club.clubId });
+        assert.equal(lateJoin.club.clubId, created.club.clubId);
+        assert.equal(lateJoin.chat.length, 0);
+        assert.equal(lateJoin.club.chat.length, 0);
+      } finally {
+        socketLate.disconnect();
+      }
     } finally {
       socketOwner.disconnect();
       socketMember.disconnect();
