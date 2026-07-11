@@ -12,7 +12,7 @@ import {
   ViewStyle,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Bell, BookOpen, Coins, GraduationCap, Home, LogOut, Mail, Music2, Settings, Volume2, X, Zap } from 'lucide-react-native';
+import { Bell, BookOpen, Coins, GraduationCap, Home, LogOut, Mail, MessageCircle, Music2, Settings, Users, Volume2, X, Zap } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { useNavigation, useRoute, type NavigationProp, type ParamListBase } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,6 +22,8 @@ import { getGameplayPreferences, setGameplayPreferences, subscribeGameplayPrefer
 import { RankEmblem } from '../components/AvatarDecorations';
 import { PlayerAvatar } from '../components/PlayerAvatar';
 import { gradients, ui } from './theme';
+
+const seenClubChatAtByClub: Record<string, number> = {};
 
 type ShellProps = {
   children: React.ReactNode;
@@ -93,31 +95,50 @@ function GlobalTopBar() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prefs, setPrefs] = useState(getGameplayPreferences());
   const [mailSummary, setMailSummary] = useState<api.MailSummary | null>(null);
+  const [clubMeta, setClubMeta] = useState<{ club: api.ClubProfile | null; applications: api.ClubApplication[] } | null>(null);
   const isLobby = route.name === 'Lobby';
   const progress = Math.max(0.06, Math.min(1, user?.progression.levelProgress ?? 0));
   const ranked = user?.competitive;
+  const club = clubMeta?.club ?? null;
+  const latestClubChat = club?.chat?.[club.chat.length - 1];
+  const clubActionCount = club?.permissions.canManageRequests ? (club.joinRequests?.length ?? 0) + (club.invites?.length ?? 0) : 0;
+  const clubChatUnread = !!club && !!latestClubChat && latestClubChat.userId !== user?.userId && latestClubChat.createdAt > (seenClubChatAtByClub[club.clubId] ?? 0);
 
   useEffect(() => subscribeGameplayPreferences(setPrefs), []);
 
   useEffect(() => {
     if (!token) {
       setMailSummary(null);
+      setClubMeta(null);
       return undefined;
     }
     let cancelled = false;
-    api.mailSummary(token)
-      .then(response => {
-        if (!cancelled) setMailSummary(response.summary);
-      })
-      .catch(() => {
-        if (!cancelled) setMailSummary(null);
+    Promise.all([
+      api.mailSummary(token).then(response => response.summary).catch(() => null),
+      api.clubMe(token).catch(() => null),
+    ])
+      .then(([mailResult, clubResult]) => {
+        if (cancelled) return;
+        setMailSummary(mailResult);
+        setClubMeta(clubResult);
       });
     return () => {
       cancelled = true;
     };
   }, [route.name, token]);
 
+  useEffect(() => {
+    if (route.name !== 'Club' || !club || !latestClubChat) return;
+    seenClubChatAtByClub[club.clubId] = Math.max(seenClubChatAtByClub[club.clubId] ?? 0, latestClubChat.createdAt);
+  }, [club, latestClubChat, route.name]);
+
   const updatePrefs = (next: Partial<typeof prefs>) => setGameplayPreferences(next);
+  const openClub = () => {
+    if (club && latestClubChat) {
+      seenClubChatAtByClub[club.clubId] = Math.max(seenClubChatAtByClub[club.clubId] ?? 0, latestClubChat.createdAt);
+    }
+    navigation.navigate('Club');
+  };
 
   return (
     <View style={[styles.topBarWrap, { paddingTop: Math.max(10, insets.top + 8) }]}>
@@ -129,7 +150,7 @@ function GlobalTopBar() {
         ) : null}
 
         <Pressable accessibilityRole="button" accessibilityLabel="Open profile" style={styles.playerChip} onPress={() => navigation.navigate('Profile')}>
-          <PlayerAvatar cosmetics={user?.inventory.equipped} fallbackInitial={user?.avatarInitial ?? '?'} size={42} />
+          <PlayerAvatar cosmetics={user?.inventory.equipped} fallbackInitial={user?.avatarInitial ?? '?'} size={40} />
           <View style={styles.playerMeta}>
             <Text style={styles.playerName} numberOfLines={1}>{user?.displayName ?? 'Player'}</Text>
             <View style={styles.xpTrack}>
@@ -161,6 +182,27 @@ function GlobalTopBar() {
             </View>
           ) : null}
         </Pressable>
+
+        {club ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Open club${clubActionCount ? `, ${clubActionCount} pending invite actions` : ''}${clubChatUnread ? ', new club chat message' : ''}`}
+            style={styles.topIconButton}
+            onPress={openClub}
+          >
+            <Users size={20} color={ui.text.primary} strokeWidth={2.8} />
+            {clubActionCount > 0 ? (
+              <View style={styles.topIconBadge}>
+                <Text style={styles.topIconBadgeText}>{Math.min(99, clubActionCount)}</Text>
+              </View>
+            ) : null}
+            {clubChatUnread ? (
+              <View style={styles.clubChatBadge}>
+                <MessageCircle size={11} color={ui.text.primary} strokeWidth={3} />
+              </View>
+            ) : null}
+          </Pressable>
+        ) : null}
 
         <Pressable accessibilityRole="button" accessibilityLabel="Open settings" style={styles.topIconButton} onPress={() => setSettingsOpen(true)}>
           <Settings size={20} color={ui.text.primary} strokeWidth={2.8} />
@@ -371,18 +413,22 @@ const styles = StyleSheet.create({
     borderColor: ui.border.soft,
     backgroundColor: 'rgba(10, 15, 37, 0.88)',
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    gap: 7,
-    paddingHorizontal: 8,
+    alignContent: 'center',
+    gap: 6,
+    paddingHorizontal: 7,
     paddingVertical: 7,
   },
   playerChip: {
     flex: 1,
-    minWidth: 0,
+    flexBasis: 146,
+    minWidth: 146,
     minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 7,
+    paddingRight: 2,
   },
   topAvatar: {
     width: 42,
@@ -409,7 +455,7 @@ const styles = StyleSheet.create({
   },
   xpFill: { height: '100%', backgroundColor: ui.palette.emerald },
   currencyChip: {
-    minWidth: 62,
+    minWidth: 56,
     height: 40,
     borderRadius: 8,
     borderWidth: 1,
@@ -419,11 +465,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
-    paddingHorizontal: 7,
+    paddingHorizontal: 6,
   },
-  currencyValue: { color: ui.palette.gold, fontSize: 13, fontWeight: '900', maxWidth: 42 },
+  currencyValue: { color: ui.palette.gold, fontSize: 13, fontWeight: '900', maxWidth: 36 },
   rankChip: {
-    width: 46,
+    width: 42,
     height: 40,
     borderRadius: 8,
     borderWidth: 1,
@@ -434,7 +480,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   topIconButton: {
-    width: 40,
+    width: 38,
     height: 40,
     borderRadius: 8,
     borderWidth: 1,
@@ -461,6 +507,19 @@ const styles = StyleSheet.create({
     color: ui.text.primary,
     fontSize: 10,
     fontWeight: '900',
+  },
+  clubChatBadge: {
+    position: 'absolute',
+    left: -3,
+    bottom: -3,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: ui.surface.panel,
+    backgroundColor: ui.palette.sky,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   modalBackdrop: {
     flex: 1,
