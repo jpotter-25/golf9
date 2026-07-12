@@ -44,9 +44,9 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Club'>;
 type ClubSection = 'chat' | 'progress' | 'treasury' | 'members' | 'news' | 'manage' | null;
 
 const COLOR_PAIRS = ['emerald', 'gold', 'sky', 'crimson', 'violet'] as const;
-const BADGE_SHAPES = ['shield', 'crest', 'diamond', 'circle'] as const;
+const BADGE_SHAPES = ['shield', 'crest', 'diamond', 'circle', 'hexagon', 'octagon', 'pennant'] as const;
 const BANNER_STYLES = ['classic', 'night', 'fairway', 'champion'] as const;
-const BADGE_ICONS = ['shield', 'flag', 'trophy', 'crown', 'star', 'target', 'bolt', 'gem'] as const;
+const BADGE_ICONS = ['shield', 'flag', 'trophy', 'crown', 'star', 'target', 'bolt', 'gem', 'spade', 'club', 'flame', 'swords', 'mountain', 'trees', 'compass', 'rocket'] as const;
 const CLUB_COLORS = ['#52E5A7', '#4DA3FF', '#FFCC66', '#FF6B6B', '#B99CFF', '#E8ECF1', '#2DD4BF', '#F472B6', '#0B1023', '#123B32', '#102448', '#2B2515', '#331A24', '#211B3D'] as const;
 const DEFAULT_CLUB_CONFIG: api.ClubEconomyConfig = {
   minJoinLevel: 1,
@@ -59,11 +59,11 @@ const DEFAULT_CLUB_CONFIG: api.ClubEconomyConfig = {
 };
 
 const BRAND_COLORS: Record<string, { accent: string; background: string; soft: string }> = {
-  emerald: { accent: '#52E5A7', background: '#123B32', soft: '#163C33' },
-  gold: { accent: '#FFCC66', background: '#2B2515', soft: '#3A3017' },
-  sky: { accent: '#4DA3FF', background: '#102448', soft: '#142E59' },
-  crimson: { accent: '#FF6B6B', background: '#331A24', soft: '#44202D' },
-  violet: { accent: '#B99CFF', background: '#211B3D', soft: '#2D2551' },
+  emerald: { accent: '#52E5A7', background: '#123B32', soft: '#2DD4BF' },
+  gold: { accent: '#FFCC66', background: '#2B2515', soft: '#E8ECF1' },
+  sky: { accent: '#4DA3FF', background: '#102448', soft: '#2DD4BF' },
+  crimson: { accent: '#FF6B6B', background: '#331A24', soft: '#FFCC66' },
+  violet: { accent: '#B99CFF', background: '#211B3D', soft: '#F472B6' },
 };
 
 export default function ClubScreen({ navigation }: Props) {
@@ -892,6 +892,30 @@ function PresetRow<T extends string>({ label, items, selected, onSelect }: { lab
   );
 }
 
+function BannerPresetRow({ tag, branding, onSelect }: { tag: string; branding: api.ClubBranding; onSelect: (value: (typeof BANNER_STYLES)[number]) => void }) {
+  const previewTag = sanitizeClubTag(tag) || 'CLUB';
+  return (
+    <View style={styles.presetBlock}>
+      <Text style={styles.metaText}>Club tag banner</Text>
+      <Text style={styles.presetHint}>This changes the plate behind your club tag.</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bannerPreviewRow}>
+        {BANNER_STYLES.map(item => (
+          <Pressable
+            key={item}
+            accessibilityRole="button"
+            accessibilityLabel={`${bannerLabel(item)} club tag banner`}
+            style={[styles.bannerOption, item === branding.bannerStyle && styles.bannerOptionSelected]}
+            onPress={() => onSelect(item)}
+          >
+            <ClubEmblem branding={{ ...branding, bannerStyle: item }} tag={previewTag} size={52} showTag />
+            <Text style={styles.bannerOptionLabel}>{bannerLabel(item)}</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
 function ClubBrandingEditor({ tag, branding, setBranding }: { tag: string; branding: api.ClubBranding; setBranding: (value: api.ClubBranding) => void }) {
   const applyTheme = (colorPair: (typeof COLOR_PAIRS)[number]) => {
     const colors = BRAND_COLORS[colorPair];
@@ -906,19 +930,19 @@ function ClubBrandingEditor({ tag, branding, setBranding }: { tag: string; brand
   return (
     <View style={styles.emblemEditor}>
       <View style={styles.emblemPreview}>
-        <ClubEmblem branding={branding} tag={sanitizeClubTag(tag) || 'CLUB'} size={74} showTag />
+        <ClubEmblem branding={branding} tag={sanitizeClubTag(tag) || 'CLUB'} size={88} showTag />
         <View style={styles.flex}>
           <Text style={styles.rowTitle}>Club Emblem</Text>
-          <Text style={styles.metaText}>Choose a base icon, shape, and three-color identity.</Text>
+          <Text style={styles.metaText}>Primary colors the outline and symbol. Background fills the emblem. Trim colors the inset line and club-tag banner.</Text>
         </View>
       </View>
       <PresetRow label="Starting theme" items={COLOR_PAIRS} selected={branding.colorPair} onSelect={applyTheme} />
       <PresetRow label="Icon" items={BADGE_ICONS} selected={branding.badgeIcon} onSelect={badgeIcon => setBranding({ ...branding, badgeIcon })} />
       <PresetRow label="Shape" items={BADGE_SHAPES} selected={branding.badgeShape} onSelect={badgeShape => setBranding({ ...branding, badgeShape })} />
-      <PresetRow label="Banner" items={BANNER_STYLES} selected={branding.bannerStyle} onSelect={bannerStyle => setBranding({ ...branding, bannerStyle })} />
+      <BannerPresetRow tag={tag} branding={branding} onSelect={bannerStyle => setBranding({ ...branding, bannerStyle })} />
       <ColorSwatchRow label="Primary" selected={branding.primaryColor} onSelect={primaryColor => setBranding({ ...branding, primaryColor })} />
       <ColorSwatchRow label="Background" selected={branding.backgroundColor} onSelect={backgroundColor => setBranding({ ...branding, backgroundColor })} />
-      <ColorSwatchRow label="Accent" selected={branding.accentColor} onSelect={accentColor => setBranding({ ...branding, accentColor })} />
+      <ColorSwatchRow label="Trim & banner" selected={branding.accentColor} onSelect={accentColor => setBranding({ ...branding, accentColor })} />
     </View>
   );
 }
@@ -977,6 +1001,10 @@ function sanitizeClubTag(value: string) {
 
 function capitalize(value: string) {
   return value ? value.slice(0, 1).toUpperCase() + value.slice(1) : value;
+}
+
+function bannerLabel(value: string) {
+  return value === 'night' ? 'Knight' : capitalize(value);
 }
 
 function formatCoins(value: number) {
@@ -1074,7 +1102,12 @@ const styles = StyleSheet.create({
   warningText: { color: ui.palette.coral, fontSize: 12, fontWeight: '800', marginTop: 6 },
   presetBlock: { marginTop: 8 },
   emblemEditor: { marginTop: 8, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.raised },
-  emblemPreview: { minHeight: 82, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 4 },
+  emblemPreview: { minHeight: 96, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 4 },
+  presetHint: { color: ui.text.muted, fontSize: 11, fontWeight: '700', marginTop: 2 },
+  bannerPreviewRow: { gap: 8, paddingTop: 8, paddingRight: 8 },
+  bannerOption: { width: 78, minHeight: 84, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.base, alignItems: 'center', justifyContent: 'center', gap: 4, padding: 6 },
+  bannerOptionSelected: { borderColor: ui.palette.emerald, backgroundColor: '#143A35' },
+  bannerOptionLabel: { color: ui.text.primary, fontSize: 10, fontWeight: '900' },
   colorSwatchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 7 },
   colorSwatch: { width: 30, height: 30, borderRadius: 6, borderWidth: 2, borderColor: 'rgba(232,236,241,0.18)' },
   colorSwatchSelected: { borderColor: '#FFFFFF', transform: [{ scale: 1.08 }] },

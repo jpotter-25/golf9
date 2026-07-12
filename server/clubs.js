@@ -20,9 +20,9 @@ export const CLUB_ROLES = ['owner', 'officer', 'member', 'rookie'];
 
 export const CLUB_BRANDING = {
   colorPairs: ['emerald', 'gold', 'sky', 'crimson', 'violet'],
-  badgeShapes: ['shield', 'crest', 'diamond', 'circle'],
+  badgeShapes: ['shield', 'crest', 'diamond', 'circle', 'hexagon', 'octagon', 'pennant'],
   bannerStyles: ['classic', 'night', 'fairway', 'champion'],
-  badgeIcons: ['shield', 'flag', 'trophy', 'crown', 'star', 'target', 'bolt', 'gem'],
+  badgeIcons: ['shield', 'flag', 'trophy', 'crown', 'star', 'target', 'bolt', 'gem', 'spade', 'club', 'flame', 'swords', 'mountain', 'trees', 'compass', 'rocket'],
   colors: [
     '#52E5A7', '#4DA3FF', '#FFCC66', '#FF6B6B', '#B99CFF', '#E8ECF1', '#2DD4BF', '#F472B6',
     '#0B1023', '#123B32', '#102448', '#2B2515', '#331A24', '#211B3D',

@@ -93,9 +93,9 @@ export type ClubRole = 'owner' | 'officer' | 'member' | 'rookie';
 
 export type ClubBranding = {
   colorPair: 'emerald' | 'gold' | 'sky' | 'crimson' | 'violet' | string;
-  badgeShape: 'shield' | 'crest' | 'diamond' | 'circle' | string;
+  badgeShape: 'shield' | 'crest' | 'diamond' | 'circle' | 'hexagon' | 'octagon' | 'pennant' | string;
   bannerStyle: 'classic' | 'night' | 'fairway' | 'champion' | string;
-  badgeIcon: 'shield' | 'flag' | 'trophy' | 'crown' | 'star' | 'target' | 'bolt' | 'gem' | string;
+  badgeIcon: 'shield' | 'flag' | 'trophy' | 'crown' | 'star' | 'target' | 'bolt' | 'gem' | 'spade' | 'club' | 'flame' | 'swords' | 'mountain' | 'trees' | 'compass' | 'rocket' | string;
   primaryColor: string;
   backgroundColor: string;
   accentColor: string;

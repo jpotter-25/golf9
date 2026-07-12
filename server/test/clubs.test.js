@@ -9,6 +9,7 @@ import {
   donateToClubTreasury,
   findClubMember,
   memberCapForLevel,
+  normalizeClubBranding,
   normalizeClubRecord,
   publicClubProfile,
   purchaseClubPrestige,
@@ -25,6 +26,22 @@ test('club levels and member caps scale at planned thresholds', () => {
   assert.equal(clubProgressionSnapshot(0).level, 1);
   assert.equal(clubProgressionSnapshot(3500).level, 3);
   assert.equal(clubProgressionSnapshot(57000).memberCap, 50);
+});
+
+test('club branding accepts expanded emblem shapes and symbols', () => {
+  const branding = normalizeClubBranding({
+    colorPair: 'violet',
+    badgeShape: 'hexagon',
+    bannerStyle: 'champion',
+    badgeIcon: 'spade',
+    primaryColor: '#B99CFF',
+    backgroundColor: '#211B3D',
+    accentColor: '#F472B6',
+  });
+
+  assert.equal(branding.badgeShape, 'hexagon');
+  assert.equal(branding.badgeIcon, 'spade');
+  assert.equal(branding.bannerStyle, 'champion');
 });
 
 test('club creation normalizes branding, identity, owner, goals, and public capacity', () => {
