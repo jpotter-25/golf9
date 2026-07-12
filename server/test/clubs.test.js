@@ -27,23 +27,47 @@ test('club levels and member caps scale at planned thresholds', () => {
   assert.equal(clubProgressionSnapshot(57000).memberCap, 50);
 });
 
-test('club creation normalizes branding, owner, goals, and public capacity', () => {
+test('club creation normalizes branding, identity, owner, goals, and public capacity', () => {
   const owner = { userId: 'owner-1', displayName: 'Owner' };
   const { club, error } = createClubRecord(owner, {
     clubId: 'club-1',
     name: 'Fairway Friends',
-    tag: 'ff9!',
+    tag: 'ff-9!',
     motto: 'Low totals together',
-    branding: { colorPair: 'gold', badgeShape: 'crest', bannerStyle: 'champion' },
+    description: 'A welcoming club for regular table players.',
+    branding: {
+      colorPair: 'gold',
+      badgeShape: 'crest',
+      bannerStyle: 'champion',
+      badgeIcon: 'crown',
+      primaryColor: '#FFCC66',
+      backgroundColor: '#2B2515',
+      accentColor: '#F472B6',
+    },
   }, 1000);
 
   assert.equal(error, undefined);
   assert.equal(club.name, 'Fairway Friends');
-  assert.equal(club.tag, 'FF9');
+  assert.equal(club.tag, 'FF');
+  assert.equal(club.description, 'A welcoming club for regular table players.');
   assert.equal(club.branding.colorPair, 'gold');
+  assert.equal(club.branding.badgeIcon, 'crown');
+  assert.equal(club.branding.accentColor, '#F472B6');
   assert.equal(club.members[0].role, 'owner');
   assert.equal(club.goals.weekly.items.length, 3);
   assert.equal(club.progression.memberCap, 15);
+});
+
+test('club tags use one to four letters and announcements keep only the latest entry', () => {
+  const owner = { userId: 'owner-1', displayName: 'Owner' };
+  const { club } = createClubRecord(owner, { clubId: 'club-1', name: 'Tag Club', tag: 'a-1bcdef' }, 1000);
+  assert.equal(club.tag, 'ABCD');
+  club.announcements = [
+    { id: 'old', text: 'Old', createdAt: 1000 },
+    { id: 'new', text: 'New', createdAt: 2000 },
+  ];
+  normalizeClubRecord(club, 3000);
+  assert.deepEqual(club.announcements.map(item => item.id), ['new']);
 });
 
 test('club match contribution updates xp, goals, event score, and does not duplicate', () => {

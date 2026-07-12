@@ -1752,8 +1752,6 @@ test('clubs create, search, request, approve, chat, and ignore local matches', a
     assert.equal(lockedCreate.status, 403);
 
     await earnClubLevel(baseUrl, owner.token);
-    await earnClubLevel(baseUrl, member.token);
-    await earnClubLevel(baseUrl, outsider.token);
     await adminAdjustCoins(baseUrl, admin, owner.user.userId, 5000);
 
     const created = await json(await fetch(`${baseUrl}/clubs`, {
@@ -1773,12 +1771,18 @@ test('clubs create, search, request, approve, chat, and ignore local matches', a
     assert.equal(created.club.progression.memberCap, 15);
     assert.equal(created.user.currency.coins >= 0, true);
 
-    const lockedInvite = await fetch(`${baseUrl}/clubs/${created.club.clubId}/invites`, {
+    const openInvite = await json(await fetch(`${baseUrl}/clubs/${created.club.clubId}/invites`, {
       method: 'POST',
       headers: authHeaders(owner.token),
       body: JSON.stringify({ userId: lowLevelInvitee.user.userId }),
-    });
-    assert.equal(lockedInvite.status, 403);
+    }));
+    assert.equal(openInvite.invite.userId, lowLevelInvitee.user.userId);
+    const lowLevelInbox = await json(await fetch(`${baseUrl}/clubs/me`, { headers: authHeaders(lowLevelInvitee.token) }));
+    assert.equal(lowLevelInbox.invitations.length, 1);
+    await json(await fetch(`${baseUrl}/clubs/${created.club.clubId}/invites/${openInvite.invite.id}`, {
+      method: 'DELETE',
+      headers: authHeaders(lowLevelInvitee.token),
+    }));
 
     const bulkClubFreeze = await json(await fetch(`${baseUrl}/admin/api/clubs/bulk`, {
       method: 'POST',

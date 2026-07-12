@@ -8,7 +8,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const CLUB_LEVEL_THRESHOLDS = [
   0, 1500, 3500, 6500, 10000, 14500, 19500, 25000, 31500, 39000, 47500, 57000,
 ];
-const CLUB_ANNOUNCEMENT_LIMIT = 20;
+const CLUB_ANNOUNCEMENT_LIMIT = 1;
+const CLUB_DESCRIPTION_MAX = 250;
 const CLUB_PROCESSED_RESULT_LIMIT = 500;
 const CLUB_DONATION_LEDGER_LIMIT = 200;
 const CLUB_TREASURY_GOAL_TITLE_MAX = 60;
@@ -21,6 +22,19 @@ export const CLUB_BRANDING = {
   colorPairs: ['emerald', 'gold', 'sky', 'crimson', 'violet'],
   badgeShapes: ['shield', 'crest', 'diamond', 'circle'],
   bannerStyles: ['classic', 'night', 'fairway', 'champion'],
+  badgeIcons: ['shield', 'flag', 'trophy', 'crown', 'star', 'target', 'bolt', 'gem'],
+  colors: [
+    '#52E5A7', '#4DA3FF', '#FFCC66', '#FF6B6B', '#B99CFF', '#E8ECF1', '#2DD4BF', '#F472B6',
+    '#0B1023', '#123B32', '#102448', '#2B2515', '#331A24', '#211B3D',
+  ],
+};
+
+const CLUB_BRAND_DEFAULTS = {
+  emerald: { primaryColor: '#52E5A7', backgroundColor: '#123B32', accentColor: '#2DD4BF' },
+  gold: { primaryColor: '#FFCC66', backgroundColor: '#2B2515', accentColor: '#E8ECF1' },
+  sky: { primaryColor: '#4DA3FF', backgroundColor: '#102448', accentColor: '#2DD4BF' },
+  crimson: { primaryColor: '#FF6B6B', backgroundColor: '#331A24', accentColor: '#FFCC66' },
+  violet: { primaryColor: '#B99CFF', backgroundColor: '#211B3D', accentColor: '#F472B6' },
 };
 
 const WEEKLY_GOAL_TEMPLATES = [
@@ -64,9 +78,9 @@ function safeInteger(value, fallback = 0) {
 
 export function normalizeClubTag(value) {
   return String(value || '')
-    .replace(/[^a-z0-9]/gi, '')
+    .replace(/[^a-z]/gi, '')
     .toUpperCase()
-    .slice(0, 5);
+    .slice(0, 4);
 }
 
 function safePreset(value, allowed, fallback) {
@@ -75,10 +89,16 @@ function safePreset(value, allowed, fallback) {
 }
 
 export function normalizeClubBranding(input = {}) {
+  const colorPair = safePreset(input.colorPair, CLUB_BRANDING.colorPairs, CLUB_BRANDING.colorPairs[0]);
+  const defaults = CLUB_BRAND_DEFAULTS[colorPair] || CLUB_BRAND_DEFAULTS.emerald;
   return {
-    colorPair: safePreset(input.colorPair, CLUB_BRANDING.colorPairs, CLUB_BRANDING.colorPairs[0]),
+    colorPair,
     badgeShape: safePreset(input.badgeShape, CLUB_BRANDING.badgeShapes, CLUB_BRANDING.badgeShapes[0]),
     bannerStyle: safePreset(input.bannerStyle, CLUB_BRANDING.bannerStyles, CLUB_BRANDING.bannerStyles[0]),
+    badgeIcon: safePreset(input.badgeIcon, CLUB_BRANDING.badgeIcons, CLUB_BRANDING.badgeIcons[0]),
+    primaryColor: safePreset(input.primaryColor, CLUB_BRANDING.colors, defaults.primaryColor),
+    backgroundColor: safePreset(input.backgroundColor, CLUB_BRANDING.colors, defaults.backgroundColor),
+    accentColor: safePreset(input.accentColor, CLUB_BRANDING.colors, defaults.accentColor),
   };
 }
 
@@ -270,6 +290,7 @@ export function normalizeClubRecord(club, now = Date.now(), rankedSeason = null,
   club.name = clampText(club.name, 28) || 'Golf Club';
   club.tag = normalizeClubTag(club.tag) || 'CLUB';
   club.motto = clampText(club.motto, 80);
+  club.description = clampText(club.description, CLUB_DESCRIPTION_MAX);
   club.visibility = 'public_apply';
   club.branding = normalizeClubBranding(club.branding);
   club.createdAt = Number(club.createdAt || now) || now;
@@ -320,12 +341,13 @@ export function createClubRecord(owner, payload, now = Date.now(), clubConfig = 
   const name = clampText(payload?.name, 28);
   const tag = normalizeClubTag(payload?.tag);
   if (name.length < 3) return { error: 'Club name must be at least 3 characters.' };
-  if (tag.length < 2) return { error: 'Club tag must be 2 to 5 letters or numbers.' };
+  if (tag.length < 1) return { error: 'Club tag must be 1 to 4 letters.' };
   const club = normalizeClubRecord({
     clubId: payload?.clubId,
     name,
     tag,
     motto: clampText(payload?.motto, 80),
+    description: clampText(payload?.description, CLUB_DESCRIPTION_MAX),
     branding: normalizeClubBranding(payload?.branding),
     visibility: 'public_apply',
     createdAt: now,
@@ -483,6 +505,7 @@ export function publicClubSummary(club, viewerUserId = null, now = Date.now(), r
     name: normalized.name,
     tag: normalized.tag,
     motto: normalized.motto,
+    description: normalized.description,
     level: normalized.progression.level,
     memberCount: normalized.members.length,
     memberCap: normalized.progression.memberCap,
@@ -619,7 +642,11 @@ export function publicClubProfile(club, users, viewerUserId, rankedSeason = null
     members: club.members.map(member => publicMember(club, users, member, onlineUserIds)),
     joinRequests: canManageRequests(viewerRole) ? club.joinRequests.map(request => publicJoinRequest(users, request)) : [],
     invites: canManageRequests(viewerRole) ? club.invites.map(invite => publicJoinRequest(users, invite)) : [],
-    announcements: club.announcements.slice().reverse(),
+    announcements: club.announcements.slice().reverse().map(item => ({
+      ...item,
+      userId: String(item.userId || item.authorUserId || 'club'),
+      displayName: item.displayName || item.authorName || 'Club',
+    })),
     goals: {
       weekly: club.goals.weekly.items.map(publicGoal),
       season: club.goals.season.items.map(publicGoal),

@@ -1881,6 +1881,7 @@ function roomSummary(room) {
         progression: safeAccount?.progression ?? null,
         competitive: safeAccount ? publicCompetitiveRankOnly(safeAccount.competitive) : null,
         cosmetics: safeAccount?.inventory?.equipped || player.inventory?.equipped || player.cosmetics || null,
+        club: safeAccount?.club || null,
         ready: true,
         connected: room.connected.get(player.userId) || false,
         isHost: player.userId === room.hostUserId,
@@ -3640,8 +3641,7 @@ app.post('/admin/api/clubs/bulk', requireAdmin(adminStore, 'clubs:write'), (req,
           text,
           createdAt: Date.now(),
         };
-        club.announcements ||= [];
-        club.announcements.push(announcement);
+        club.announcements = [announcement];
         resultsOut.push(bulkActionResult(item.id, club, { announcementId: announcement.id }));
       } else if (action === 'rewardGrant' || action === 'rewardRevoke') {
         club.rewards ||= { unlocked: [], memberClaims: {} };
@@ -3682,14 +3682,15 @@ app.patch('/admin/api/clubs/:clubId', requireAdmin(adminStore, 'clubs:write'), (
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   const reason = requireClubAdminReason(req, res);
   if (!reason) return;
-  const before = { name: club.name, tag: club.tag, motto: club.motto, branding: club.branding };
+  const before = { name: club.name, tag: club.tag, motto: club.motto, description: club.description, branding: club.branding };
   if (req.body?.name !== undefined) club.name = String(req.body.name);
   if (req.body?.tag !== undefined) club.tag = normalizeClubTag(req.body.tag);
   if (req.body?.motto !== undefined) club.motto = String(req.body.motto);
+  if (req.body?.description !== undefined) club.description = String(req.body.description);
   if (req.body?.branding !== undefined) club.branding = normalizeClubBranding(req.body.branding);
   club.updatedAt = Date.now();
   normalizeClub(club, Date.now(), rankedSeason);
-  writeAudit(adminStore, req, req.admin.admin, 'admin.clubs.update', { clubId: club.clubId }, { reason, before, after: { name: club.name, tag: club.tag, motto: club.motto, branding: club.branding } });
+  writeAudit(adminStore, req, req.admin.admin, 'admin.clubs.update', { clubId: club.clubId }, { reason, before, after: { name: club.name, tag: club.tag, motto: club.motto, description: club.description, branding: club.branding } });
   saveStore();
   return res.json({ club: adminClubDetail(club) });
 });
@@ -3796,7 +3797,7 @@ app.post('/admin/api/clubs/:clubId/announcements', requireAdmin(adminStore, 'clu
     text,
     createdAt: Date.now(),
   };
-  club.announcements.push(announcement);
+  club.announcements = [announcement];
   club.updatedAt = Date.now();
   normalizeClub(club, Date.now(), rankedSeason);
   writeAudit(adminStore, req, req.admin.admin, 'admin.clubs.announcement', { clubId: club.clubId, announcementId: announcement.id }, { reason });
@@ -4195,6 +4196,7 @@ app.post('/clubs', requireAuth, (req, res) => {
     name,
     tag,
     motto: req.body?.motto,
+    description: req.body?.description,
     branding: req.body?.branding,
   }, Date.now(), config);
   if (created.error) return res.status(400).json({ error: created.error });
@@ -4235,12 +4237,13 @@ app.patch('/clubs/:clubId', requireAuth, (req, res) => {
   const nextName = String(req.body?.name ?? club.name).replace(/\s+/g, ' ').trim().slice(0, 28);
   const nextTag = normalizeClubTag(req.body?.tag ?? club.tag);
   if (nextName.length < 3) return res.status(400).json({ error: 'Club name must be at least 3 characters.' });
-  if (nextTag.length < 2) return res.status(400).json({ error: 'Club tag must be 2 to 5 letters or numbers.' });
+  if (nextTag.length < 1) return res.status(400).json({ error: 'Club tag must be 1 to 4 letters.' });
   if (clubNameOrTagTaken(nextName, nextTag, club.clubId)) return res.status(409).json({ error: 'Club name or tag is already taken.' });
 
   club.name = nextName;
   club.tag = nextTag;
   club.motto = String(req.body?.motto ?? club.motto).replace(/\s+/g, ' ').trim().slice(0, 80);
+  club.description = String(req.body?.description ?? club.description).replace(/\s+/g, ' ').trim().slice(0, 250);
   club.branding = normalizeClubBranding(req.body?.branding || club.branding);
   club.updatedAt = Date.now();
   saveStore();
@@ -4518,8 +4521,7 @@ app.post('/clubs/:clubId/announcements', requireAuth, (req, res) => {
     text: cleaned.text,
     createdAt: Date.now(),
   };
-  club.announcements.push(announcement);
-  club.announcements = club.announcements.slice(-20);
+  club.announcements = [announcement];
   club.updatedAt = announcement.createdAt;
   saveStore();
   io.to(clubSocketRoom(club.clubId)).emit('club:announcement', announcement);

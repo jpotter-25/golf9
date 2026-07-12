@@ -149,6 +149,64 @@ export function RankEmblem({
   );
 }
 
+export function ProgressAvatar({
+  cosmetics,
+  fallbackInitial = '?',
+  league,
+  progress = 0,
+  size = 46,
+  onPress,
+  style,
+}: {
+  cosmetics?: EquippedCosmetics | null;
+  fallbackInitial?: string;
+  league?: LeagueLike;
+  progress?: number;
+  size?: number;
+  onPress?: () => void;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const ringWidth = Math.max(2.5, size * 0.075);
+  const center = size / 2;
+  const radius = center - ringWidth;
+  const circumference = 2 * Math.PI * radius;
+  const safeProgress = Math.max(0, Math.min(1, Number(progress) || 0));
+  const avatarSize = size - Math.max(8, ringWidth * 2.5);
+  const rankSize = Math.max(17, Math.round(size * 0.4));
+  const content = (
+    <>
+      <Svg pointerEvents="none" width={size} height={size} style={StyleSheet.absoluteFill}>
+        <Circle cx={center} cy={center} r={radius} fill="none" stroke="rgba(232,236,241,0.16)" strokeWidth={ringWidth} />
+        <Circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke="#52E5A7"
+          strokeWidth={ringWidth}
+          strokeLinecap="round"
+          strokeDasharray={`${circumference} ${circumference}`}
+          strokeDashoffset={circumference * (1 - safeProgress)}
+          transform={`rotate(-90 ${center} ${center})`}
+        />
+      </Svg>
+      <PlayerAvatar cosmetics={cosmetics} fallbackInitial={fallbackInitial} size={avatarSize} />
+      <View pointerEvents="none" style={[styles.progressRank, { width: rankSize, height: rankSize, left: -2, bottom: -2 }]}>
+        <RankEmblem league={league} size={rankSize} />
+      </View>
+    </>
+  );
+
+  if (onPress) {
+    return (
+      <Pressable accessibilityRole="button" accessibilityLabel="Open profile" onPress={onPress} style={[styles.progressAvatar, { width: size, height: size }, style]}>
+        {content}
+      </Pressable>
+    );
+  }
+  return <View style={[styles.progressAvatar, { width: size, height: size }, style]}>{content}</View>;
+}
+
 type AvatarClusterProps = {
   cosmetics?: EquippedCosmetics | null;
   fallbackInitial?: string;
@@ -281,6 +339,16 @@ export function AvatarCluster({
 }
 
 const styles = StyleSheet.create({
+  progressAvatar: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'visible',
+  },
+  progressRank: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   cluster: {
     alignItems: 'center',
     justifyContent: 'center',

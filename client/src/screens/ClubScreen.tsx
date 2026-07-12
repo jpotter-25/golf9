@@ -36,6 +36,7 @@ import type { LucideIcon } from 'lucide-react-native';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
 import { useClubRealtime } from '../context/ClubRealtimeContext';
+import { ClubEmblem } from '../components/ClubEmblem';
 import * as api from '../services/api';
 import { ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
 
@@ -45,8 +46,10 @@ type ClubSection = 'chat' | 'progress' | 'treasury' | 'members' | 'news' | 'mana
 const COLOR_PAIRS = ['emerald', 'gold', 'sky', 'crimson', 'violet'] as const;
 const BADGE_SHAPES = ['shield', 'crest', 'diamond', 'circle'] as const;
 const BANNER_STYLES = ['classic', 'night', 'fairway', 'champion'] as const;
+const BADGE_ICONS = ['shield', 'flag', 'trophy', 'crown', 'star', 'target', 'bolt', 'gem'] as const;
+const CLUB_COLORS = ['#52E5A7', '#4DA3FF', '#FFCC66', '#FF6B6B', '#B99CFF', '#E8ECF1', '#2DD4BF', '#F472B6', '#0B1023', '#123B32', '#102448', '#2B2515', '#331A24', '#211B3D'] as const;
 const DEFAULT_CLUB_CONFIG: api.ClubEconomyConfig = {
-  minJoinLevel: 10,
+  minJoinLevel: 1,
   minCreateLevel: 10,
   createCost: 5000,
   prestigeTiers: [
@@ -75,7 +78,16 @@ export default function ClubScreen({ navigation }: Props) {
   const [name, setName] = useState('');
   const [tag, setTag] = useState('');
   const [motto, setMotto] = useState('');
-  const [branding, setBranding] = useState<api.ClubBranding>({ colorPair: 'emerald', badgeShape: 'shield', bannerStyle: 'classic' });
+  const [description, setDescription] = useState('');
+  const [branding, setBranding] = useState<api.ClubBranding>({
+    colorPair: 'emerald',
+    badgeShape: 'shield',
+    bannerStyle: 'classic',
+    badgeIcon: 'shield',
+    primaryColor: '#52E5A7',
+    backgroundColor: '#123B32',
+    accentColor: '#2DD4BF',
+  });
   const [announcementText, setAnnouncementText] = useState('');
   const [chatInput, setChatInput] = useState('');
   const [donationAmount, setDonationAmount] = useState('500');
@@ -85,6 +97,8 @@ export default function ClubScreen({ navigation }: Props) {
   const [editName, setEditName] = useState('');
   const [editTag, setEditTag] = useState('');
   const [editMotto, setEditMotto] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editBranding, setEditBranding] = useState<api.ClubBranding>(branding);
   const clubConfig = economy?.clubConfig || DEFAULT_CLUB_CONFIG;
 
   const load = useCallback(async () => {
@@ -107,7 +121,9 @@ export default function ClubScreen({ navigation }: Props) {
     setEditName(club.name);
     setEditTag(club.tag);
     setEditMotto(club.motto);
-  }, [club?.clubId, club?.treasuryGoal?.updatedAt]);
+    setEditDescription(club.description);
+    setEditBranding(club.branding);
+  }, [club?.clubId, club?.treasuryGoal?.updatedAt, club?.updatedAt]);
 
   useEffect(() => {
     realtime.setClubChatVisible(activeSection === 'chat');
@@ -146,11 +162,12 @@ export default function ClubScreen({ navigation }: Props) {
   const setClubFrom = (response: { club: api.ClubProfile }) => realtime.replaceClub(response.club);
 
   const create = () => runAction('create', async () => {
-    const response = await api.createClub(token!, { name, tag, motto, branding });
+    const response = await api.createClub(token!, { name, tag, motto, description, branding });
     setClubFrom(response);
     setName('');
     setTag('');
     setMotto('');
+    setDescription('');
     await refreshProfile();
     await realtime.refresh();
   });
@@ -226,7 +243,13 @@ export default function ClubScreen({ navigation }: Props) {
 
   const updateIdentity = () => runAction('identity', async () => {
     if (!club) return;
-    setClubFrom(await api.updateClub(token!, club.clubId, { name: editName, tag: editTag, motto: editMotto }));
+    setClubFrom(await api.updateClub(token!, club.clubId, {
+      name: editName,
+      tag: editTag,
+      motto: editMotto,
+      description: editDescription,
+      branding: editBranding,
+    }));
   });
 
   const leave = () => runAction('leave', async () => {
@@ -238,7 +261,7 @@ export default function ClubScreen({ navigation }: Props) {
     await realtime.refresh();
   });
 
-  const activeColors = useMemo(() => colorsFor(club?.branding.colorPair || branding.colorPair), [branding.colorPair, club?.branding.colorPair]);
+  const activeColors = useMemo(() => colorsForBranding(club?.branding || branding), [branding, club?.branding]);
 
   return (
     <ScreenShell scroll>
@@ -260,6 +283,8 @@ export default function ClubScreen({ navigation }: Props) {
           editName={editName}
           editTag={editTag}
           editMotto={editMotto}
+          editDescription={editDescription}
+          editBranding={editBranding}
           setActiveSection={setActiveSection}
           setChatInput={setChatInput}
           setAnnouncementText={setAnnouncementText}
@@ -270,6 +295,8 @@ export default function ClubScreen({ navigation }: Props) {
           setEditName={setEditName}
           setEditTag={setEditTag}
           setEditMotto={setEditMotto}
+          setEditDescription={setEditDescription}
+          setEditBranding={setEditBranding}
           goBack={() => navigation.goBack()}
           sendChat={sendChat}
           donate={donate}
@@ -289,7 +316,7 @@ export default function ClubScreen({ navigation }: Props) {
           <ScreenHeader
             eyebrow="Clubs"
             title="Clubhouse"
-            subtitle="Build a club, chase goals, and stay connected."
+            subtitle={`Join from Level 1. Create your own at Level ${clubConfig.minCreateLevel}.`}
             right={<BackButton onPress={() => navigation.goBack()} />}
           />
           <NoClub
@@ -301,6 +328,7 @@ export default function ClubScreen({ navigation }: Props) {
             name={name}
             tag={tag}
             motto={motto}
+            description={description}
             branding={branding}
             user={user}
             clubConfig={clubConfig}
@@ -309,6 +337,7 @@ export default function ClubScreen({ navigation }: Props) {
             setName={setName}
             setTag={setTag}
             setMotto={setMotto}
+            setDescription={setDescription}
             setBranding={setBranding}
             create={create}
             apply={apply}
@@ -338,6 +367,8 @@ function JoinedClub(props: {
   editName: string;
   editTag: string;
   editMotto: string;
+  editDescription: string;
+  editBranding: api.ClubBranding;
   setActiveSection: (section: ClubSection) => void;
   setChatInput: (value: string) => void;
   setAnnouncementText: (value: string) => void;
@@ -348,6 +379,8 @@ function JoinedClub(props: {
   setEditName: (value: string) => void;
   setEditTag: (value: string) => void;
   setEditMotto: (value: string) => void;
+  setEditDescription: (value: string) => void;
+  setEditBranding: (value: api.ClubBranding) => void;
   goBack: () => void;
   sendChat: () => void;
   donate: (amount: number) => void;
@@ -370,9 +403,7 @@ function JoinedClub(props: {
     <>
       <View style={[styles.clubHero, { backgroundColor: activeColors.background, borderColor: activeColors.accent }]}>
         <BackButton onPress={props.goBack} style={styles.heroBack} />
-        <View style={[styles.clubBadge, { borderColor: activeColors.accent, backgroundColor: activeColors.soft }]}>
-          <Text style={styles.clubBadgeText}>{club.tag}</Text>
-        </View>
+        <ClubEmblem branding={club.branding} tag={club.tag} size={72} showTag />
         <View style={styles.flex}>
           <Text style={styles.clubName} numberOfLines={1}>{club.name}</Text>
           <Text style={styles.heroMotto} numberOfLines={1}>{club.motto || 'Playing lower together.'}</Text>
@@ -630,12 +661,15 @@ function MembersSection(props: Parameters<typeof JoinedClub>[0]) {
 function NewsSection({ club }: { club: api.ClubProfile }) {
   return (
     <>
+      <SectionBlock title="About">
+        <Text style={styles.chatText}>{club.description || club.motto || 'This club has not added a description yet.'}</Text>
+      </SectionBlock>
       <SectionBlock title="Live Event">
         <Text style={styles.rowTitle}>{club.event.title}</Text>
         <Text style={styles.metaText}>Club score: {club.event.leaderboardScore}</Text>
       </SectionBlock>
       <SectionBlock title="Announcements">
-        {club.announcements.length ? club.announcements.map(item => (
+        {club.announcements.length ? club.announcements.slice(0, 1).map(item => (
           <View key={item.id} style={styles.announcementRow}>
             <Text style={styles.chatName}>{item.displayName}</Text>
             <Text style={styles.chatText}>{item.text}</Text>
@@ -652,7 +686,8 @@ function ManageSection(props: Parameters<typeof JoinedClub>[0]) {
   return (
     <>
       {club.permissions.canPostAnnouncement ? (
-        <SectionBlock title="Post Announcement">
+        <SectionBlock title="Update Announcement">
+          <Text style={styles.metaText}>Your club keeps one current announcement. Posting replaces the previous one.</Text>
           <View style={styles.inlineForm}>
             <TextInput style={[styles.input, styles.inlineInput]} value={props.announcementText} onChangeText={props.setAnnouncementText} placeholder="Announcement" placeholderTextColor={ui.text.muted} maxLength={160} />
             <SmallButton label="Post" busy={props.busyId === 'announcement'} disabled={!props.announcementText.trim()} onPress={props.postAnnouncement} />
@@ -676,8 +711,11 @@ function ManageSection(props: Parameters<typeof JoinedClub>[0]) {
       {club.permissions.canEdit ? (
         <SectionBlock title="Club Identity">
           <TextInput style={styles.input} value={props.editName} onChangeText={props.setEditName} placeholder="Club name" placeholderTextColor={ui.text.muted} maxLength={28} />
-          <TextInput style={styles.input} value={props.editTag} onChangeText={text => props.setEditTag(text.toUpperCase())} placeholder="Tag" placeholderTextColor={ui.text.muted} maxLength={5} autoCapitalize="characters" />
+          <TextInput style={styles.input} value={props.editTag} onChangeText={text => props.setEditTag(sanitizeClubTag(text))} placeholder="Tag (1-4 letters)" placeholderTextColor={ui.text.muted} maxLength={4} autoCapitalize="characters" />
           <TextInput style={styles.input} value={props.editMotto} onChangeText={props.setEditMotto} placeholder="Motto" placeholderTextColor={ui.text.muted} maxLength={80} />
+          <TextInput style={[styles.input, styles.descriptionInput]} value={props.editDescription} onChangeText={props.setEditDescription} placeholder="Club description" placeholderTextColor={ui.text.muted} maxLength={250} multiline />
+          <Text style={styles.helperText}>{props.editDescription.length}/250</Text>
+          <ClubBrandingEditor tag={props.editTag} branding={props.editBranding} setBranding={props.setEditBranding} />
           <PrimaryButton label={props.busyId === 'identity' ? 'Saving...' : 'Save Club Identity'} disabled={props.busyId === 'identity'} onPress={props.updateIdentity} />
         </SectionBlock>
       ) : null}
@@ -694,6 +732,7 @@ function NoClub(props: {
   name: string;
   tag: string;
   motto: string;
+  description: string;
   branding: api.ClubBranding;
   user: api.UserProfile | null;
   clubConfig: api.ClubEconomyConfig;
@@ -702,6 +741,7 @@ function NoClub(props: {
   setName: (value: string) => void;
   setTag: (value: string) => void;
   setMotto: (value: string) => void;
+  setDescription: (value: string) => void;
   setBranding: (value: api.ClubBranding) => void;
   create: () => void;
   apply: (club: api.ClubSummary) => void;
@@ -710,25 +750,9 @@ function NoClub(props: {
 }) {
   const level = props.user?.progression.level || 1;
   const coins = props.user?.currency.coins || 0;
-  const joinLocked = level < props.clubConfig.minJoinLevel;
   const createLocked = level < props.clubConfig.minCreateLevel;
   const canAffordCreate = coins >= props.clubConfig.createCost;
-  const accessLevel = Math.max(props.clubConfig.minJoinLevel, props.clubConfig.minCreateLevel);
   const clubsToShow = props.searchQuery.trim().length >= 2 ? props.searchResults : props.recommended;
-
-  if (joinLocked) {
-    return (
-      <Panel title="Clubhouse Locked">
-        <Text style={styles.lockTitle}>Reach Level {accessLevel} to unlock clubs.</Text>
-        <Text style={styles.metaText}>You are Level {level}. Join and create access unlock together.</Text>
-        <View style={styles.statGrid}>
-          <StatTile label="Join + Create Clubs" value={`Lv ${accessLevel}`} locked style={styles.statTileWide} />
-          <StatTile label="Your Level" value={`Lv ${level}`} />
-          <StatTile label="Create Cost" value={formatCoins(props.clubConfig.createCost)} dimmed={!canAffordCreate} locked={!canAffordCreate} />
-        </View>
-      </Panel>
-    );
-  }
 
   return (
     <>
@@ -736,6 +760,7 @@ function NoClub(props: {
         <Panel title="Club Invitations">
           {props.invitations.map(invitation => (
             <View key={invitation.id} style={styles.invitationRow}>
+              <ClubEmblem branding={invitation.club.branding} tag={invitation.club.tag} size={42} />
               <View style={styles.flex}>
                 <Text style={styles.rowTitle}>[{invitation.club.tag}] {invitation.club.name}</Text>
                 <Text style={styles.metaText}>Invited by {invitation.fromDisplayName} - {invitation.club.memberCount}/{invitation.club.memberCap} members</Text>
@@ -746,38 +771,49 @@ function NoClub(props: {
           ))}
         </Panel>
       ) : null}
+      {props.applications.length ? (
+        <Panel title="Pending Applications">
+          {props.applications.map(application => <Text key={application.id} style={styles.metaText}>[{application.club.tag}] {application.club.name}</Text>)}
+        </Panel>
+      ) : null}
+      <Panel title="Join a Club">
+        <Text style={styles.metaText}>Club membership is open at every level.</Text>
+        <TextInput style={styles.input} value={props.searchQuery} onChangeText={props.setSearchQuery} placeholder="Search by name or tag" placeholderTextColor={ui.text.muted} />
+        {clubsToShow.length ? clubsToShow.map(item => (
+          <View key={item.clubId} style={styles.searchRow}>
+            <ClubEmblem branding={item.branding} tag={item.tag} size={50} showTag />
+            <View style={styles.flex}>
+              <Text style={styles.rowTitle}>{item.name}</Text>
+              {item.description ? <Text style={styles.metaText} numberOfLines={2}>{item.description}</Text> : null}
+              <Text style={styles.metaText}>Lv {item.level} - {item.memberCount}/{item.memberCap} members - {item.onlineMemberCount} online</Text>
+            </View>
+            <SmallButton label={props.applications.some(application => application.club.clubId === item.clubId) ? 'Pending' : 'Apply'} disabled={props.applications.some(application => application.club.clubId === item.clubId)} busy={props.busyId === `apply:${item.clubId}`} onPress={() => props.apply(item)} />
+          </View>
+        )) : <Empty text="No clubs found yet." />}
+      </Panel>
       <Panel title="Create Club">
+        {createLocked ? (
+          <View style={styles.lockStrip}>
+            <Lock size={20} color={ui.text.muted} />
+            <View style={styles.flex}>
+              <Text style={styles.rowTitle}>Creation unlocks at Level {props.clubConfig.minCreateLevel}</Text>
+              <Text style={styles.metaText}>You can still join any club now. You are Level {level}.</Text>
+            </View>
+          </View>
+        ) : null}
         <View style={styles.costStrip}>
           <Text style={styles.metaText}>Creation cost</Text>
           <Text style={styles.costText}>{formatCoins(props.clubConfig.createCost)}</Text>
           <Text style={styles.metaText}>Your balance: {formatCoins(coins)}</Text>
         </View>
         <TextInput style={styles.input} value={props.name} onChangeText={props.setName} placeholder="Club name" placeholderTextColor={ui.text.muted} />
-        <TextInput style={styles.input} value={props.tag} onChangeText={text => props.setTag(text.toUpperCase())} placeholder="Tag" placeholderTextColor={ui.text.muted} autoCapitalize="characters" maxLength={5} />
+        <TextInput style={styles.input} value={props.tag} onChangeText={text => props.setTag(sanitizeClubTag(text))} placeholder="Tag (1-4 letters)" placeholderTextColor={ui.text.muted} autoCapitalize="characters" maxLength={4} />
         <TextInput style={styles.input} value={props.motto} onChangeText={props.setMotto} placeholder="Motto" placeholderTextColor={ui.text.muted} maxLength={80} />
-        <PresetRow label="Color" items={COLOR_PAIRS} selected={props.branding.colorPair} onSelect={colorPair => props.setBranding({ ...props.branding, colorPair })} />
-        <PresetRow label="Badge" items={BADGE_SHAPES} selected={props.branding.badgeShape} onSelect={badgeShape => props.setBranding({ ...props.branding, badgeShape })} />
-        <PresetRow label="Banner" items={BANNER_STYLES} selected={props.branding.bannerStyle} onSelect={bannerStyle => props.setBranding({ ...props.branding, bannerStyle })} />
+        <TextInput style={[styles.input, styles.descriptionInput]} value={props.description} onChangeText={props.setDescription} placeholder="Describe your club" placeholderTextColor={ui.text.muted} maxLength={250} multiline />
+        <Text style={styles.helperText}>{props.description.length}/250</Text>
+        <ClubBrandingEditor tag={props.tag} branding={props.branding} setBranding={props.setBranding} />
         {!canAffordCreate ? <Text style={styles.warningText}>You need {formatCoins(props.clubConfig.createCost - coins)} more.</Text> : null}
-        <PrimaryButton label={props.busyId === 'create' ? 'Creating...' : 'Create Club'} disabled={createLocked || !canAffordCreate || props.busyId === 'create'} onPress={props.create} />
-      </Panel>
-      {props.applications.length ? (
-        <Panel title="Pending Applications">
-          {props.applications.map(application => <Text key={application.id} style={styles.metaText}>[{application.club.tag}] {application.club.name}</Text>)}
-        </Panel>
-      ) : null}
-      <Panel title="Find Clubs">
-        <TextInput style={styles.input} value={props.searchQuery} onChangeText={props.setSearchQuery} placeholder="Search by name or tag" placeholderTextColor={ui.text.muted} />
-        {clubsToShow.length ? clubsToShow.map(item => (
-          <View key={item.clubId} style={styles.searchRow}>
-            <View style={[styles.searchBadge, { borderColor: colorsFor(item.branding.colorPair).accent }]}><Text style={styles.searchBadgeText}>{item.tag}</Text></View>
-            <View style={styles.flex}>
-              <Text style={styles.rowTitle}>{item.name}</Text>
-              <Text style={styles.metaText}>Lv {item.level} - {item.memberCount}/{item.memberCap} members - {item.onlineMemberCount} online</Text>
-            </View>
-            <SmallButton label={props.applications.some(application => application.club.clubId === item.clubId) ? 'Pending' : 'Apply'} disabled={props.applications.some(application => application.club.clubId === item.clubId)} busy={props.busyId === `apply:${item.clubId}`} onPress={() => props.apply(item)} />
-          </View>
-        )) : <Empty text="No clubs found yet." />}
+        <PrimaryButton label={createLocked ? `Unlocks at Level ${props.clubConfig.minCreateLevel}` : props.busyId === 'create' ? 'Creating...' : 'Create Club'} disabled={createLocked || !canAffordCreate || props.busyId === 'create'} onPress={props.create} />
       </Panel>
     </>
   );
@@ -856,6 +892,56 @@ function PresetRow<T extends string>({ label, items, selected, onSelect }: { lab
   );
 }
 
+function ClubBrandingEditor({ tag, branding, setBranding }: { tag: string; branding: api.ClubBranding; setBranding: (value: api.ClubBranding) => void }) {
+  const applyTheme = (colorPair: (typeof COLOR_PAIRS)[number]) => {
+    const colors = BRAND_COLORS[colorPair];
+    setBranding({
+      ...branding,
+      colorPair,
+      primaryColor: colors.accent,
+      backgroundColor: colors.background,
+      accentColor: colors.soft,
+    });
+  };
+  return (
+    <View style={styles.emblemEditor}>
+      <View style={styles.emblemPreview}>
+        <ClubEmblem branding={branding} tag={sanitizeClubTag(tag) || 'CLUB'} size={74} showTag />
+        <View style={styles.flex}>
+          <Text style={styles.rowTitle}>Club Emblem</Text>
+          <Text style={styles.metaText}>Choose a base icon, shape, and three-color identity.</Text>
+        </View>
+      </View>
+      <PresetRow label="Starting theme" items={COLOR_PAIRS} selected={branding.colorPair} onSelect={applyTheme} />
+      <PresetRow label="Icon" items={BADGE_ICONS} selected={branding.badgeIcon} onSelect={badgeIcon => setBranding({ ...branding, badgeIcon })} />
+      <PresetRow label="Shape" items={BADGE_SHAPES} selected={branding.badgeShape} onSelect={badgeShape => setBranding({ ...branding, badgeShape })} />
+      <PresetRow label="Banner" items={BANNER_STYLES} selected={branding.bannerStyle} onSelect={bannerStyle => setBranding({ ...branding, bannerStyle })} />
+      <ColorSwatchRow label="Primary" selected={branding.primaryColor} onSelect={primaryColor => setBranding({ ...branding, primaryColor })} />
+      <ColorSwatchRow label="Background" selected={branding.backgroundColor} onSelect={backgroundColor => setBranding({ ...branding, backgroundColor })} />
+      <ColorSwatchRow label="Accent" selected={branding.accentColor} onSelect={accentColor => setBranding({ ...branding, accentColor })} />
+    </View>
+  );
+}
+
+function ColorSwatchRow({ label, selected, onSelect }: { label: string; selected: string; onSelect: (value: string) => void }) {
+  return (
+    <View style={styles.presetBlock}>
+      <Text style={styles.metaText}>{label}</Text>
+      <View style={styles.colorSwatchRow}>
+        {CLUB_COLORS.map(color => (
+          <Pressable
+            key={color}
+            accessibilityRole="button"
+            accessibilityLabel={`${label} ${color}`}
+            style={[styles.colorSwatch, { backgroundColor: color }, selected === color && styles.colorSwatchSelected]}
+            onPress={() => onSelect(color)}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function ProgressBar({ progress, color }: { progress: number; color: string }) {
   return <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${Math.max(0, Math.min(1, progress)) * 100}%`, backgroundColor: color }]} /></View>;
 }
@@ -876,8 +962,17 @@ function Empty({ text }: { text: string }) {
   return <Text style={styles.emptyText}>{text}</Text>;
 }
 
-function colorsFor(name: string) {
-  return BRAND_COLORS[name] || BRAND_COLORS.emerald;
+function colorsForBranding(branding: api.ClubBranding) {
+  const fallback = BRAND_COLORS[branding.colorPair] || BRAND_COLORS.emerald;
+  return {
+    accent: branding.primaryColor || fallback.accent,
+    background: branding.backgroundColor || fallback.background,
+    soft: branding.accentColor || fallback.soft,
+  };
+}
+
+function sanitizeClubTag(value: string) {
+  return value.replace(/[^a-z]/gi, '').toUpperCase().slice(0, 4);
 }
 
 function capitalize(value: string) {
@@ -893,8 +988,6 @@ const styles = StyleSheet.create({
   headerIcon: { width: 48, height: 48, borderRadius: 8, borderWidth: 1, borderColor: ui.border.strong, backgroundColor: ui.surface.raised, alignItems: 'center', justifyContent: 'center' },
   heroBack: { position: 'absolute', right: 12, top: 12, zIndex: 2, width: 42, height: 42 },
   clubHero: { borderWidth: 1.5, borderRadius: 8, padding: 18, paddingRight: 60, flexDirection: 'row', gap: 14, alignItems: 'center', marginBottom: 14 },
-  clubBadge: { width: 72, height: 72, borderRadius: 8, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  clubBadgeText: { color: ui.text.primary, fontSize: 18, fontWeight: '900' },
   clubName: { color: ui.text.primary, fontSize: 25, fontWeight: '900' },
   heroMotto: { color: ui.text.secondary, fontSize: 13, fontWeight: '700', marginTop: 2 },
   heroMetaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8 },
@@ -922,6 +1015,7 @@ const styles = StyleSheet.create({
   panel: { borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.panel, padding: 16, marginBottom: 14 },
   panelTitle: { color: ui.text.primary, fontSize: 20, fontWeight: '900', marginBottom: 12 },
   input: { minHeight: 48, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.base, color: ui.text.primary, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, fontWeight: '700', marginBottom: 9 },
+  descriptionInput: { minHeight: 96, textAlignVertical: 'top' },
   inlineForm: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   inlineInput: { flex: 1, marginBottom: 0, maxHeight: 100 },
   formStack: { marginTop: 8 },
@@ -954,7 +1048,6 @@ const styles = StyleSheet.create({
   requirementRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
   statTile: { width: '48.5%', minHeight: 86, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.raised, padding: 12, justifyContent: 'center' },
-  statTileWide: { width: '100%' },
   statTileDimmed: { opacity: 0.52 },
   statValueRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   statValue: { color: ui.text.primary, fontSize: 18, fontWeight: '900' },
@@ -976,12 +1069,15 @@ const styles = StyleSheet.create({
   leaveButton: { minHeight: 48, borderRadius: 8, borderWidth: 1, borderColor: ui.palette.coral, alignItems: 'center', justifyContent: 'center' },
   leaveButtonText: { color: ui.palette.coral, fontWeight: '900' },
   costStrip: { padding: 12, borderRadius: 8, backgroundColor: ui.surface.raised, marginBottom: 12 },
+  lockStrip: { padding: 12, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.raised, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
   costText: { color: ui.palette.gold, fontSize: 22, fontWeight: '900', marginVertical: 3 },
   warningText: { color: ui.palette.coral, fontSize: 12, fontWeight: '800', marginTop: 6 },
-  lockTitle: { color: ui.text.primary, fontSize: 22, fontWeight: '900', marginBottom: 8 },
   presetBlock: { marginTop: 8 },
+  emblemEditor: { marginTop: 8, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.raised },
+  emblemPreview: { minHeight: 82, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 4 },
+  colorSwatchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 7 },
+  colorSwatch: { width: 30, height: 30, borderRadius: 6, borderWidth: 2, borderColor: 'rgba(232,236,241,0.18)' },
+  colorSwatchSelected: { borderColor: '#FFFFFF', transform: [{ scale: 1.08 }] },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderColor: ui.border.soft },
-  searchBadge: { width: 50, height: 50, borderRadius: 8, borderWidth: 2, alignItems: 'center', justifyContent: 'center', backgroundColor: ui.surface.raised },
-  searchBadgeText: { color: ui.text.primary, fontSize: 11, fontWeight: '900' },
   emptyText: { color: ui.text.muted, fontSize: 13, fontWeight: '700', paddingVertical: 12 },
 });

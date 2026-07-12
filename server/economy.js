@@ -73,7 +73,7 @@ export const DEFAULT_CLUB_PRESTIGE_TIERS = [
 ];
 
 export const DEFAULT_CLUB_CONFIG = {
-  minJoinLevel: 10,
+  minJoinLevel: 1,
   minCreateLevel: 10,
   createCost: 5000,
   prestigeTiers: DEFAULT_CLUB_PRESTIGE_TIERS,
@@ -164,7 +164,9 @@ export function normalizeClubConfig(input = DEFAULT_CLUB_CONFIG) {
   if (!byTier.has(1)) byTier.set(1, normalizeClubPrestigeTier(DEFAULT_CLUB_PRESTIGE_TIERS[0], 0));
   const prestigeTiers = [...byTier.values()].sort((a, b) => a.tier - b.tier);
   return {
-    minJoinLevel: Math.max(1, safeInteger(source.minJoinLevel, DEFAULT_CLUB_CONFIG.minJoinLevel)),
+    // Joining is intentionally open to every account. Keep the field in the
+    // public config for backward compatibility with older clients.
+    minJoinLevel: 1,
     minCreateLevel: Math.max(1, safeInteger(source.minCreateLevel, DEFAULT_CLUB_CONFIG.minCreateLevel)),
     createCost: Math.max(0, safeInteger(source.createCost, DEFAULT_CLUB_CONFIG.createCost)),
     prestigeTiers,

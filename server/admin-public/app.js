@@ -899,7 +899,7 @@ function normalizeClubConfigDraft(input = {}) {
     { tier: 2, name: 'Growing Club', treasuryCost: 10000, memberCap: 20, minClubLevel: 3, minMembers: 5, minWeeklyMatches: 10, minSeasonMatches: 0, perks: ['20 member seats'] },
   ];
   return {
-    minJoinLevel: Number(input.minJoinLevel || 10),
+    minJoinLevel: 1,
     minCreateLevel: Number(input.minCreateLevel || 10),
     createCost: Number(input.createCost || 5000),
     prestigeTiers: tiers.map((tier, index) => ({
@@ -919,7 +919,7 @@ function normalizeClubConfigDraft(input = {}) {
 function renderClubConfig() {
   const form = document.querySelector('#economyConfigEditor');
   const config = economyClubConfig || normalizeClubConfigDraft();
-  form.clubMinJoinLevel.value = config.minJoinLevel;
+  form.clubMinJoinLevel.value = 'Open to every level';
   form.clubMinCreateLevel.value = config.minCreateLevel;
   form.clubCreateCost.value = config.createCost;
   const output = document.querySelector('#clubPrestigeRows');
@@ -978,7 +978,7 @@ function collectClubConfig() {
     byTier.set(1, { tier: 1, name: 'Founding Club', treasuryCost: 5000, memberCap: 15, minClubLevel: 1, minMembers: 1, minWeeklyMatches: 0, minSeasonMatches: 0, perks: ['Club tag', 'Club chat', '15 member seats'] });
   }
   return {
-    minJoinLevel: Math.max(1, Math.floor(Number(form.clubMinJoinLevel.value || 10))),
+    minJoinLevel: 1,
     minCreateLevel: Math.max(1, Math.floor(Number(form.clubMinCreateLevel.value || 10))),
     createCost: Math.max(0, Math.floor(Number(form.clubCreateCost.value || 5000))),
     prestigeTiers: [...byTier.values()].sort((a, b) => a.tier - b.tier),
@@ -1750,6 +1750,7 @@ function renderClubDetail(club) {
   node.innerHTML = `
     <h2>${escapeHtml(club.name)} [${escapeHtml(club.tag)}]</h2>
     <p class="muted">${escapeHtml(club.clubId)} - ${club.memberCount}/${club.memberCap} members - Level ${club.level}</p>
+    ${club.description ? `<p>${escapeHtml(club.description)}</p>` : ''}
     <div class="statline">
       <span class="chip">XP ${Number(club.progression?.totalXp || 0).toLocaleString()}</span>
       <span class="chip">Requests ${club.joinRequests?.length || 0}</span>
@@ -1808,14 +1809,15 @@ async function runClubAction(action) {
       const name = prompt('Club name', selectedClub.name);
       const tag = prompt('Club tag', selectedClub.tag);
       const motto = prompt('Club motto', selectedClub.motto || '');
-      await api(`/clubs/${selectedClub.clubId}`, { method: 'PATCH', body: JSON.stringify({ reason, name, tag, motto, branding: selectedClub.branding }) });
+      const description = prompt('Club description (up to 250 characters)', selectedClub.description || '');
+      await api(`/clubs/${selectedClub.clubId}`, { method: 'PATCH', body: JSON.stringify({ reason, name, tag, motto, description, branding: selectedClub.branding }) });
     }
     if (action === 'xp') {
       const amount = Number(prompt('XP adjustment amount, e.g. 500 or -500', '500'));
       await api(`/clubs/${selectedClub.clubId}/xp/adjust`, { method: 'POST', body: JSON.stringify({ reason, amount }) });
     }
     if (action === 'announce') {
-      const text = prompt('Announcement text');
+      const text = prompt('Announcement text (replaces the current announcement)');
       await api(`/clubs/${selectedClub.clubId}/announcements`, { method: 'POST', body: JSON.stringify({ reason, text }) });
     }
     if (action === 'rewardGrant' || action === 'rewardRevoke') {

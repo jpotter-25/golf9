@@ -53,6 +53,7 @@ export type RoomPlayer = {
   progression?: ProgressionState | null;
   competitive?: Pick<CompetitiveState, 'league' | 'placementComplete' | 'placementsRemaining' | 'rankedGames' | 'wins' | 'losses' | 'seasonBestLeague'> | null;
   cosmetics?: PlayerInventory['equipped'] | null;
+  club?: ClubSummary | null;
   ready: boolean;
   connected: boolean;
   isHost: boolean;
@@ -94,6 +95,10 @@ export type ClubBranding = {
   colorPair: 'emerald' | 'gold' | 'sky' | 'crimson' | 'violet' | string;
   badgeShape: 'shield' | 'crest' | 'diamond' | 'circle' | string;
   bannerStyle: 'classic' | 'night' | 'fairway' | 'champion' | string;
+  badgeIcon: 'shield' | 'flag' | 'trophy' | 'crown' | 'star' | 'target' | 'bolt' | 'gem' | string;
+  primaryColor: string;
+  backgroundColor: string;
+  accentColor: string;
 };
 
 export type ClubSummary = {
@@ -101,6 +106,7 @@ export type ClubSummary = {
   name: string;
   tag: string;
   motto: string;
+  description: string;
   level: number;
   memberCount: number;
   memberCap: number;
@@ -846,7 +852,7 @@ export function clubMe(token: string): Promise<{ club: ClubProfile | null; appli
   return request<{ club: ClubProfile | null; applications: ClubApplication[]; invitations: ClubInvitation[]; recommended?: ClubSummary[] }>('/clubs/me', {}, token);
 }
 
-export function createClub(token: string, payload: { name: string; tag: string; motto?: string; branding?: Partial<ClubBranding> }): Promise<{ club: ClubProfile }> {
+export function createClub(token: string, payload: { name: string; tag: string; motto?: string; description?: string; branding?: Partial<ClubBranding> }): Promise<{ club: ClubProfile }> {
   return request<{ club: ClubProfile }>('/clubs', { method: 'POST', body: JSON.stringify(payload) }, token);
 }
 
@@ -858,7 +864,7 @@ export function clubProfile(token: string, clubId: string): Promise<{ club: Club
   return request<{ club: ClubProfile }>(`/clubs/${encodeURIComponent(clubId)}`, {}, token);
 }
 
-export function updateClub(token: string, clubId: string, payload: { name?: string; tag?: string; motto?: string; branding?: Partial<ClubBranding> }): Promise<{ club: ClubProfile }> {
+export function updateClub(token: string, clubId: string, payload: { name?: string; tag?: string; motto?: string; description?: string; branding?: Partial<ClubBranding> }): Promise<{ club: ClubProfile }> {
   return request<{ club: ClubProfile }>(
     `/clubs/${encodeURIComponent(clubId)}`,
     { method: 'PATCH', body: JSON.stringify(payload) },

@@ -92,12 +92,12 @@ test('club economy config defaults and admin-configured prestige tiers normalize
       ],
     },
   });
-  assert.equal(config.clubConfig.minJoinLevel, 12);
+  assert.equal(config.clubConfig.minJoinLevel, 1);
   assert.equal(config.clubConfig.minCreateLevel, 14);
   assert.equal(config.clubConfig.createCost, 7500);
   assert.deepEqual(config.clubConfig.prestigeTiers.map(tier => tier.memberCap), [12, 24]);
 
   const catalog = publicEconomyCatalog(null, config);
   assert.equal(catalog.clubConfig.prestigeTiers[1].name, 'Big Club');
-  assert.equal(normalizeClubConfig({}).minJoinLevel, 10);
+  assert.equal(normalizeClubConfig({}).minJoinLevel, 1);
 });

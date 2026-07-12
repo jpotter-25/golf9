@@ -19,8 +19,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useClubRealtime } from '../context/ClubRealtimeContext';
 import { getGameplayPreferences, setGameplayPreferences, subscribeGameplayPreferences } from '../services/preferences';
-import { RankEmblem } from '../components/AvatarDecorations';
-import { PlayerAvatar } from '../components/PlayerAvatar';
+import { ProgressAvatar } from '../components/AvatarDecorations';
+import { ClubEmblem } from '../components/ClubEmblem';
 import { gradients, ui } from './theme';
 
 type ShellProps = {
@@ -90,11 +90,11 @@ function GlobalTopBar() {
   const route = useRoute();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const { user, signOut } = useAuth();
-  const { club, invitations, mailSummary, clubChatUnread, clubActionCount } = useClubRealtime();
+  const { club, mailSummary, clubChatUnread, clubActionCount } = useClubRealtime();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prefs, setPrefs] = useState(getGameplayPreferences());
   const isLobby = route.name === 'Lobby';
-  const progress = Math.max(0.06, Math.min(1, user?.progression.levelProgress ?? 0));
+  const progress = Math.max(0, Math.min(1, user?.progression.levelProgress ?? 0));
   const ranked = user?.competitive;
   const clubAttentionCount = Math.min(99, clubActionCount + clubChatUnread);
 
@@ -109,38 +109,34 @@ function GlobalTopBar() {
     <View style={[styles.topBarWrap, { paddingTop: Math.max(10, insets.top + 8) }]}>
       <View style={styles.topBar}>
         {!isLobby ? (
-          <Pressable accessibilityRole="button" accessibilityLabel="Go home" style={styles.topIconButton} onPress={() => navigation.navigate('Lobby')}>
-            <Home size={20} color={ui.text.primary} strokeWidth={2.8} />
+          <Pressable accessibilityRole="button" accessibilityLabel="Go home" style={[styles.topIconButton, styles.topHomeButton]} onPress={() => navigation.navigate('Lobby')}>
+            <Home size={18} color={ui.text.primary} strokeWidth={2.8} />
           </Pressable>
         ) : null}
 
         <Pressable accessibilityRole="button" accessibilityLabel="Open profile" style={styles.playerChip} onPress={() => navigation.navigate('Profile')}>
-          <PlayerAvatar cosmetics={user?.inventory.equipped} fallbackInitial={user?.avatarInitial ?? '?'} size={40} />
+          <ProgressAvatar
+            cosmetics={user?.inventory.equipped}
+            fallbackInitial={user?.avatarInitial ?? '?'}
+            league={ranked?.league}
+            progress={progress}
+            size={43}
+          />
           <View style={styles.playerMeta}>
-            <Text style={styles.playerName} numberOfLines={1}>{user?.displayName ?? 'Player'}</Text>
-            <View style={styles.xpTrack}>
-              <View style={[styles.xpFill, { width: `${progress * 100}%` }]} />
-            </View>
-            <Text style={styles.playerLevel} numberOfLines={1}>Lv {user?.progression.level ?? 1}</Text>
+            <Text style={styles.playerName} adjustsFontSizeToFit minimumFontScale={0.76} numberOfLines={1}>{user?.displayName ?? 'Player'}</Text>
+            <Text style={styles.playerAffiliation} numberOfLines={1}>
+              {club?.tag ? `[${club.tag}]  ` : ''}Lv {user?.progression.level ?? 1}
+            </Text>
           </View>
         </Pressable>
 
         <Pressable accessibilityRole="button" accessibilityLabel="Open shop" style={styles.currencyChip} onPress={() => navigation.navigate('Shop')}>
-          <Coins size={16} color={ui.palette.gold} strokeWidth={2.8} />
+          <Coins size={14} color={ui.palette.gold} strokeWidth={2.8} />
           <Text style={styles.currencyValue} numberOfLines={1}>{user?.currency.coins ?? 0}</Text>
         </Pressable>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Open ranked profile, ${ranked?.league.name ?? 'Iron III'}`}
-          style={styles.rankChip}
-          onPress={() => navigation.navigate('Profile')}
-        >
-          <RankEmblem league={ranked?.league} size={32} />
-        </Pressable>
-
         <Pressable accessibilityRole="button" accessibilityLabel="Open inbox" style={styles.topIconButton} onPress={() => navigation.navigate('Inbox')}>
-          <Mail size={20} color={ui.text.primary} strokeWidth={2.8} />
+          <Mail size={18} color={ui.text.primary} strokeWidth={2.8} />
           {(mailSummary?.attention ?? 0) > 0 ? (
             <View style={styles.topIconBadge}>
               <Text style={styles.topIconBadgeText}>{Math.min(99, mailSummary?.attention ?? 0)}</Text>
@@ -148,24 +144,22 @@ function GlobalTopBar() {
           ) : null}
         </Pressable>
 
-        {club || invitations.length ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Open club${clubActionCount ? `, ${clubActionCount} pending club action${clubActionCount === 1 ? '' : 's'}` : ''}${clubChatUnread ? `, ${clubChatUnread} new club chat message${clubChatUnread === 1 ? '' : 's'}` : ''}`}
-            style={styles.topIconButton}
-            onPress={openClub}
-          >
-            <Users size={20} color={ui.text.primary} strokeWidth={2.8} />
-            {clubAttentionCount > 0 ? (
-              <View style={styles.topIconBadge}>
-                <Text style={styles.topIconBadgeText}>{clubAttentionCount}</Text>
-              </View>
-            ) : null}
-          </Pressable>
-        ) : null}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Open club${clubActionCount ? `, ${clubActionCount} pending club action${clubActionCount === 1 ? '' : 's'}` : ''}${clubChatUnread ? `, ${clubChatUnread} new club chat message${clubChatUnread === 1 ? '' : 's'}` : ''}`}
+          style={styles.topIconButton}
+          onPress={openClub}
+        >
+          {club ? <ClubEmblem branding={club.branding} tag={club.tag} size={25} /> : <Users size={18} color={ui.text.primary} strokeWidth={2.8} />}
+          {clubAttentionCount > 0 ? (
+            <View style={styles.topIconBadge}>
+              <Text style={styles.topIconBadgeText}>{clubAttentionCount}</Text>
+            </View>
+          ) : null}
+        </Pressable>
 
         <Pressable accessibilityRole="button" accessibilityLabel="Open settings" style={styles.topIconButton} onPress={() => setSettingsOpen(true)}>
-          <Settings size={20} color={ui.text.primary} strokeWidth={2.8} />
+          <Settings size={18} color={ui.text.primary} strokeWidth={2.8} />
         </Pressable>
       </View>
 
@@ -363,60 +357,35 @@ const styles = StyleSheet.create({
   shellContent: { flexGrow: 1, paddingHorizontal: 18 },
   shellCentered: { justifyContent: 'center' },
   topBarWrap: {
-    paddingHorizontal: 12,
-    paddingBottom: 8,
+    paddingHorizontal: 6,
+    paddingBottom: 6,
   },
   topBar: {
-    minHeight: 56,
+    minHeight: 52,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: ui.border.soft,
     backgroundColor: 'rgba(10, 15, 37, 0.88)',
     flexDirection: 'row',
-    flexWrap: 'wrap',
     alignItems: 'center',
-    alignContent: 'center',
-    gap: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 7,
+    gap: 3,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
   },
   playerChip: {
     flex: 1,
-    flexBasis: 146,
-    minWidth: 146,
+    minWidth: 0,
     minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    paddingRight: 2,
+    gap: 4,
   },
-  topAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    borderWidth: 2,
-    borderColor: ui.palette.emerald,
-    backgroundColor: ui.palette.feltLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  topAvatarText: { color: ui.text.primary, fontSize: 18, fontWeight: '900' },
   playerMeta: { flex: 1, minWidth: 0 },
-  playerName: { color: ui.text.primary, fontSize: 12, fontWeight: '900' },
-  playerLevel: { color: ui.palette.gold, fontSize: 10, fontWeight: '900', marginTop: 2 },
-  xpTrack: {
-    height: 6,
-    borderRadius: 4,
-    overflow: 'hidden',
-    backgroundColor: ui.surface.base,
-    marginTop: 4,
-    borderWidth: 1,
-    borderColor: ui.border.soft,
-  },
-  xpFill: { height: '100%', backgroundColor: ui.palette.emerald },
+  playerName: { color: ui.text.primary, fontSize: 11, fontWeight: '900' },
+  playerAffiliation: { color: ui.palette.gold, fontSize: 8.5, lineHeight: 11, fontWeight: '900', marginTop: 2 },
   currencyChip: {
-    minWidth: 56,
-    height: 40,
+    width: 47,
+    height: 38,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: ui.border.gold,
@@ -424,24 +393,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-    paddingHorizontal: 6,
+    gap: 2,
+    paddingHorizontal: 3,
   },
-  currencyValue: { color: ui.palette.gold, fontSize: 13, fontWeight: '900', maxWidth: 36 },
-  rankChip: {
-    width: 42,
-    height: 40,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: ui.border.strong,
-    backgroundColor: ui.surface.glass,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
+  currencyValue: { color: ui.palette.gold, fontSize: 11, fontWeight: '900', maxWidth: 29 },
   topIconButton: {
-    width: 38,
-    height: 40,
+    width: 32,
+    height: 38,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: ui.border.soft,
@@ -449,6 +407,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  topHomeButton: { width: 32 },
   topIconBadge: {
     position: 'absolute',
     right: -4,

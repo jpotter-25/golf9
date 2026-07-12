@@ -1620,6 +1620,7 @@ export default function GameScreen({ route, navigation }: Props) {
   // ===== Render =====
   const bottomRoomPlayer = roomPlayersById.get(bottomPlayer.userId);
   const bottomConnected = !isOnline || (bottomRoomPlayer?.connected ?? bottomPlayer.connected ?? true);
+  const bottomClubTag = bottomRoomPlayer?.club?.tag ?? (bottomPlayer.userId === user?.userId ? user?.club?.tag : null);
   const selfClaimableCount =
     (user?.currency.dailyBonus.canClaim ? 1 : 0)
     + (user?.challenges.daily.items.filter(item => item.canClaim).length ?? 0)
@@ -1667,6 +1668,7 @@ export default function GameScreen({ route, navigation }: Props) {
     const activeGift = avatarGifts[p.userId]?.type === 'gift' ? avatarGifts[p.userId] : null;
     const activeGiftOption = activeGift?.giftId ? TABLE_GIFTS_BY_ID.get(activeGift.giftId) : null;
     const opponentName = roomPlayer?.displayName ?? p.name ?? 'Player';
+    const opponentClubTag = roomPlayer?.club?.tag;
     return (
       <View
         key={`${slot}:${p.id ?? p.userId ?? i}`}
@@ -1707,7 +1709,7 @@ export default function GameScreen({ route, navigation }: Props) {
           style={styles.oppGridName}
           numberOfLines={1}
         >
-          {opponentName}
+          {opponentClubTag ? <Text style={styles.clubTagText}>[{opponentClubTag}] </Text> : null}{opponentName}
         </Text>
         <GridView
           grid={p.grid}
@@ -1850,6 +1852,7 @@ export default function GameScreen({ route, navigation }: Props) {
                 style={[styles.meTitle, bottomIsActive && styles.activeName]}
                 numberOfLines={1}
               >
+                {bottomClubTag ? <Text style={styles.clubTagText}>[{bottomClubTag}] </Text> : null}
                 {isOnline ? (bottomRoomPlayer?.displayName ?? bottomPlayer.name ?? 'Your Grid') : isSolo ? bottomPlayer.name : bottomPlayer.name}
               </Text>
               <Text style={styles.playerGridMeta}>
@@ -3132,6 +3135,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     minWidth: 0,
   },
+  clubTagText: { color: '#B99CFF', fontWeight: '900' },
   playerGridMeta: { color: '#9BA3C7', fontSize: 8, fontWeight: '900', marginTop: 1 },
   inlineScores: { alignItems: 'flex-end', flexShrink: 0, minWidth: 42, paddingRight: 1 },
 
