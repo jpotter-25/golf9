@@ -158,28 +158,58 @@ test('hard solo AI uses reveal decisions to keep a better hidden card', () => {
   assert.equal(next.topDiscard.rank, '9');
 });
 
-test('hard solo AI avoids triggering final turn when trailing the table', () => {
+test('hard solo AI uses visible grid scores and avoids its last hidden card while trailing', () => {
   const state = baseState({
     aiGrid: [
-      row(card('3'), card('9'), card('5')),
-      row(card('A'), card('A'), card('5')),
-      row(card('6'), card('8'), card('7', false)),
+      row(card('3'), card('4'), card('2')),
+      row(card('3'), card('6'), card('K')),
+      row(card('4'), card('4'), card('5', false)),
     ],
     opponentGrid: [
-      row(card('A'), card('K'), card('2')),
-      row(card('3'), card('4'), card('5')),
-      row(card('6'), card('7'), card('8')),
+      row(card('3'), card('A'), card('K')),
+      row(card('A'), card('A'), card('5')),
+      row(card('3'), card('9', false), card('2')),
     ],
-    drawRank: '2',
+    drawRank: '7',
     discardRank: 'Q',
   });
-  state.players[0].score = 25;
-  state.players[1].score = 1;
+
+  assert.equal(state.players[0].score, 0);
+  assert.equal(state.players[1].score, 0);
 
   const move = chooseAiMove(state, 0, 'hard');
 
   assert.equal(move.source, 'draw');
-  assert.deepEqual(move.target, { playerIndex: 0, r: 0, c: 1 });
+  assert.equal(move.discardDrawn, true);
+  assert.equal(move.target, null);
+
+  const next = aiPlayTurn(state, 0, 'hard');
+  assert.equal(next.players[0].grid[2][2].faceUp, false);
+  assert.equal(next.sweepActive, false);
+  assert.equal(next.currentPlayerIndex, 1);
+});
+
+test('hard solo AI improves a face-up card instead of ending while trailing', () => {
+  const state = baseState({
+    aiGrid: [
+      row(card('3'), card('4'), card('2')),
+      row(card('3'), card('6'), card('K')),
+      row(card('4'), card('4'), card('5', false)),
+    ],
+    opponentGrid: [
+      row(card('3'), card('A'), card('K')),
+      row(card('A'), card('A'), card('5')),
+      row(card('3'), card('9', false), card('2')),
+    ],
+    drawRank: '2',
+    discardRank: 'Q',
+  });
+
+  const move = chooseAiMove(state, 0, 'hard');
+
+  assert.equal(move.source, 'draw');
+  assert.equal(move.discardDrawn, false);
+  assert.deepEqual(move.target, { playerIndex: 0, r: 1, c: 1 });
   assert.equal(move.revealThenDecide, false);
 });
 
@@ -198,9 +228,6 @@ test('hard solo AI can trigger final turn when holding the lowest score', () => 
     drawRank: '2',
     discardRank: 'Q',
   });
-  state.players[0].score = 1;
-  state.players[1].score = 25;
-
   const move = chooseAiMove(state, 0, 'hard');
 
   assert.equal(move.source, 'draw');

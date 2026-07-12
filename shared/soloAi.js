@@ -162,10 +162,14 @@ function chooseHardSource(state, playerIndex) {
   const topValue = cardValue(top);
   const hiddenCount = countFaceDownCards(grid);
   const worst = worstFaceUp(grid);
+  const avoidFinalHidden = shouldAvoidFinalHiddenTarget(state, playerIndex);
+  const completion = visibleColumnCompletionTarget(grid, top);
+  const setup = visibleColumnSetupTarget(grid, top);
 
-  if (visibleColumnCompletionTarget(grid, top)) return 'discard';
+  if (completion && !targetIsFinalHidden(grid, completion, avoidFinalHidden)) return 'discard';
+  if (avoidFinalHidden && (!worst || topValue >= worst.score)) return 'draw';
   if (topValue <= HARD_DIRECT_KEEP_MAX) return 'discard';
-  if (visibleColumnSetupTarget(grid, top) && topValue <= HARD_SETUP_MAX) return 'discard';
+  if (setup && !targetIsFinalHidden(grid, setup, avoidFinalHidden) && topValue <= HARD_SETUP_MAX) return 'discard';
   if (worst && topValue <= worst.score - HARD_BIG_IMPROVEMENT) return 'discard';
   if (hiddenCount <= 2 && worst && topValue < worst.score) return 'discard';
   return 'draw';
@@ -200,8 +204,14 @@ function shouldDiscardDrawnHard(state, playerIndex, card) {
 
   const incomingValue = cardValue(card);
   const worst = worstFaceUp(grid);
-  if (visibleColumnCompletionTarget(grid, card)) return false;
-  if (visibleColumnSetupTarget(grid, card) && incomingValue <= HARD_SETUP_MAX) return false;
+  const avoidFinalHidden = shouldAvoidFinalHiddenTarget(state, playerIndex);
+  const completion = visibleColumnCompletionTarget(grid, card);
+  const setup = visibleColumnSetupTarget(grid, card);
+  if (completion && !targetIsFinalHidden(grid, completion, avoidFinalHidden)) return false;
+  if (setup && !targetIsFinalHidden(grid, setup, avoidFinalHidden) && incomingValue <= HARD_SETUP_MAX) return false;
+  if (avoidFinalHidden && (!worst || incomingValue >= worst.score)) {
+    return cardDangerToOpponents(state, playerIndex, card) < 7;
+  }
   if (incomingValue <= HARD_REVEAL_MAX) return false;
   if (worst && incomingValue <= worst.score - 1) return false;
   if (cardDangerToOpponents(state, playerIndex, card) >= 7) return false;
@@ -216,13 +226,13 @@ function canDiscardDrawnForAi(state, playerIndex) {
 function chooseHardTargetForDraw(state, playerIndex, card) {
   const grid = state.players[playerIndex]?.grid;
   if (!grid) return null;
+  const avoidFinalHidden = shouldAvoidFinalHiddenTarget(state, playerIndex);
   const completion = visibleColumnCompletionTarget(grid, card);
-  if (completion) return completion;
+  if (completion && !targetIsFinalHidden(grid, completion, avoidFinalHidden)) return completion;
 
   const setup = visibleColumnSetupTarget(grid, card);
   const incomingValue = cardValue(card);
   const hiddenCount = countFaceDownCards(grid);
-  const avoidFinalHidden = shouldAvoidFinalHiddenTarget(state, playerIndex);
   if (setup && !targetIsFinalHidden(grid, setup, avoidFinalHidden) && (incomingValue <= HARD_SETUP_MAX || hiddenCount >= 4)) {
     return setup;
   }
@@ -241,7 +251,7 @@ function chooseHardTargetForDraw(state, playerIndex, card) {
 
 function chooseDirectTargetForKeptCard(grid, card, options = {}) {
   const completion = visibleColumnCompletionTarget(grid, card);
-  if (completion) return completion;
+  if (completion && !targetIsFinalHidden(grid, completion, options.avoidFinalHidden)) return completion;
 
   const incomingValue = cardValue(card);
   const setup = visibleColumnSetupTarget(grid, card);
@@ -280,9 +290,11 @@ function hasLowestRoundScore(state, playerIndex) {
 }
 
 function currentRoundScore(player) {
-  const score = Number(player?.score);
-  if (Number.isFinite(score)) return score;
-  const grid = player?.grid || [];
+  const grid = player?.grid;
+  if (!Array.isArray(grid)) {
+    const score = Number(player?.score);
+    return Number.isFinite(score) ? score : 0;
+  }
   let total = 0;
   for (const row of grid) {
     for (const card of row) {
