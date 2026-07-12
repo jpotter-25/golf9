@@ -60,27 +60,27 @@ const LESSONS: TutorialLesson[] = [
   },
   {
     title: 'Read the discard pile',
-    body: 'Your practice partner finished a turn and left a 5. Taking a visible discard is useful when it improves your grid or builds a matching column.',
+    body: 'Your practice partner finished a turn and left an 8. Taking a visible discard is useful when it improves your grid or builds a matching column.',
     prompt: 'Tap the highlighted discard.',
   },
   {
     title: 'Build a matching column',
-    body: 'You already peeked at two 5s in the first column. Use the 5 you took to replace its last hidden card.',
+    body: 'You already peeked at two 8s in the first column. Use the 8 you took to replace its last hidden card.',
     prompt: 'Tap the highlighted card in that column.',
   },
   {
     title: 'Finish the column',
-    body: 'The hidden card was a 9. Keep the drawn 5 to make three matching ranks in one column.',
+    body: 'The hidden card was a 9. Keep the drawn 8 to make three matching ranks in one column.',
     prompt: 'Choose Keep Drawn.',
   },
   {
     title: 'Column cleared',
-    body: 'Three matching ranks in a column clear from the grid and score 0. Clearing a column also earns another turn.',
+    body: 'Three 8s would cost 24 points. Clearing their column removes all 24 points, scores 0, and earns another turn.',
     prompt: 'See how the remaining cards score.',
   },
   {
     title: 'Count the round',
-    body: 'Your cleared column is worth 0. Fives score -5, Kings score 0, and every other card uses its shown value. Lowest total wins.',
+    body: 'Your cleared 8 column is worth 0. The remaining 5 scores -5, the King scores 0, and the other cards use their shown values. Lowest total wins.',
     prompt: 'You scored 4. Your practice partner scored 20.',
   },
   {
@@ -131,7 +131,7 @@ export default function TutorialScreen({ navigation }: Props) {
 
   const chooseRevealed = () => {
     setNudge(step === 8
-      ? 'Keeping the 9 is legal, but it misses a zero-point column. Try the 5 for this lesson.'
+      ? 'Keeping the 9 is legal, but it misses clearing 24 points. Try the 8 for this lesson.'
       : 'Keeping the 9 is legal, but it adds more points. Try the lower 3 for this lesson.');
   };
 
@@ -160,7 +160,7 @@ export default function TutorialScreen({ navigation }: Props) {
         </Pressable>
       </View>
 
-      <PremiumPanel tone={step >= LESSONS.length - 1 ? 'gold' : 'felt'} style={styles.coachPanel}>
+      <PremiumPanel tone="felt" style={[styles.coachPanel, step >= LESSONS.length - 1 && styles.completionPanel]}>
         <View style={styles.coachTitleRow}>
           <View style={styles.coachIcon}>
             {step >= LESSONS.length - 1
@@ -192,8 +192,8 @@ export default function TutorialScreen({ navigation }: Props) {
           <ActionButton label="Complete Tutorial" Icon={Check} onPress={() => setStep(11)} />
         ) : step >= LESSONS.length - 1 ? (
           <View style={styles.completionActions}>
-            <ActionButton label="Practice Again" Icon={RotateCcw} onPress={() => setStep(0)} style={styles.completionButton} />
-            <ActionButton label="Done" Icon={Check} tone="ghost" onPress={() => navigation.goBack()} style={styles.completionButton} />
+            <ActionButton label="Practice Again" Icon={RotateCcw} tone="ghost" onPress={() => setStep(0)} style={styles.completionButton} />
+            <ActionButton label="Done" Icon={Check} tone="gold" onPress={() => navigation.goBack()} style={styles.completionButton} />
           </View>
         ) : null}
       </PremiumPanel>
@@ -313,8 +313,8 @@ function cloneCard(card: GameCard, faceUp = card.faceUp): GameCard {
 
 function buildPlayerGrid(step: number): GameGrid {
   const grid: GameGrid = [
-    [tutorialCard('player-00', '5', '\u2665', false), tutorialCard('player-01', '2', '\u2663', false), tutorialCard('player-02', 'K', '\u2660', false)],
-    [tutorialCard('player-10', '5', '\u2666', false), tutorialCard('player-11', '5', '\u2663', false), tutorialCard('player-12', '3', '\u2665', false)],
+    [tutorialCard('player-00', '8', '\u2665', false), tutorialCard('player-01', '2', '\u2663', false), tutorialCard('player-02', 'K', '\u2660', false)],
+    [tutorialCard('player-10', '8', '\u2666', false), tutorialCard('player-11', '5', '\u2663', false), tutorialCard('player-12', '3', '\u2665', false)],
     [tutorialCard('player-20', '9', '\u2663', false), tutorialCard('player-21', '9', '\u2666', false), tutorialCard('player-22', 'A', '\u2660', false)],
   ];
 
@@ -354,12 +354,12 @@ function buildOpponentGrid(step: number): GameGrid {
 
 function heldCardForStep(step: number): GameCard | null {
   if (step === 4 || step === 5) return tutorialCard('held-three', '3', '\u2663', true);
-  if (step === 7 || step === 8) return tutorialCard('held-five', '5', '\u2665', true);
+  if (step === 7 || step === 8) return tutorialCard('held-eight', '8', '\u2665', true);
   return null;
 }
 
 function discardForStep(step: number): GameCard {
-  if (step === 6) return tutorialCard('discard-five', '5', '\u2665', true);
+  if (step === 6) return tutorialCard('discard-eight', '8', '\u2665', true);
   if (step >= 9) return tutorialCard('discard-nine', '9', '\u2663', true);
   return tutorialCard('discard-king', 'K', '\u2666', true);
 }
@@ -379,6 +379,7 @@ const styles = StyleSheet.create({
   progressCopy: { flex: 1, minWidth: 0 },
   eyebrow: { color: ui.palette.gold, fontSize: 11, fontWeight: '900', textTransform: 'uppercase', marginBottom: 5 },
   coachPanel: { marginBottom: 12 },
+  completionPanel: { borderColor: ui.border.gold, borderWidth: 2, backgroundColor: ui.surface.panel },
   coachTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   coachIcon: { width: 38, height: 38, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.base, alignItems: 'center', justifyContent: 'center' },
   coachTitle: { flex: 1, color: ui.text.primary, fontSize: 20, fontWeight: '900' },
