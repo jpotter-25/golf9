@@ -1,14 +1,14 @@
 # Golf 9 Internal Testing Checklist
 
 ## Latest Google Play internal build
-- Release date: `2026-07-11`
+- Release date: `2026-07-12`
 - Package: `us.joinup.golf_9`
 - App version: `0.1.0`
-- Android versionCode: `34`
+- Android versionCode: `35`
 - EAS profile: `playtest`
-- EAS build ID: `90edcfab-4dac-4760-a643-a05adcf05cd7`
-- Source commit: `0f9c737761db187400af03c3af593e77c7eba57c`
-- AAB: `https://expo.dev/artifacts/eas/nSDHPgQzY_i5CiMu7VCtfeFxfPsZlmJXvNYVpKMqH9M.aab`
+- EAS build ID: `2ab5e708-94f2-440a-9357-b2b67cdf1724`
+- Source commit: `fd47c936690869a581e03f69d47256a727644c11`
+- AAB: `https://expo.dev/artifacts/eas/8fe3oSk5hrtnwp9t1AGqy4k0BGlLoJKBOAqBXGHGCJc.aab`
 
 ## Build channels
 - iOS TestFlight: `eas build --platform ios --profile staging`
