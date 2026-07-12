@@ -11,6 +11,8 @@ export { default as ProfileScreen } from './ProfileScreen';
 export { default as ShopScreen } from './ShopScreen';
 export { default as SettingsScreen } from './SettingsScreen';
 export { default as OnlineMenuScreen } from './OnlineMenuScreen';
+export { default as OfflineMenuScreen } from './OfflineMenuScreen';
+export { default as RankedMenuScreen } from './RankedMenuScreen';
 export { default as OnlineRoomScreen } from './OnlineRoomScreen';
 export { default as RankedQueueScreen } from './RankedQueueScreen';
 export { default as SocialScreen } from './SocialScreen';

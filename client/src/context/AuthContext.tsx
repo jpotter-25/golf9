@@ -5,8 +5,16 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import * as api from '../services/api';
 import { unregisterPushNotifications } from '../services/pushNotifications';
 import { getSocialCredential, signOutProviders } from '../services/socialAuth';
-import { clearSession, loadSession, saveSession } from '../utils/sessionStorage';
+import {
+  clearCachedProfile,
+  clearSession,
+  loadCachedProfile,
+  loadSession,
+  saveCachedProfile,
+  saveSession,
+} from '../utils/sessionStorage';
 import { logError } from '../utils/logger';
+import { useConnectivity } from './ConnectivityContext';
 
 type AuthContextValue = {
   loading: boolean;
@@ -24,36 +32,60 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const { isOnline } = useConnectivity();
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<api.UserProfile | null>(null);
 
   useEffect(() => {
-    loadSession()
-      .then(async saved => {
+    Promise.all([loadSession(), loadCachedProfile()])
+      .then(([saved, cachedProfile]) => {
         if (!saved) return;
         const parsed = JSON.parse(saved) as { token: string };
-        const profile = await api.me(parsed.token);
         setToken(parsed.token);
-        setUser(profile.user);
+        if (cachedProfile) setUser(JSON.parse(cachedProfile) as api.UserProfile);
       })
       .catch(error => {
         logError(error, { area: 'restore-session' });
-        clearSession();
+        void clearSession();
+        void clearCachedProfile();
       })
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (loading || !token || !isOnline) return;
+    api.me(token)
+      .then(async profile => {
+        setUser(profile.user);
+        await saveCachedProfile(JSON.stringify(profile.user));
+      })
+      .catch(error => {
+        if (error instanceof api.ApiRequestError && error.status === 401) {
+          setToken(null);
+          setUser(null);
+          void clearSession();
+          void clearCachedProfile();
+          return;
+        }
+        logError(error, { area: 'refresh-restored-session' });
+      });
+  }, [isOnline, loading, token]);
+
   const applyAuth = useCallback(async (response: api.AuthResponse) => {
     setToken(response.token);
     setUser(response.user);
-    await saveSession(JSON.stringify({ token: response.token }));
+    await Promise.all([
+      saveSession(JSON.stringify({ token: response.token })),
+      saveCachedProfile(JSON.stringify(response.user)),
+    ]);
   }, []);
 
   const refreshProfile = useCallback(async () => {
     if (!token) return;
     const profile = await api.me(token);
     setUser(profile.user);
+    await saveCachedProfile(JSON.stringify(profile.user));
   }, [token]);
 
   const value = useMemo<AuthContextValue>(() => ({
@@ -81,16 +113,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     },
     refreshProfile,
     signOut: async () => {
-      if (token) {
+      if (token && isOnline) {
         await unregisterPushNotifications(token).catch(error => logError(error, { area: 'push-logout' }));
         await api.logout(token).catch(error => logError(error, { area: 'logout' }));
       }
       await signOutProviders().catch(error => logError(error, { area: 'provider-logout' }));
       setToken(null);
       setUser(null);
-      await clearSession();
+      await Promise.all([clearSession(), clearCachedProfile()]);
     },
-  }), [applyAuth, loading, refreshProfile, token, user]);
+  }), [applyAuth, isOnline, loading, refreshProfile, token, user]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

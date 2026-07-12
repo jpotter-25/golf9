@@ -18,6 +18,8 @@ import {
   ProfileScreen,
   SettingsScreen,
   OnlineMenuScreen,
+  OfflineMenuScreen,
+  RankedMenuScreen,
   OnlineRoomScreen,
   RankedQueueScreen,
   SocialScreen,
@@ -28,14 +30,19 @@ import {
 } from './screens';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ClubRealtimeProvider } from './context/ClubRealtimeContext';
+import { ConnectivityProvider, useConnectivity } from './context/ConnectivityContext';
+import { OfflineSyncProvider } from './context/OfflineSyncContext';
 import * as api from './services/api';
 import { getGameplayPreferences, subscribeGameplayPreferences, type GameplayPreferences } from './services/preferences';
 import { registerPushNotifications, unregisterPushNotifications } from './services/pushNotifications';
+import { cacheActiveMatch, clearCachedActiveMatch, loadCachedActiveMatch } from './services/activeMatchCache';
 
 export type RootStackParamList = {
   Login: undefined;
   Lobby: undefined;
-  OnlineMenu: undefined;
+  CasualMenu: undefined;
+  RankedMenu: undefined;
+  OfflineMenu: undefined;
   OnlineRoom: { players: 2 | 3 | 4; rounds: 5 | 9; create?: boolean; joinCode?: string; quickPlay?: boolean; ranked?: boolean; wagerBuyIn?: number };
   RankedQueue: { players: 2 | 3 | 4 };
   Game: { players: number; rounds: 5 | 9; mode: 'passplay' | 'solo' | 'online'; roomCode?: string; roomId?: string; online?: boolean; aiDifficulty?: 'easy' | 'hard'; localPlayerNames?: string[] };
@@ -108,7 +115,8 @@ function resetToActiveGame(room: api.RoomSummary) {
 }
 
 function ActiveMatchGate({ navigationTick }: { navigationTick: number }) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const { isOnline, isConnectionKnown } = useConnectivity();
   const [checked, setChecked] = useState(false);
   const [checking, setChecking] = useState(false);
   const [active, setActive] = useState<api.ActiveRoomResponse | null>(null);
@@ -116,13 +124,43 @@ function ActiveMatchGate({ navigationTick }: { navigationTick: number }) {
   const checkingRef = useRef(false);
 
   const checkActiveMatch = useCallback(async (showLoader = false) => {
-    if (!token || checkingRef.current) return;
+    if (!token || !user?.userId || checkingRef.current) return;
+    if (!isOnline) {
+      const cached = await loadCachedActiveMatch(user.userId);
+      if (cached) {
+        const room: api.RoomSummary = {
+          code: cached.roomCode,
+          hostUserId: '',
+          status: 'playing',
+          matchType: 'casual',
+          isPublic: false,
+          maxPlayers: cached.maxPlayers,
+          rounds: cached.rounds,
+          openSeats: 0,
+          economy: { buyIn: 0, pot: 0, chargedAt: null },
+          players: [],
+        };
+        setActive({ active: true, mustRejoin: true, room, game: null });
+      } else {
+        setActive(null);
+      }
+      setChecked(true);
+      setChecking(false);
+      setError(null);
+      return;
+    }
     checkingRef.current = true;
     if (showLoader) setChecking(true);
     setError(null);
     try {
       const response = await api.activeRoom(token);
       if (response.mustRejoin && response.room) {
+        await cacheActiveMatch({
+          userId: user.userId,
+          roomCode: response.room.code,
+          maxPlayers: response.room.maxPlayers,
+          rounds: response.room.rounds,
+        });
         if (isAllowedActiveMatchRoute(response.room)) {
           setActive(null);
         } else if (resetToActiveGame(response.room)) {
@@ -131,6 +169,7 @@ function ActiveMatchGate({ navigationTick }: { navigationTick: number }) {
           setActive(response);
         }
       } else {
+        await clearCachedActiveMatch(user.userId);
         setActive(null);
       }
     } catch (err) {
@@ -140,14 +179,14 @@ function ActiveMatchGate({ navigationTick }: { navigationTick: number }) {
       setChecked(true);
       setChecking(false);
     }
-  }, [token]);
+  }, [isOnline, token, user?.userId]);
 
   useEffect(() => {
     setChecked(false);
     setActive(null);
     setError(null);
-    if (token) void checkActiveMatch(true);
-  }, [checkActiveMatch, token]);
+    if (token && isConnectionKnown) void checkActiveMatch(true);
+  }, [checkActiveMatch, isConnectionKnown, token]);
 
   useEffect(() => {
     if (!token || !checked) return;
@@ -180,7 +219,9 @@ function ActiveMatchGate({ navigationTick }: { navigationTick: number }) {
         </Text>
         <Text style={styles.activeGateCopy}>
           {room
-            ? `Room ${room.code} is still active. Rejoin this match to keep playing.`
+            ? isOnline
+              ? `Room ${room.code} is still active. Rejoin this match to keep playing.`
+              : `Room ${room.code} is still active. Reconnect to return to the table.`
             : error
               ? error
               : 'Looking for an unfinished online match before opening the lobby.'}
@@ -191,10 +232,10 @@ function ActiveMatchGate({ navigationTick }: { navigationTick: number }) {
           </Text>
         ) : null}
         <Pressable
-          style={[styles.activeGateButton, checking && styles.activeGateButtonDisabled]}
-          disabled={checking}
+          style={[styles.activeGateButton, (checking || (!!room && !isOnline)) && styles.activeGateButtonDisabled]}
+          disabled={checking || (!!room && !isOnline)}
           onPress={() => {
-            if (room && resetToActiveGame(room)) {
+            if (room && isOnline && resetToActiveGame(room)) {
               setActive(null);
               return;
             }
@@ -202,7 +243,7 @@ function ActiveMatchGate({ navigationTick }: { navigationTick: number }) {
           }}
         >
           <Text style={styles.activeGateButtonText}>
-            {checking ? 'Checking...' : room ? 'Rejoin Match' : 'Retry'}
+            {checking ? 'Checking...' : room ? isOnline ? 'Rejoin Match' : 'Waiting for Connection' : 'Retry'}
           </Text>
         </Pressable>
       </View>
@@ -239,7 +280,9 @@ function AppNavigator() {
         ) : (
           <>
             <Stack.Screen name="Lobby" component={LobbyScreen} />
-            <Stack.Screen name="OnlineMenu" component={OnlineMenuScreen} />
+            <Stack.Screen name="CasualMenu" component={OnlineMenuScreen} />
+            <Stack.Screen name="RankedMenu" component={RankedMenuScreen} />
+            <Stack.Screen name="OfflineMenu" component={OfflineMenuScreen} />
             <Stack.Screen name="OnlineRoom" component={OnlineRoomScreen} />
             <Stack.Screen name="RankedQueue" component={RankedQueueScreen} />
             <Stack.Screen name="Game" component={GameScreen} />
@@ -262,18 +305,19 @@ function AppNavigator() {
 
 function PushNotificationRegistration() {
   const { token } = useAuth();
+  const { isOnline } = useConnectivity();
   const [prefs, setPrefs] = React.useState<GameplayPreferences>(getGameplayPreferences());
 
   useEffect(() => subscribeGameplayPreferences(setPrefs), []);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || !isOnline) return;
     if (prefs.turnAlerts) {
       void registerPushNotifications(token);
       return;
     }
     void unregisterPushNotifications(token);
-  }, [prefs.turnAlerts, token]);
+  }, [isOnline, prefs.turnAlerts, token]);
 
   return null;
 }
@@ -289,12 +333,16 @@ export default function App() {
     <SafeAreaProvider>
       {/* Hide the OS status bar */}
       <StatusBar hidden />
-      <AuthProvider>
-        <ClubRealtimeProvider>
-          <PushNotificationRegistration />
-          <AppNavigator />
-        </ClubRealtimeProvider>
-      </AuthProvider>
+      <ConnectivityProvider>
+        <AuthProvider>
+          <OfflineSyncProvider>
+            <ClubRealtimeProvider>
+              <PushNotificationRegistration />
+              <AppNavigator />
+            </ClubRealtimeProvider>
+          </OfflineSyncProvider>
+        </AuthProvider>
+      </ConnectivityProvider>
     </SafeAreaProvider>
   );
 }

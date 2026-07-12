@@ -193,6 +193,7 @@ export type PublicPlayerProfile = {
 };
 export type GameResult = {
   resultId: string;
+  clientResultId?: string | null;
   completedAt: number;
   roomCode: string | null;
   matchType?: MatchType;
@@ -390,6 +391,8 @@ export type MailSummary = {
 export type MailFeedbackCategory = 'bug' | 'suggestion' | 'account' | 'gameplay' | 'other';
 
 export type LocalResultPayload = {
+  clientResultId?: string;
+  completedAt?: number;
   mode: 'solo' | 'passplay';
   totalRounds: 5 | 9;
   roundScores: number[];
@@ -702,6 +705,16 @@ export type ClubContributionSummary = {
 
 const REQUEST_TIMEOUT_MS = 8000;
 
+export class ApiRequestError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}, token?: string | null): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -719,7 +732,7 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
       },
     });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || `Request failed: ${res.status}`);
+    if (!res.ok) throw new ApiRequestError(body.error || `Request failed: ${res.status}`, res.status);
     return body as T;
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {

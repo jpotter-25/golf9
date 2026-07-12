@@ -1291,6 +1291,45 @@ test('records local match progression and reward summary', async () => {
   });
 });
 
+test('retries an offline local result without duplicating rewards or history', async () => {
+  await withServer(async (baseUrl) => {
+    const account = await signup(baseUrl, `Offline${Date.now()}`);
+    const payload = {
+      clientResultId: `local-test-${Date.now()}`,
+      completedAt: Date.now() - 5000,
+      mode: 'solo',
+      totalRounds: 5,
+      roundScores: [5, 7, 9, 4, 6],
+      columnClears: 2,
+      players: [
+        { displayName: 'Player 1', total: 31 },
+        { displayName: 'Player 2', total: 52 },
+      ],
+    };
+
+    const first = await json(await fetch(`${baseUrl}/results/local`, {
+      method: 'POST',
+      headers: authHeaders(account.token),
+      body: JSON.stringify(payload),
+    }));
+    const retried = await json(await fetch(`${baseUrl}/results/local`, {
+      method: 'POST',
+      headers: authHeaders(account.token),
+      body: JSON.stringify(payload),
+    }));
+
+    assert.equal(retried.duplicate, true);
+    assert.equal(retried.result.resultId, first.result.resultId);
+    assert.equal(retried.user.statistics.gamesPlayed, 1);
+    assert.equal(retried.user.currency.coins, first.user.currency.coins);
+    assert.equal(retried.user.progression.totalXp, first.user.progression.totalXp);
+
+    const completed = await json(await fetch(`${baseUrl}/results/me`, { headers: authHeaders(account.token) }));
+    assert.equal(completed.results.length, 1);
+    assert.equal(completed.results[0].clientResultId, payload.clientResultId);
+  });
+});
+
 test('daily table bonus endpoint lets broke players rebuild on a rolling 24-hour clock', async () => {
   await withServer(async (baseUrl) => {
     const account = await signup(baseUrl, `Bonus${Date.now()}`);

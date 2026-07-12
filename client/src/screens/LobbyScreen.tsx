@@ -1,319 +1,199 @@
 // src/screens/LobbyScreen.tsx
-// Purpose: Premium mode-first home hub for local, solo, and online play.
+// Purpose: Authenticated home hub for casual, ranked, offline, and club destinations.
 
-import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Bot, ChevronLeft, Play, Users, Wifi } from 'lucide-react-native';
+import React from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { BookOpen, ChevronRight, Gamepad2, Search, Trophy, Users, Wifi, WifiOff } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
-import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
+import { PremiumPanel, ProgressBar, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
+import { ClubEmblem } from '../components/ClubEmblem';
 import { useAuth } from '../context/AuthContext';
+import { useClubRealtime } from '../context/ClubRealtimeContext';
+import { useConnectivity } from '../context/ConnectivityContext';
+import type { ClubProfile, ClubSummary } from '../services/api';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Lobby'>;
-type ModeChoice = 'passplay' | 'solo' | 'online';
-
-const MODE_META: Record<ModeChoice, { title: string; subtitle: string; Icon: LucideIcon; tone: 'emerald' | 'sky' | 'gold' }> = {
-  passplay: { title: 'Pass & Play', subtitle: 'Same room, one device, table-night energy.', Icon: Users, tone: 'emerald' },
-  solo: { title: 'Solo vs AI', subtitle: 'Train your table instincts against tuned AI.', Icon: Bot, tone: 'sky' },
-  online: { title: 'Online Multiplayer', subtitle: 'Create rooms, wager, ranked, clubs, and friends.', Icon: Wifi, tone: 'gold' },
-};
 
 export default function LobbyScreen({ navigation }: Props) {
   const { user } = useAuth();
-  const [selectedMode, setSelectedMode] = useState<ModeChoice | null>(null);
-  const [players, setPlayers] = useState<2 | 3 | 4>(4);
-  const [rounds, setRounds] = useState<5 | 9>(9);
-  const [aiDifficulty, setAiDifficulty] = useState<'easy' | 'hard'>('easy');
-  const [passPlayerNames, setPassPlayerNames] = useState<string[]>(['', '', '', '']);
-
-  const startSelectedMode = () => {
-    if (selectedMode === 'passplay') {
-      const localPlayerNames = Array.from({ length: players }, (_, index) => (
-        index === 0
-          ? user?.displayName ?? 'Player 1'
-          : cleanSeatName(passPlayerNames[index], `Player ${index + 1}`)
-      ));
-      navigation.replace('Game', { players, mode: 'passplay', rounds, localPlayerNames });
-    }
-    else if (selectedMode === 'solo') navigation.replace('Game', { players, mode: 'solo', rounds, aiDifficulty });
-  };
-
-  if (!selectedMode) {
-    return (
-      <ScreenShell scroll centered>
-        <ScreenHeader
-          eyebrow="Golf 9"
-          title="Choose Your Table"
-          subtitle="Fast card strategy, social pressure, and casino-night polish."
-        />
-
-        {(Object.keys(MODE_META) as ModeChoice[]).map(mode => (
-          <ModeCard
-            key={mode}
-            mode={mode}
-            {...MODE_META[mode]}
-            onPress={() => {
-              if (mode === 'online') navigation.navigate('OnlineMenu');
-              else setSelectedMode(mode);
-            }}
-          />
-        ))}
-      </ScreenShell>
-    );
-  }
-
-  const selected = MODE_META[selectedMode];
-  const SelectedIcon = selected.Icon;
-  const isSolo = selectedMode === 'solo';
+  const { club: realtimeClub, clubActionCount, clubChatUnread } = useClubRealtime();
+  const { isOnline, isConnectionKnown } = useConnectivity();
+  const club = realtimeClub ?? user?.club ?? null;
+  const clubAttention = clubActionCount + clubChatUnread;
 
   return (
     <ScreenShell scroll centered>
       <ScreenHeader
-        eyebrow="Table Setup"
-        title={selected.title}
-        subtitle={selected.subtitle}
-        right={<SelectedIcon size={34} color={toneColor(selected.tone)} strokeWidth={2.4} />}
+        eyebrow="Golf 9"
+        title="Play"
+        subtitle="Choose a table style and get straight to the cards."
+        right={isOnline
+          ? <StatusBadge label="ONLINE" tone="emerald" />
+          : isConnectionKnown
+            ? <StatusBadge label="OFFLINE" tone="gold" />
+            : <StatusBadge label="CHECKING" tone="muted" />}
       />
 
-      <PremiumPanel>
-        <PickerLabel label="Players" value={`${players}`} />
-        <Segmented values={[2, 3, 4]} selected={players} onSelect={value => setPlayers(value as 2 | 3 | 4)} />
-      </PremiumPanel>
+      <View style={styles.playStack}>
+        <DestinationCard
+          title="Play Casual"
+          subtitle="Auto-match, room codes, custom tables, and coin wagers."
+          Icon={Users}
+          color={ui.palette.emerald}
+          disabled={!isOnline}
+          status={!isOnline ? 'Internet needed' : 'Online multiplayer'}
+          onPress={() => navigation.navigate('CasualMenu')}
+        />
+        <DestinationCard
+          title="Play Ranked"
+          subtitle="Nine-round competitive matches with separate 2P, 3P, and 4P ladders."
+          Icon={Trophy}
+          color={ui.palette.gold}
+          disabled={!isOnline}
+          status={!isOnline ? 'Internet needed' : user?.competitive?.league.name ?? 'Iron III'}
+          onPress={() => navigation.navigate('RankedMenu')}
+        />
+        <DestinationCard
+          title="Play Offline"
+          subtitle="Solo AI and Pass & Play work anywhere, with or without service."
+          Icon={Gamepad2}
+          color={ui.palette.sky}
+          status={isOnline ? 'Local play' : 'Ready now'}
+          onPress={() => navigation.navigate('OfflineMenu')}
+        />
+      </View>
 
-      <PremiumPanel>
-        <PickerLabel label="Rounds" value={`${rounds}`} />
-        <Segmented values={[5, 9]} selected={rounds} onSelect={value => setRounds(value as 5 | 9)} />
-      </PremiumPanel>
+      <View style={styles.sectionHeading}>
+        <Text style={styles.sectionEyebrow}>Club</Text>
+        <Text style={styles.sectionHint}>{club ? 'Your community' : 'Find your community'}</Text>
+      </View>
 
-      {isSolo ? (
-        <PremiumPanel>
-          <PickerLabel label="AI Difficulty" value={aiDifficulty === 'easy' ? 'Easy' : 'Hard'} />
-          <Segmented
-            values={['easy', 'hard']}
-            selected={aiDifficulty}
-            onSelect={value => setAiDifficulty(value as 'easy' | 'hard')}
-            labels={{ easy: 'Easy', hard: 'Hard' }}
-          />
-        </PremiumPanel>
-      ) : null}
-
-      {selectedMode === 'passplay' ? (
-        <PremiumPanel>
-          <PickerLabel label="Seats" value={`${players}`} />
-          <View style={styles.seatRow}>
-            <View style={styles.seatNumber}>
-              <Text style={styles.seatNumberText}>1</Text>
+      {club ? (
+        <ClubDestinationCard
+          club={club}
+          attention={clubAttention}
+          disabled={!isOnline}
+          onPress={() => navigation.navigate('Club')}
+        />
+      ) : (
+        <Pressable
+          onPress={() => navigation.navigate('Club')}
+          disabled={!isOnline}
+          accessibilityRole="button"
+          accessibilityLabel="Find a club"
+          style={({ pressed }) => [(!isOnline || pressed) && styles.destinationDisabled]}
+        >
+          <PremiumPanel style={styles.findClubCard}>
+            <View style={styles.findClubIcon}><Search size={25} color={ui.palette.violet} strokeWidth={2.7} /></View>
+            <View style={styles.findClubCopy}>
+              <Text style={styles.findClubTitle}>Find a Club</Text>
+              <Text style={styles.findClubText}>{isOnline ? 'Meet players, share live chat, and build club progress.' : 'Reconnect to browse and join clubs.'}</Text>
             </View>
-            <View style={styles.seatCopy}>
-              <Text style={styles.seatLabel}>Signed-in player</Text>
-              <Text style={styles.seatName} numberOfLines={1}>{user?.displayName ?? 'Player 1'}</Text>
-            </View>
-          </View>
-          {Array.from({ length: players - 1 }, (_, offset) => offset + 1).map(index => (
-            <View key={index} style={styles.seatRow}>
-              <View style={styles.seatNumber}>
-                <Text style={styles.seatNumberText}>{index + 1}</Text>
-              </View>
-              <TextInput
-                value={passPlayerNames[index] ?? ''}
-                onChangeText={text => {
-                  const next = [...passPlayerNames];
-                  next[index] = text;
-                  setPassPlayerNames(next);
-                }}
-                placeholder={`Player ${index + 1}`}
-                placeholderTextColor={ui.text.muted}
-                maxLength={12}
-                autoCapitalize="words"
-                autoCorrect={false}
-                style={styles.seatInput}
-              />
-            </View>
-          ))}
-        </PremiumPanel>
-      ) : null}
+            {isOnline ? <ChevronRight size={21} color={ui.text.muted} strokeWidth={2.7} /> : <WifiOff size={20} color={ui.text.muted} strokeWidth={2.5} />}
+          </PremiumPanel>
+        </Pressable>
+      )}
 
-      <ActionButton
-        label="Deal Cards"
-        Icon={Play}
-        tone={selected.tone === 'gold' ? 'gold' : selected.tone === 'sky' ? 'secondary' : 'primary'}
-        onPress={startSelectedMode}
-        style={styles.startButton}
-      />
-      <ActionButton label="Back" Icon={ChevronLeft} tone="ghost" onPress={() => setSelectedMode(null)} />
+      <Pressable style={styles.howToPlay} onPress={() => navigation.navigate('Rules')} accessibilityRole="link">
+        <BookOpen size={17} color={ui.palette.sky} strokeWidth={2.5} />
+        <Text style={styles.howToPlayText}>How to play?</Text>
+      </Pressable>
     </ScreenShell>
   );
 }
 
-function ModeCard({
-  title,
-  subtitle,
-  Icon,
-  tone,
-  onPress,
-}: {
-  mode: ModeChoice;
-  title: string;
-  subtitle: string;
-  Icon: LucideIcon;
-  tone: 'emerald' | 'sky' | 'gold';
-  onPress: () => void;
-}) {
+function DestinationCard({ title, subtitle, Icon, color, status, disabled = false, onPress }: { title: string; subtitle: string; Icon: LucideIcon; color: string; status: string; disabled?: boolean; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress}>
-      <PremiumPanel tone="felt" style={[styles.modeCard, { borderColor: toneColor(tone) }]}>
-        <View style={[styles.modeAccent, { backgroundColor: toneColor(tone) }]} />
-        <View style={[styles.modeIcon, { borderColor: toneColor(tone) }]}>
-          <Icon size={26} color={toneColor(tone)} strokeWidth={2.6} />
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={`${title}. ${status}`}
+      style={({ pressed }) => [(disabled || pressed) && styles.destinationDisabled]}
+    >
+      <PremiumPanel tone="felt" style={[styles.destinationCard, { borderColor: disabled ? ui.border.soft : color }]}>
+        <View style={[styles.destinationAccent, { backgroundColor: color }]} />
+        <View style={[styles.destinationIcon, { borderColor: color }]}><Icon size={27} color={color} strokeWidth={2.7} /></View>
+        <View style={styles.destinationCopy}>
+          <View style={styles.destinationTitleRow}>
+            <Text style={styles.destinationTitle}>{title}</Text>
+            <Text style={[styles.destinationStatus, { color: disabled ? ui.text.muted : color }]} numberOfLines={1}>{status}</Text>
+          </View>
+          <Text style={styles.destinationSubtitle}>{subtitle}</Text>
         </View>
-        <View style={styles.modeCopy}>
-          <Text style={styles.modeTitle}>{title}</Text>
-          <Text style={styles.modeSubtitle}>{subtitle}</Text>
-        </View>
-        <Play size={20} color={ui.palette.gold} fill={ui.palette.gold} />
+        {disabled ? <WifiOff size={20} color={ui.text.muted} strokeWidth={2.5} /> : <ChevronRight size={21} color={color} strokeWidth={2.7} />}
       </PremiumPanel>
     </Pressable>
   );
 }
 
-function PickerLabel({ label, value }: { label: string; value: string }) {
+function ClubDestinationCard({ club, attention, disabled, onPress }: { club: ClubSummary | ClubProfile; attention: number; disabled: boolean; onPress: () => void }) {
+  const progression = 'progression' in club ? club.progression : null;
   return (
-    <View style={styles.pickerLabel}>
-      <Text style={styles.label}>{label}</Text>
-      <StatusBadge label={value} tone="sky" />
-    </View>
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${club.name}${attention ? `, ${attention} new club item${attention === 1 ? '' : 's'}` : ''}`}
+      style={({ pressed }) => [(disabled || pressed) && styles.destinationDisabled]}
+    >
+      <PremiumPanel style={styles.clubCard}>
+        <View style={styles.clubEmblemWrap}>
+          <ClubEmblem branding={club.branding} tag={club.tag} size={68} />
+          {attention > 0 ? <View style={styles.clubBadge}><Text style={styles.clubBadgeText}>{Math.min(99, attention)}</Text></View> : null}
+        </View>
+        <View style={styles.clubCopy}>
+          <View style={styles.clubNameRow}>
+            <Text style={styles.clubName} numberOfLines={1}>{club.name}</Text>
+            <Text style={styles.clubTag}>[{club.tag}]</Text>
+          </View>
+          <Text style={styles.clubMotto} numberOfLines={1}>{club.motto || 'Play together. Grow together.'}</Text>
+          <View style={styles.clubMetaRow}>
+            <Text style={styles.clubMeta}>Lv {club.level}</Text>
+            <Text style={styles.clubMeta}>{club.memberCount}/{club.memberCap} members</Text>
+            <Text style={[styles.clubMeta, styles.clubOnline]}>{club.onlineMemberCount} online</Text>
+          </View>
+          <ProgressBar value={progression?.levelProgress ?? 0} color={ui.palette.violet} />
+        </View>
+        {disabled ? <WifiOff size={20} color={ui.text.muted} strokeWidth={2.5} /> : <ChevronRight size={21} color={ui.palette.violet} strokeWidth={2.7} />}
+      </PremiumPanel>
+    </Pressable>
   );
-}
-
-function Segmented<T extends string | number>({
-  values,
-  selected,
-  labels,
-  onSelect,
-}: {
-  values: T[];
-  selected: T;
-  labels?: Partial<Record<string, string>>;
-  onSelect: (value: T) => void;
-}) {
-  return (
-    <View style={styles.segmented}>
-      {values.map(value => {
-        const active = selected === value;
-        const text = labels?.[String(value)] ?? String(value);
-        return (
-          <Pressable key={String(value)} onPress={() => onSelect(value)} style={[styles.segment, active && styles.segmentActive]}>
-            <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{text}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
-function toneColor(tone: 'emerald' | 'sky' | 'gold') {
-  if (tone === 'sky') return ui.palette.sky;
-  if (tone === 'gold') return ui.palette.gold;
-  return ui.palette.emerald;
-}
-
-function cleanSeatName(value: string | undefined, fallback: string) {
-  const trimmed = String(value || '').trim().replace(/\s+/g, ' ');
-  return trimmed ? trimmed.slice(0, 12) : fallback;
 }
 
 const styles = StyleSheet.create({
-  modeCard: {
-    minHeight: 96,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  modeAccent: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 4,
-    opacity: 0.9,
-  },
-  modeIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
-    borderWidth: 1,
-    backgroundColor: 'rgba(7, 10, 24, 0.34)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modeCopy: { flex: 1, minWidth: 0 },
-  modeTitle: { color: ui.text.primary, fontSize: 19, fontWeight: '900' },
-  modeSubtitle: { color: ui.text.secondary, fontSize: 13, fontWeight: '700', lineHeight: 18, marginTop: 4 },
-  utilityGrid: {
-    display: 'none',
-  },
-  pickerLabel: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  label: { color: ui.text.secondary, fontSize: 14, fontWeight: '900' },
-  segmented: {
-    minHeight: 46,
-    flexDirection: 'row',
-    gap: 8,
-  },
-  segment: {
-    flex: 1,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: ui.border.soft,
-    backgroundColor: ui.surface.base,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  segmentActive: {
-    backgroundColor: ui.palette.emerald,
-    borderColor: ui.palette.emerald,
-  },
-  segmentText: { color: ui.text.secondary, fontSize: 15, fontWeight: '900' },
-  segmentTextActive: { color: ui.text.inverse },
-  startButton: { marginBottom: 10 },
-  seatRow: {
-    minHeight: 54,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginTop: 10,
-  },
-  seatNumber: {
-    width: 38,
-    height: 38,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: ui.border.soft,
-    backgroundColor: ui.surface.base,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  seatNumberText: { color: ui.palette.emerald, fontSize: 15, fontWeight: '900' },
-  seatCopy: { flex: 1, minWidth: 0 },
-  seatLabel: { color: ui.text.muted, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
-  seatName: { color: ui.text.primary, fontSize: 17, fontWeight: '900', marginTop: 2 },
-  seatInput: {
-    flex: 1,
-    minHeight: 46,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: ui.border.soft,
-    backgroundColor: ui.surface.base,
-    color: ui.text.primary,
-    fontSize: 16,
-    fontWeight: '900',
-    paddingHorizontal: 12,
-  },
+  playStack: { gap: 10 },
+  destinationCard: { minHeight: 100, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, overflow: 'hidden' },
+  destinationAccent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4 },
+  destinationIcon: { width: 52, height: 52, borderRadius: 8, borderWidth: 1, backgroundColor: 'rgba(7, 10, 24, 0.4)', alignItems: 'center', justifyContent: 'center' },
+  destinationCopy: { flex: 1, minWidth: 0 },
+  destinationTitleRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
+  destinationTitle: { color: ui.text.primary, fontSize: 19, fontWeight: '900' },
+  destinationStatus: { maxWidth: 105, fontSize: 10, fontWeight: '900', textAlign: 'right' },
+  destinationSubtitle: { color: ui.text.secondary, fontSize: 12, fontWeight: '700', lineHeight: 17, marginTop: 5 },
+  destinationDisabled: { opacity: 0.52 },
+  sectionHeading: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 8 },
+  sectionEyebrow: { color: ui.text.primary, fontSize: 18, fontWeight: '900' },
+  sectionHint: { color: ui.text.muted, fontSize: 11, fontWeight: '800' },
+  clubCard: { minHeight: 118, flexDirection: 'row', alignItems: 'center', gap: 13, borderColor: ui.palette.violet },
+  clubEmblemWrap: { width: 72, height: 72, alignItems: 'center', justifyContent: 'center' },
+  clubBadge: { position: 'absolute', right: -2, top: -2, minWidth: 22, height: 22, paddingHorizontal: 5, borderRadius: 11, backgroundColor: ui.feedback.danger, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: ui.surface.base },
+  clubBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
+  clubCopy: { flex: 1, minWidth: 0 },
+  clubNameRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  clubName: { flexShrink: 1, color: ui.text.primary, fontSize: 19, fontWeight: '900' },
+  clubTag: { color: ui.palette.violet, fontSize: 11, fontWeight: '900' },
+  clubMotto: { color: ui.text.secondary, fontSize: 12, fontWeight: '700', marginTop: 3 },
+  clubMetaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 7, marginBottom: 7 },
+  clubMeta: { color: ui.text.muted, fontSize: 10, fontWeight: '900' },
+  clubOnline: { color: ui.palette.emerald },
+  findClubCard: { minHeight: 94, flexDirection: 'row', alignItems: 'center', gap: 13, borderColor: ui.palette.violet },
+  findClubIcon: { width: 48, height: 48, borderRadius: 8, borderWidth: 1, borderColor: ui.palette.violet, alignItems: 'center', justifyContent: 'center' },
+  findClubCopy: { flex: 1, minWidth: 0 },
+  findClubTitle: { color: ui.text.primary, fontSize: 18, fontWeight: '900' },
+  findClubText: { color: ui.text.secondary, fontSize: 12, fontWeight: '700', lineHeight: 17, marginTop: 4 },
+  howToPlay: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 7, minHeight: 44, paddingHorizontal: 10 },
+  howToPlayText: { color: ui.palette.sky, fontSize: 14, fontWeight: '900', textDecorationLine: 'underline' },
 });

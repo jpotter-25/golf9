@@ -1,17 +1,18 @@
 // client/src/screens/OnlineMenuScreen.tsx
-// Purpose: Online table browser for casual auto-match, coded rooms, wagers, and ranked.
+// Purpose: Casual online table browser for auto-match, coded rooms, and wagers.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Coins, DoorOpen, Gift, Search, Sparkles, Trophy, Users, X } from 'lucide-react-native';
+import { Coins, DoorOpen, Gift, Search, Sparkles, Trophy, Users, WifiOff, X } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
+import { useConnectivity } from '../context/ConnectivityContext';
 import * as api from '../services/api';
 import { CoinClaimBurst, type CoinClaimBurstState } from '../components/CoinClaimBurst';
 import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'OnlineMenu'>;
+type Props = NativeStackScreenProps<RootStackParamList, 'CasualMenu'>;
 type PlayerCount = 2 | 3 | 4;
 type RoundCount = 5 | 9;
 
@@ -24,6 +25,7 @@ const WAGER_SNAP_INTERVAL = WAGER_STEP_WIDTH + WAGER_STEP_GAP;
 
 export default function OnlineMenuScreen({ navigation }: Props) {
   const { token, user, refreshProfile } = useAuth();
+  const { isOnline } = useConnectivity();
   const [joinCode, setJoinCode] = useState('');
   const [autoOpen, setAutoOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
@@ -36,7 +38,6 @@ export default function OnlineMenuScreen({ navigation }: Props) {
   const [wagerPlayers, setWagerPlayers] = useState<PlayerCount>(4);
   const [wagerRounds, setWagerRounds] = useState<RoundCount>(9);
   const [wagerIndex, setWagerIndex] = useState(0);
-  const [rankedPlayers, setRankedPlayers] = useState<PlayerCount>(2);
   const [economy, setEconomy] = useState<api.EconomyCatalog | null>(null);
   const [freeRooms, setFreeRooms] = useState<api.RoomSummary[]>([]);
   const [wagerRooms, setWagerRooms] = useState<api.RoomSummary[]>([]);
@@ -54,21 +55,20 @@ export default function OnlineMenuScreen({ navigation }: Props) {
   const dailyBonus = economy?.dailyBonus ?? user?.currency.dailyBonus ?? null;
   const normalizedCode = joinCode.trim().toUpperCase();
   const canJoin = normalizedCode.length === 4;
-  const rankedLadder = user?.competitiveByPlayers?.[String(rankedPlayers) as '2' | '3' | '4'] ?? user?.competitive;
   const selectedWager = wagerTables[Math.min(wagerIndex, Math.max(0, wagerTables.length - 1))];
 
   const loadTables = useCallback(async () => {
-    if (!token) return;
+    if (!token || !isOnline) return;
     const [free, wager] = await Promise.all([
       api.openRooms(token, { matchType: 'casual' }),
       api.openRooms(token, { matchType: 'wager' }),
     ]);
     setFreeRooms(free.rooms);
     setWagerRooms(wager.rooms);
-  }, [token]);
+  }, [isOnline, token]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || !isOnline) return;
     api.economyCatalog(token)
       .then(response => {
         setEconomy(response);
@@ -77,7 +77,7 @@ export default function OnlineMenuScreen({ navigation }: Props) {
         setWagerIndex(current => Math.min(current, Math.max(0, tables.length - 1)));
       })
       .catch(() => {});
-  }, [token]);
+  }, [isOnline, token]);
 
   useEffect(() => {
     loadTables().catch(() => {});
@@ -126,13 +126,31 @@ export default function OnlineMenuScreen({ navigation }: Props) {
     setTimeout(() => setBusyRoomCode(null), 500);
   };
 
+  if (!isOnline) {
+    return (
+      <ScreenShell scroll centered>
+        <ScreenHeader
+          eyebrow="Casual Play"
+          title="Connection Needed"
+          subtitle="Casual rooms and wagers reconnect to Golf 9 services. Offline play remains available."
+          right={<WifiOff size={30} color={ui.feedback.danger} strokeWidth={2.5} />}
+        />
+        <PremiumPanel>
+          <Text style={styles.cardTitle}>You are offline</Text>
+          <Text style={styles.cardMeta}>Return to Offline Play for Solo AI or Pass & Play without waiting for a connection.</Text>
+        </PremiumPanel>
+        <ActionButton label="Open Offline Play" tone="primary" onPress={() => navigation.replace('OfflineMenu')} />
+      </ScreenShell>
+    );
+  }
+
   return (
     <ScreenShell scroll>
       <CoinClaimBurst burst={coinBurst} top={104} right={18} />
       <ScreenHeader
-        eyebrow="Online Multiplayer"
-        title="Open Online Tables"
-        subtitle="Auto-match, join by code, create tables, wager, or queue for ranked."
+        eyebrow="Online Play"
+        title="Casual Tables"
+        subtitle="Auto-match, join a code, create a room, or put coins on the line."
       />
 
       <PremiumPanel tone="felt">
@@ -177,28 +195,6 @@ export default function OnlineMenuScreen({ navigation }: Props) {
           emptyText="No public wager tables are waiting at this buy-in."
           busyRoomCode={busyRoomCode}
           onJoin={joinOpenRoom}
-        />
-      </PremiumPanel>
-
-      <PremiumPanel tone="gold">
-        <View style={styles.rankedHeader}>
-          <View style={styles.rankedCopy}>
-            <Text style={styles.rankedTitle}>Ranked Match</Text>
-            <Text style={styles.rankedMeta}>Always 9 rounds. Each player count has its own ladder.</Text>
-          </View>
-          <Trophy size={30} color={ui.text.inverse} strokeWidth={2.7} />
-        </View>
-        <Segmented values={PLAYER_OPTIONS} selected={rankedPlayers} onSelect={setRankedPlayers} suffix="P" />
-        <View style={styles.rankedStats}>
-          <StatMini label="Rounds" value="9" dark />
-          <StatMini label="League" value={rankedLadder?.league.name ?? 'Iron III'} dark />
-          <StatMini label="Ladder" value={`${rankedPlayers}P`} dark />
-        </View>
-        <ActionButton
-          label={`Find ${rankedPlayers}-Player Ranked Match`}
-          Icon={Trophy}
-          tone="gold"
-          onPress={() => navigation.navigate('RankedQueue', { players: rankedPlayers })}
         />
       </PremiumPanel>
 
@@ -555,15 +551,6 @@ function EarnCoinsModal({
   );
 }
 
-function StatMini({ label, value, dark = false }: { label: string; value: string; dark?: boolean }) {
-  return (
-    <View style={[styles.statMini, dark && styles.statMiniDark]}>
-      <Text style={[styles.statValue, dark && styles.statValueDark]} numberOfLines={1}>{value}</Text>
-      <Text style={[styles.statLabel, dark && styles.statLabelDark]} numberOfLines={1}>{label}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   cardHeader: {
     minHeight: 44,
@@ -684,17 +671,6 @@ const styles = StyleSheet.create({
   wagerLabel: { color: ui.text.primary, fontSize: 12, fontWeight: '900', marginTop: 3 },
   wagerMeta: { color: ui.text.muted, fontSize: 10, fontWeight: '800', marginTop: 3 },
   disabled: { opacity: 0.45 },
-  rankedHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 },
-  rankedCopy: { flex: 1, minWidth: 0 },
-  rankedTitle: { color: ui.text.inverse, fontSize: 22, fontWeight: '900' },
-  rankedMeta: { color: '#4D3D17', fontSize: 12, fontWeight: '900', lineHeight: 17, marginTop: 4 },
-  rankedStats: { flexDirection: 'row', gap: 8, marginVertical: 12 },
-  statMini: { flex: 1, borderRadius: 8, backgroundColor: ui.surface.glass, padding: 9, alignItems: 'center' },
-  statMiniDark: { backgroundColor: 'rgba(7, 10, 24, 0.18)' },
-  statValue: { color: ui.text.primary, fontSize: 14, fontWeight: '900' },
-  statValueDark: { color: ui.text.inverse },
-  statLabel: { color: ui.text.muted, fontSize: 10, fontWeight: '900', marginTop: 3 },
-  statLabelDark: { color: '#4D3D17' },
   input: {
     minHeight: 58,
     borderWidth: 1,

@@ -27,6 +27,7 @@ import { PlayerAvatar } from '../components/PlayerAvatar';
 import { useBoardMetrics } from '../utils/scaling';
 import { useAuth } from '../context/AuthContext';
 import { useClubRealtime } from '../context/ClubRealtimeContext';
+import { useOfflineSync, type LocalResultSyncOutcome } from '../context/OfflineSyncContext';
 import * as api from '../services/api';
 import {
   connect,
@@ -47,6 +48,8 @@ import { getGameplayPreferences, setGameplayPreferences, subscribeGameplayPrefer
 import { getTableThemeVisual, type EquippedCosmetics } from '../theme/cosmetics';
 import { actionCopy, layerZ, ui, type GameActionModel, type GameLayerState, type GameNotice } from '../ui';
 import { ShopContent } from './ShopScreen';
+import { cacheActiveMatch, clearCachedActiveMatch } from '../services/activeMatchCache';
+import { makeClientResultId } from '../services/localResults';
 import {
   cardValue,
   continueAfterRoundSummary,
@@ -187,6 +190,7 @@ export default function GameScreen({ route, navigation }: Props) {
   const { players, mode, rounds, roomCode, aiDifficulty = 'easy', localPlayerNames } = route.params;
   const TOTAL_ROUNDS: number = rounds;
   const { token, user, refreshProfile } = useAuth();
+  const { submitLocalResult } = useOfflineSync();
   const {
     club: clubProfile,
     chatMessages: clubChatMessages,
@@ -262,6 +266,7 @@ export default function GameScreen({ route, navigation }: Props) {
   const localRoundRevealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const localEndingRound = useRef<number | null>(null);
   const recordedLocalRoundKey = useRef<string | null>(null);
+  const localMatchResultId = useRef(makeClientResultId());
   const chatOpenRef = useRef(false);
   const chatScrollRef = useRef<ScrollView | null>(null);
   const clubChatScrollRef = useRef<ScrollView | null>(null);
@@ -306,6 +311,20 @@ export default function GameScreen({ route, navigation }: Props) {
   const bottomCardBackId = playerCosmetics(bottomPlayer, bottomIndex)?.cardBack;
 
   useEffect(() => subscribeGameplayPreferences(setGameplayPrefs), []);
+
+  useEffect(() => {
+    if (!isOnline || !roomCode || !user?.userId) return;
+    if (state.completed) {
+      void clearCachedActiveMatch(user.userId);
+      return;
+    }
+    void cacheActiveMatch({
+      userId: user.userId,
+      roomCode,
+      maxPlayers: players,
+      rounds,
+    });
+  }, [isOnline, players, roomCode, rounds, state.completed, user?.userId]);
 
   const showSocialBurst = useCallback((message: ChatMessage) => {
     if (message.type === 'text') return;
@@ -803,12 +822,14 @@ export default function GameScreen({ route, navigation }: Props) {
     revealedState: GameState,
     finalTotals: number[],
     finalRoundScores: number[]
-  ): Promise<api.MatchProgressionSummary | null> => {
-    if (!token) return null;
+  ): Promise<LocalResultSyncOutcome> => {
+    if (!token) return { progression: null, queued: false };
     const winningTotal = Math.min(...finalTotals);
     const accountRoundScores = [...localRoundScores.current, finalRoundScores[0] ?? 0];
     try {
-      const response = await api.recordLocalResult(token, {
+      const outcome = await submitLocalResult({
+        clientResultId: localMatchResultId.current,
+        completedAt: Date.now(),
         mode: isSolo ? 'solo' : 'passplay',
         totalRounds: TOTAL_ROUNDS === 5 ? 5 : 9,
         roundScores: accountRoundScores,
@@ -819,13 +840,12 @@ export default function GameScreen({ route, navigation }: Props) {
           won: (finalTotals[index] ?? 0) === winningTotal,
         })),
       });
-      setMatchProgression(response.progression);
-      refreshProfile().catch(() => {});
-      return response.progression;
+      if (outcome.progression) setMatchProgression(outcome.progression);
+      return outcome;
     } catch {
-      return null;
+      return { progression: null, queued: true };
     }
-  }, [TOTAL_ROUNDS, isSolo, refreshProfile, token, user?.displayName]);
+  }, [TOTAL_ROUNDS, isSolo, submitLocalResult, token, user?.displayName]);
 
   function endRoundAndMaybeContinue() {
     const roundNumber = Math.min(round, TOTAL_ROUNDS);
@@ -878,14 +898,16 @@ export default function GameScreen({ route, navigation }: Props) {
         );
       } else {
         const finalTotals = nextTotals;
-        const progression = await recordLocalMatchCompletion(revealedState, finalTotals, roundScores);
+        const outcome = await recordLocalMatchCompletion(revealedState, finalTotals, roundScores);
         const finalLines = revealedState.players
           .map((_, i) => `Player ${i + 1}: ${finalTotals[i]}`)
           .join('\n');
-        const rewardLines = formatProgressionSummary(progression);
+        const rewardLines = formatProgressionSummary(outcome.progression);
+        const syncLine = outcome.queued ? 'Match saved. Rewards and progression will sync when you reconnect.' : '';
+        const completionCopy = [finalLines, rewardLines, syncLine].filter(Boolean).join('\n\n');
         Alert.alert(
           'Game Over',
-          rewardLines ? `${finalLines}\n\n${rewardLines}` : finalLines,
+          completionCopy,
           [{ text: 'OK', onPress: () => navigation.replace('Lobby') }],
           { cancelable: false }
         );

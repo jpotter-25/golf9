@@ -4747,8 +4747,33 @@ app.post('/cosmetics/equip', requireAuth, (req, res) => {
 app.get('/results/me', requireAuth, (req, res) => res.json({ results: userResults(req.auth.user.userId) }));
 
 app.post('/results/local', requireAuth, (req, res) => {
+  const clientResultId = String(req.body?.clientResultId || '').trim();
+  if (clientResultId && !/^[A-Za-z0-9_-]{8,80}$/.test(clientResultId)) {
+    return res.status(400).json({ error: 'Invalid local result identifier.' });
+  }
+  if (clientResultId) {
+    const existing = results.find(result => (
+      result.clientResultId === clientResultId
+      && result.players?.[0]?.userId === req.auth.user.userId
+    ));
+    if (existing) {
+      return res.json({
+        result: existing,
+        progression: existing.players?.[0]?.progression || null,
+        user: safeUser(req.auth.user),
+        duplicate: true,
+      });
+    }
+  }
   const mode = req.body?.mode === 'solo' ? 'solo' : 'passplay';
   const totalRounds = Number(req.body?.totalRounds) === 5 ? 5 : 9;
+  const submittedCompletedAt = Number(req.body?.completedAt);
+  const now = Date.now();
+  const completedAt = Number.isFinite(submittedCompletedAt)
+    && submittedCompletedAt >= now - (90 * 24 * 60 * 60 * 1000)
+    && submittedCompletedAt <= now + (5 * 60 * 1000)
+    ? Math.floor(submittedCompletedAt)
+    : now;
   const submittedPlayers = Array.isArray(req.body?.players) ? req.body.players : [];
   const normalizedPlayers = submittedPlayers.length
     ? submittedPlayers.slice(0, 4).map((player, index) => ({
@@ -4778,7 +4803,8 @@ app.post('/results/local', requireAuth, (req, res) => {
 
   const result = {
     resultId: crypto.randomUUID(),
-    completedAt: Date.now(),
+    clientResultId: clientResultId || null,
+    completedAt,
     roomCode: null,
     mode,
     round: totalRounds,
