@@ -3,7 +3,7 @@
 
 import React from 'react';
 import { StyleSheet, Text } from 'react-native';
-import { BookOpen, ChevronLeft } from 'lucide-react-native';
+import { BookOpen, ChevronLeft, GraduationCap } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, ui } from '../ui';
@@ -39,7 +39,8 @@ export default function RulesScreen({ navigation }: Props) {
         When all cards are face-up, values are totaled. Lowest score wins the round.
       </RuleCard>
 
-      <ActionButton label="Back To Lobby" Icon={ChevronLeft} tone="ghost" onPress={() => navigation.goBack()} />
+      <ActionButton label="Play Guided Tutorial" Icon={GraduationCap} onPress={() => navigation.navigate('Tutorial')} />
+      <ActionButton label="Back" Icon={ChevronLeft} tone="ghost" style={styles.backButton} onPress={() => navigation.goBack()} />
     </ScreenShell>
   );
 }
@@ -57,4 +58,5 @@ const styles = StyleSheet.create({
   h2: { color: ui.text.primary, fontSize: 18, marginBottom: 8, fontWeight: '900' },
   p: { color: ui.text.secondary, lineHeight: 22, fontSize: 15, fontWeight: '700' },
   li: { color: ui.text.secondary, lineHeight: 22, marginBottom: 4, fontSize: 15, fontWeight: '700' },
+  backButton: { marginTop: 10 },
 });

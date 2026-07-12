@@ -14,6 +14,7 @@ import {
   LobbyScreen,
   GameScreen,
   RulesScreen,
+  TutorialScreen,
   ProfileScreen,
   SettingsScreen,
   OnlineMenuScreen,
@@ -39,6 +40,7 @@ export type RootStackParamList = {
   RankedQueue: { players: 2 | 3 | 4 };
   Game: { players: number; rounds: 5 | 9; mode: 'passplay' | 'solo' | 'online'; roomCode?: string; roomId?: string; online?: boolean; aiDifficulty?: 'easy' | 'hard'; localPlayerNames?: string[] };
   Rules: undefined;
+  Tutorial: undefined;
   Profile: undefined;
   Shop: undefined;
   Inbox: undefined;
@@ -232,6 +234,7 @@ function AppNavigator() {
           <>
             <Stack.Screen name="Login" component={LoginScreen} />
             <Stack.Screen name="Rules" component={RulesScreen} />
+            <Stack.Screen name="Tutorial" component={TutorialScreen} />
           </>
         ) : (
           <>
@@ -241,6 +244,7 @@ function AppNavigator() {
             <Stack.Screen name="RankedQueue" component={RankedQueueScreen} />
             <Stack.Screen name="Game" component={GameScreen} />
             <Stack.Screen name="Rules" component={RulesScreen} />
+            <Stack.Screen name="Tutorial" component={TutorialScreen} />
             <Stack.Screen name="Profile" component={ProfileScreen} />
             <Stack.Screen name="Shop" component={ShopScreen} />
             <Stack.Screen name="Inbox" component={InboxScreen} />

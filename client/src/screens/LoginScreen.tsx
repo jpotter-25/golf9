@@ -3,7 +3,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { BookOpen, LogIn, Sparkles, UserPlus } from 'lucide-react-native';
+import { BookOpen, GraduationCap, LogIn, Sparkles, UserPlus } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
@@ -216,6 +216,10 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
           <Text style={styles.secondaryText}>Rules</Text>
         </Pressable>
       </View>
+      <Pressable style={[styles.secondaryAction, styles.tutorialAction]} onPress={() => navigation.navigate('Tutorial')}>
+        <GraduationCap size={18} color={ui.palette.emerald} />
+        <Text style={styles.secondaryText}>Play Tutorial</Text>
+      </Pressable>
 
       {__DEV__ ? <Text style={styles.devServer}>Server: {SERVER_URL}</Text> : null}
 
@@ -315,6 +319,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   secondaryText: { color: ui.text.primary, fontWeight: '900', fontSize: 13 },
+  tutorialAction: { flex: 0, width: '100%', marginTop: 10 },
   devServer: { color: ui.text.muted, fontSize: 11, marginTop: 18, textAlign: 'center', fontWeight: '700' },
   dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 16 },
   dividerLine: { flex: 1, height: 1, backgroundColor: ui.border.soft },

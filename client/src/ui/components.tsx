@@ -184,7 +184,7 @@ function GlobalTopBar() {
               <View style={styles.settingsDivider} />
               <Text style={styles.settingsSectionLabel}>Game help</Text>
               <SettingsAction Icon={BookOpen} label="Rules" onPress={() => { setSettingsOpen(false); navigation.navigate('Rules'); }} />
-              <SettingsAction Icon={GraduationCap} label="Play Tutorial" onPress={() => { setSettingsOpen(false); navigation.navigate('Rules'); }} />
+              <SettingsAction Icon={GraduationCap} label="Play Tutorial" onPress={() => { setSettingsOpen(false); navigation.navigate('Tutorial'); }} />
               <View style={styles.settingsDivider} />
               <SettingsAction Icon={LogOut} label="Log Out" danger onPress={() => { setSettingsOpen(false); signOut(); }} />
             </View>
