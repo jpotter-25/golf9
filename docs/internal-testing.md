@@ -4,11 +4,11 @@
 - Release date: `2026-07-11`
 - Package: `us.joinup.golf_9`
 - App version: `0.1.0`
-- Android versionCode: `32`
+- Android versionCode: `33`
 - EAS profile: `playtest`
-- EAS build ID: `31fff03e-eab4-4a6d-ac79-51de5e37df9f`
-- Source commit: `afe122f155348671c01c386e70c0f438f17e3ebd`
-- AAB: `https://expo.dev/artifacts/eas/oi5QT1ntGDKxlt55DwoYol9lK33kSurojl9flZJk6QM.aab`
+- EAS build ID: `b94d8558-8148-44fb-a14f-73792634629f`
+- Source commit: `3c769f4c8c31928395905cb90651e72b36a5edd1`
+- AAB: `https://expo.dev/artifacts/eas/4erXZCEVzG8Mv4zv_yfbIBlQ3sgYj8_P7W3c4F-y-ZM.aab`
 
 ## Build channels
 - iOS TestFlight: `eas build --platform ios --profile staging`
