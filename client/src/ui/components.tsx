@@ -150,7 +150,7 @@ function GlobalTopBar() {
           style={styles.topIconButton}
           onPress={openClub}
         >
-          {club ? <ClubEmblem branding={club.branding} tag={club.tag} size={25} /> : <Users size={18} color={ui.text.primary} strokeWidth={2.8} />}
+          {club ? <ClubEmblem branding={club.branding} tag={club.tag} size={29} /> : <Users size={18} color={ui.text.primary} strokeWidth={2.8} />}
           {clubAttentionCount > 0 ? (
             <View style={styles.topIconBadge}>
               <Text style={styles.topIconBadgeText}>{clubAttentionCount}</Text>

@@ -110,8 +110,8 @@ export function ClubEmblem({
   const resolved = { ...FALLBACK_BRANDING, ...branding };
   const Icon = EMBLEM_ICONS[resolved.badgeIcon] || Shield;
   const safeTag = String(tag || '').replace(/[^A-Z]/g, '').slice(0, 4);
-  const strokeWidth = Math.max(2, size * 0.055);
-  const iconSize = Math.max(14, size * 0.42);
+  const strokeWidth = 3.6;
+  const iconSize = Math.max(10, size * 0.42);
 
   return (
     <View style={[{ width: size, height: size }, style]}>
