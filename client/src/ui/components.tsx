@@ -95,7 +95,6 @@ function GlobalTopBar() {
   const [prefs, setPrefs] = useState(getGameplayPreferences());
   const isLobby = route.name === 'Lobby';
   const progress = Math.max(0, Math.min(1, user?.progression.levelProgress ?? 0));
-  const ranked = user?.competitive;
   const clubAttentionCount = Math.min(99, clubActionCount + clubChatUnread);
 
   useEffect(() => subscribeGameplayPreferences(setPrefs), []);
@@ -118,7 +117,7 @@ function GlobalTopBar() {
           <ProgressAvatar
             cosmetics={user?.inventory.equipped}
             fallbackInitial={user?.avatarInitial ?? '?'}
-            league={ranked?.league}
+            league={user?.displayRankEmblem?.league}
             progress={progress}
             size={43}
           />

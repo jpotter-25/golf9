@@ -63,7 +63,11 @@ import {
   normalizeRankedPlayerCount,
   normalizeRankedSeason,
   placementForTotals,
+  publicCompetitiveByPlayers,
   publicCompetitiveState,
+  rankedDisplayEmblemChoices,
+  resolveDisplayRankEmblem,
+  setDisplayRankEmblem,
 } from './ranked.js';
 import {
   activateCompetitiveSeason,
@@ -75,7 +79,9 @@ import {
   publishCompetitiveConfig,
   rollbackCompetitiveConfig,
   saveDraftCompetitiveConfig,
+  simulateCompetitiveRating,
   upsertCompetitiveSeason,
+  validateCompetitiveConfig,
 } from './competitive.js';
 import {
   calculatePayouts,
@@ -385,6 +391,7 @@ const catalogStore = normalizeCatalogStore({});
 const economyStore = normalizeEconomyConfigStore({});
 const postgresStore = createPostgresStore(DATABASE_URL);
 const googleOAuthClient = new OAuth2Client();
+const MINIMUM_RANKED_BUILD = 39;
 let storeReady = false;
 let storeLoadError = null;
 let lastDailyPushScanAt = 0;
@@ -410,16 +417,21 @@ function publicRankedCatalog() {
   const config = rankedConfig();
   rankedSeason = normalizeRankedSeason(rankedSeason, Date.now(), config);
   return {
-    baseMmr: config.baseMmr,
-    leagueBands: config.leagueBands,
     placementMatchesRequired: config.placementMatchesRequired,
+    rankPath: config.leagueBands.flatMap(band => (band.divisions?.length
+      ? band.divisions.map(division => ({ league: band.league, division, name: `${band.league} ${division}` }))
+      : [{ league: band.league, division: null, name: band.league }])),
     season: {
       id: rankedSeason.id,
       name: rankedSeason.name,
       startsAt: rankedSeason.startsAt,
       endsAt: rankedSeason.endsAt,
       rewards: (rankedSeason.rewards || config.rewards || []).map(reward => ({
-        ...reward,
+        id: reward.id,
+        name: reward.name,
+        league: reward.league,
+        requiredRank: reward.requiredRank || reward.league,
+        cosmeticId: reward.cosmeticId,
         earned: false,
         claimed: false,
       })),
@@ -546,14 +558,20 @@ function publicAuthProviders(user) {
 }
 
 function publicCompetitiveRankOnly(competitive = {}) {
+  const publicRank = rank => rank ? {
+    league: rank.league || 'Unranked',
+    division: rank.division ?? null,
+    name: rank.name || 'Unranked',
+  } : null;
   return {
-    league: competitive.league,
+    league: publicRank(competitive.league),
     placementComplete: !!competitive.placementComplete,
     placementsRemaining: competitive.placementsRemaining ?? 0,
     rankedGames: competitive.rankedGames ?? 0,
     wins: competitive.wins ?? 0,
     losses: competitive.losses ?? 0,
-    seasonBestLeague: competitive.seasonBestLeague,
+    seasonBestLeague: publicRank(competitive.seasonBestLeague),
+    careerBestLeague: publicRank(competitive.careerBestLeague),
   };
 }
 
@@ -1174,39 +1192,59 @@ function adminClubSummaries(query = '') {
 
 function adminCompetitiveOverview() {
   const config = rankedConfig();
-  const rankedUsers = [...users.values()].map(user => {
-    normalizeCompetitiveState(user, rankedSeason, config);
-    return user;
-  });
-  const leagueDistribution = {};
-  let totalMmr = 0;
+  const rankedUsers = [...users.values()];
+  const ladders = {};
   const recentMovement = [];
-  for (const user of rankedUsers) {
-    const league = user.competitive?.league?.name || leagueForMmr(user.competitive?.mmr ?? BASE_MMR, config).name;
-    leagueDistribution[league] = (leagueDistribution[league] || 0) + 1;
-    totalMmr += Number(user.competitive?.mmr || 0);
-    for (const history of user.competitive?.matchHistory || []) {
-      if (!history?.leagueBefore || !history?.leagueAfter || history.leagueBefore.name === history.leagueAfter.name) continue;
-      recentMovement.push({
-        userId: user.userId,
-        displayName: user.displayName,
-        completedAt: history.completedAt,
-        from: history.leagueBefore.name,
-        to: history.leagueAfter.name,
-        delta: history.delta,
-      });
+  for (const playerCount of [2, 3, 4]) {
+    const leagueDistribution = {};
+    let totalMmr = 0;
+    let participants = 0;
+    let placements = 0;
+    let calibration = 0;
+    let established = 0;
+    for (const user of rankedUsers) {
+      const record = normalizeCompetitiveState(user, rankedSeason, config, playerCount);
+      const hasParticipated = record.rankedGames > 0 || record.placementsPlayed > 0;
+      if (!hasParticipated) continue;
+      const league = record.placementComplete ? record.league.name : 'Unranked';
+      leagueDistribution[league] = (leagueDistribution[league] || 0) + 1;
+      totalMmr += Number(record.mmr || 0);
+      participants += 1;
+      if (record.confidenceStage === 'placement') placements += 1;
+      if (record.confidenceStage === 'calibration') calibration += 1;
+      if (record.confidenceStage === 'established') established += 1;
+      for (const history of record.matchHistory || []) {
+        if (!history?.leagueBefore || !history?.leagueAfter || history.leagueBefore.name === history.leagueAfter.name) continue;
+        recentMovement.push({
+          userId: user.userId,
+          displayName: user.displayName,
+          playerCount,
+          completedAt: history.completedAt,
+          from: history.leagueBefore.name,
+          to: history.leagueAfter.name,
+          delta: history.delta,
+        });
+      }
     }
+    ladders[String(playerCount)] = {
+      playerCount,
+      participants,
+      averageMmr: participants ? Math.round(totalMmr / participants) : 0,
+      leagueDistribution,
+      confidence: { placements, calibration, established },
+    };
   }
   const activeRankedRooms = [...rooms.values()].filter(room => room.matchType === 'ranked' && !room.game?.completed);
   return {
     season: rankedSeason,
     config,
-    rankedPlayers: rankedUsers.filter(user => user.competitive?.rankedGames > 0 || user.competitive?.placementsPlayed > 0).length,
+    rankedPlayers: new Set(rankedUsers
+      .filter(user => [2, 3, 4].some(count => normalizeCompetitiveState(user, rankedSeason, config, count).rankedGames > 0))
+      .map(user => user.userId)).size,
     totalPlayers: rankedUsers.length,
-    averageMmr: rankedUsers.length ? Math.round(totalMmr / rankedUsers.length) : 0,
     activeQueues: rankedQueue.size,
     activeRankedRooms: activeRankedRooms.length,
-    leagueDistribution,
+    ladders,
     recentMovement: recentMovement.sort((a, b) => b.completedAt - a.completedAt).slice(0, 20),
   };
 }
@@ -1233,7 +1271,9 @@ function normalizeAdminCompetitiveAdjustment(user, body = {}) {
   const patch = {};
   if (body.mmr !== undefined) patch.mmr = Math.max(0, Math.floor(Number(body.mmr) || 0));
   if (body.seasonBestMmr !== undefined) patch.seasonBestMmr = Math.max(0, Math.floor(Number(body.seasonBestMmr) || 0));
+  if (body.careerBestMmr !== undefined) patch.careerBestMmr = Math.max(0, Math.floor(Number(body.careerBestMmr) || 0));
   if (body.placementsPlayed !== undefined) patch.placementsPlayed = Math.max(0, Math.floor(Number(body.placementsPlayed) || 0));
+  if (body.calibrationMatchesPlayed !== undefined) patch.calibrationMatchesPlayed = Math.max(0, Math.floor(Number(body.calibrationMatchesPlayed) || 0));
   if (body.rankedGames !== undefined) patch.rankedGames = Math.max(0, Math.floor(Number(body.rankedGames) || 0));
   if (body.wins !== undefined) patch.wins = Math.max(0, Math.floor(Number(body.wins) || 0));
   if (body.losses !== undefined) patch.losses = Math.max(0, Math.floor(Number(body.losses) || 0));
@@ -1241,9 +1281,16 @@ function normalizeAdminCompetitiveAdjustment(user, body = {}) {
   const next = { ...competitive, ...patch, playerCount };
   next.placementsPlayed = Math.min(next.placementsPlayed, next.placementMatchesRequired);
   next.placementComplete = next.placementsPlayed >= next.placementMatchesRequired;
+  next.hasCompletedInitialPlacement = next.hasCompletedInitialPlacement || next.placementComplete;
+  next.calibrationMatchesPlayed = Math.min(next.calibrationMatchesPlayed, next.calibrationMatchesRequired);
+  next.confidenceStage = !next.placementComplete
+    ? 'placement'
+    : next.calibrationMatchesPlayed < next.calibrationMatchesRequired ? 'calibration' : 'established';
   next.seasonBestMmr = Math.max(next.mmr, next.seasonBestMmr);
+  next.careerBestMmr = Math.max(next.mmr, next.seasonBestMmr, next.careerBestMmr || 0);
   next.league = leagueForMmr(next.mmr, config);
   next.seasonBestLeague = leagueForMmr(next.seasonBestMmr, config);
+  next.careerBestLeague = leagueForMmr(next.careerBestMmr, config);
   if (body.clearHistory) next.matchHistory = [];
   next.matchHistory = [{
     matchId: `admin-${crypto.randomUUID()}`,
@@ -1384,6 +1431,7 @@ function publicPlayerCard(viewer, target, extra = {}) {
       wins: profile.competitive.wins,
     },
     competitiveByPlayers: publicCompetitiveByPlayersRankOnly(profile.competitiveByPlayers),
+    displayRankEmblem: profile.displayRankEmblem,
     cosmetics: profile.inventory.equipped,
     club: profile.club,
     relationship: relationshipBetween(viewer, target),
@@ -1427,6 +1475,7 @@ function publicViewedProfile(viewer, target) {
     achievements: unlockedAchievements,
     competitive: publicCompetitiveRankOnly(profile.competitive),
     competitiveByPlayers: publicCompetitiveByPlayersRankOnly(profile.competitiveByPlayers),
+    displayRankEmblem: profile.displayRankEmblem,
     cosmetics: profile.inventory.equipped,
     club: profile.club,
     relationship: relationshipBetween(viewer, target),
@@ -1848,6 +1897,18 @@ function requireAuth(req, res, next) {
   return next();
 }
 
+function requireRankedBuild(req, res, next) {
+  const build = Number.parseInt(String(req.headers['x-golf9-build'] || ''), 10);
+  if (!Number.isFinite(build) || build < MINIMUM_RANKED_BUILD) {
+    return res.status(426).json({
+      error: 'Update Golf 9 to continue playing ranked.',
+      code: 'RANKED_UPDATE_REQUIRED',
+      minimumBuild: MINIMUM_RANKED_BUILD,
+    });
+  }
+  return next();
+}
+
 function roomSummary(room) {
   return {
     code: room.code,
@@ -1880,6 +1941,7 @@ function roomSummary(room) {
         level: safeAccount?.progression?.level ?? 1,
         progression: safeAccount?.progression ?? null,
         competitive: safeAccount ? publicCompetitiveRankOnly(safeAccount.competitive) : null,
+        displayRankEmblem: safeAccount?.displayRankEmblem || null,
         cosmetics: safeAccount?.inventory?.equipped || player.inventory?.equipped || player.cosmetics || null,
         club: safeAccount?.club || null,
         ready: true,
@@ -2278,7 +2340,6 @@ function publicRankedQueueStatus(userId) {
     maxPlayers: entry.maxPlayers,
     rounds: entry.rounds,
     joinedAt: entry.joinedAt,
-    searchRange: matchmakingRangeFor(entry.joinedAt, Date.now(), rankedConfig()),
     buyIn: 0,
     pot: 0,
     queuedPlayers: [...rankedQueue.values()].filter(item => item.key === entry.key).length,
@@ -2460,7 +2521,15 @@ function startRoomGame(room, { requireReady = false } = {}) {
   room.progressionStats = new Map();
   room.progressionRoundKeys = new Set();
   room.game = createGameState(
-    room.players.map(player => sanitizePlayerIdentity(users.get(player.userId) || player)),
+    room.players.map(player => {
+      const account = users.get(player.userId) || player;
+      return sanitizePlayerIdentity({
+        ...account,
+        displayRankEmblem: users.has(player.userId)
+          ? resolveDisplayRankEmblem(account, rankedSeason, rankedConfig())
+          : null,
+      });
+    }),
     { totalRounds: room.rounds, simultaneousPeek: true }
   );
   room.resultRecorded = false;
@@ -3231,7 +3300,7 @@ app.post('/admin/api/users/:userId/competitive/adjust', requireAdmin(adminStore,
   const result = normalizeAdminCompetitiveAdjustment(user, req.body || {});
   writeAudit(adminStore, req, req.admin.admin, 'admin.users.competitive.adjust', { userId: user.userId }, { reason, before: result.before, after: result.after });
   saveStore();
-  return res.json({ user: safeUser(user), competitive: publicCompetitiveState(user, rankedSeason, rankedConfig()) });
+  return res.json({ user: safeUser(user), competitive: result.after });
 });
 
 app.post('/admin/api/users/:userId/cosmetics/grant', requireAdmin(adminStore, 'cosmetics:write'), (req, res) => {
@@ -3501,27 +3570,36 @@ app.patch('/admin/api/economy/config', requireAdmin(adminStore, 'economy:write')
 app.get('/admin/api/competitive/overview', requireAdmin(adminStore, 'competitive:read'), (_req, res) => res.json({ overview: adminCompetitiveOverview() }));
 
 app.get('/admin/api/competitive/config', requireAdmin(adminStore, 'competitive:read'), (_req, res) => {
-  res.json(publicCompetitiveAdminConfig(competitiveStore));
+  const config = publicCompetitiveAdminConfig(competitiveStore);
+  res.json({ ...config, preflight: validateCompetitiveConfig(config.draft) });
 });
 
 app.patch('/admin/api/competitive/config/draft', requireAdmin(adminStore, 'competitive:write'), (req, res) => {
   const reason = cleanAdminReason(req.body?.reason);
   if (!reason) return res.status(400).json({ error: 'Reason is required.' });
   const result = saveDraftCompetitiveConfig(competitiveStore, req.body?.config || req.body || {});
+  const preflight = validateCompetitiveConfig(result.draft);
   writeAudit(adminStore, req, req.admin.admin, 'admin.competitive.config.update', {}, { reason });
   saveStore();
-  return res.json({ draft: result.draft });
+  return res.json({ draft: result.draft, preflight });
 });
 
 app.post('/admin/api/competitive/config/publish', requireAdmin(adminStore, 'competitive:write'), (req, res) => {
   const reason = cleanAdminReason(req.body?.reason);
   if (!reason) return res.status(400).json({ error: 'Reason is required.' });
+  const preflight = validateCompetitiveConfig(draftCompetitiveConfig(competitiveStore));
+  if (!preflight.valid) return res.status(400).json({ error: 'Fix competitive preflight errors before publishing.', preflight });
   const result = publishCompetitiveConfig(competitiveStore, req.admin.admin.displayName);
   rankedSeason = normalizeRankedSeason(rankedSeason, Date.now(), rankedConfig());
   for (const user of users.values()) normalizeCompetitiveState(user, rankedSeason, rankedConfig());
   writeAudit(adminStore, req, req.admin.admin, 'admin.competitive.config.publish', { versionId: result.version.versionId }, { reason });
   saveStore();
   return res.json({ live: result.live, version: result.version, overview: adminCompetitiveOverview() });
+});
+
+app.post('/admin/api/competitive/simulate', requireAdmin(adminStore, 'competitive:read'), (req, res) => {
+  const config = req.body?.useDraft === false ? liveCompetitiveConfig(competitiveStore) : draftCompetitiveConfig(competitiveStore);
+  return res.json({ simulation: simulateCompetitiveRating(req.body || {}, config) });
 });
 
 app.post('/admin/api/competitive/config/rollback', requireAdmin(adminStore, 'competitive:write'), (req, res) => {
@@ -4658,21 +4736,36 @@ app.post('/economy/daily-bonus/claim', requireAuth, (req, res) => {
   return res.json({ ...result, user: safeUser(req.auth.user), economy: publicEconomyCatalog(req.auth.user, economyConfig()) });
 });
 
-app.get('/ranked/catalog', requireAuth, (_req, res) => {
+app.get('/ranked/catalog', requireAuth, requireRankedBuild, (_req, res) => {
   return res.json({ catalog: publicRankedCatalog() });
 });
 
-app.get('/ranked/me', requireAuth, (req, res) => {
+app.get('/ranked/me', requireAuth, requireRankedBuild, (req, res) => {
   rankedSeason = normalizeRankedSeason(rankedSeason, Date.now(), rankedConfig());
   normalizeCompetitiveState(req.auth.user, rankedSeason, rankedConfig());
   return res.json({
     competitive: publicCompetitiveState(req.auth.user, rankedSeason, rankedConfig()),
-    competitiveByPlayers: safeUser(req.auth.user).competitiveByPlayers,
+    competitiveByPlayers: publicCompetitiveByPlayers(req.auth.user, rankedSeason, rankedConfig()),
+    displayRankSelection: req.auth.user.displayRankSelection || null,
+    displayRankEmblem: resolveDisplayRankEmblem(req.auth.user, rankedSeason, rankedConfig()),
+    displayRankEmblemChoices: rankedDisplayEmblemChoices(req.auth.user, rankedSeason, rankedConfig()),
     queue: publicRankedQueueStatus(req.auth.user.userId),
   });
 });
 
-app.post('/ranked/queue', requireAuth, (req, res) => {
+app.patch('/ranked/display-emblem', requireAuth, requireRankedBuild, (req, res) => {
+  const result = setDisplayRankEmblem(req.auth.user, req.body || null, rankedSeason, rankedConfig());
+  if (result.error) return res.status(400).json(result);
+  for (const room of rooms.values()) {
+    const gamePlayer = room.game?.players?.find(player => player.userId === req.auth.user.userId);
+    if (gamePlayer) gamePlayer.displayRankEmblem = result.displayRankEmblem;
+    if (room.players.some(player => player.userId === req.auth.user.userId)) broadcastRoom(room);
+  }
+  saveStore();
+  return res.json({ ...result, user: safeUser(req.auth.user), choices: rankedDisplayEmblemChoices(req.auth.user, rankedSeason, rankedConfig()) });
+});
+
+app.post('/ranked/queue', requireAuth, requireRankedBuild, (req, res) => {
   rankedSeason = normalizeRankedSeason(rankedSeason, Date.now(), rankedConfig());
   if (blockActiveMatch(req, res)) return;
   const activeRoom = activeRankedRoomForUser(req.auth.user.userId);
@@ -4680,7 +4773,7 @@ app.post('/ranked/queue', requireAuth, (req, res) => {
     return res.json({
       queue: publicRankedQueueStatus(req.auth.user.userId),
       competitive: publicCompetitiveState(req.auth.user, rankedSeason, rankedConfig(), activeRoom.maxPlayers),
-      competitiveByPlayers: safeUser(req.auth.user).competitiveByPlayers,
+      competitiveByPlayers: publicCompetitiveByPlayers(req.auth.user, rankedSeason, rankedConfig()),
     });
   }
   const options = normalizeRankedRoomOptions(req.body || {});
@@ -4694,27 +4787,27 @@ app.post('/ranked/queue', requireAuth, (req, res) => {
   return res.json({
     queue: publicRankedQueueStatus(req.auth.user.userId),
     competitive: publicCompetitiveState(req.auth.user, rankedSeason, rankedConfig(), options.maxPlayers),
-    competitiveByPlayers: safeUser(req.auth.user).competitiveByPlayers,
+    competitiveByPlayers: publicCompetitiveByPlayers(req.auth.user, rankedSeason, rankedConfig()),
   });
 });
 
-app.get('/ranked/queue', requireAuth, (req, res) => {
+app.get('/ranked/queue', requireAuth, requireRankedBuild, (req, res) => {
   tryMatchRankedQueue();
   const queue = publicRankedQueueStatus(req.auth.user.userId);
   const playerCount = queue.room?.maxPlayers || queue.maxPlayers || 2;
   return res.json({
     queue,
     competitive: publicCompetitiveState(req.auth.user, rankedSeason, rankedConfig(), playerCount),
-    competitiveByPlayers: safeUser(req.auth.user).competitiveByPlayers,
+    competitiveByPlayers: publicCompetitiveByPlayers(req.auth.user, rankedSeason, rankedConfig()),
   });
 });
 
-app.delete('/ranked/queue', requireAuth, (req, res) => {
+app.delete('/ranked/queue', requireAuth, requireRankedBuild, (req, res) => {
   removeUserFromRankedQueue(req.auth.user.userId);
   return res.json({ queue: publicRankedQueueStatus(req.auth.user.userId) });
 });
 
-app.post('/ranked/season/rewards/claim', requireAuth, (req, res) => {
+app.post('/ranked/season/rewards/claim', requireAuth, requireRankedBuild, (req, res) => {
   rankedSeason = normalizeRankedSeason(rankedSeason, Date.now(), rankedConfig());
   const result = claimSeasonRewards(req.auth.user, rankedSeason, rankedConfig());
   saveStore();

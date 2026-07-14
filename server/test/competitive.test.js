@@ -8,7 +8,9 @@ import {
   publishCompetitiveConfig,
   rollbackCompetitiveConfig,
   saveDraftCompetitiveConfig,
+  simulateCompetitiveRating,
   upsertCompetitiveSeason,
+  validateCompetitiveConfig,
 } from '../competitive.js';
 import {
   leagueForMmr,
@@ -31,8 +33,10 @@ test('competitive config seeds from current ranked defaults', () => {
   const config = liveCompetitiveConfig(store);
 
   assert.equal(config.placementMatchesRequired, 5);
-  assert.equal(config.placementMultiplier, 1.25);
   assert.equal(config.baseMmr, 0);
+  assert.equal(config.confidence.returningPlacementMultiplier, 1.35);
+  assert.equal(config.confidence.calibrationMatchesRequired, 10);
+  assert.deepEqual(config.mmrDeltas[4], [36, 12, -12, -36]);
   assert.equal(leagueForMmr(config.baseMmr, config).name, 'Iron III');
   assert.equal(previewRankedDelta({
     mmr: 1000,
@@ -42,7 +46,7 @@ test('competitive config seeds from current ranked defaults', () => {
     total: 18,
     columnClears: 1,
     placementsPlayed: 5,
-  }, config), 26);
+  }, config), 24);
 });
 
 test('draft competitive edits do not affect live ranked behavior until published', () => {
@@ -62,7 +66,7 @@ test('draft competitive edits do not affect live ranked behavior until published
     total: 80,
     columnClears: 0,
     placementsPlayed: 5,
-  }, liveCompetitiveConfig(store)), 22);
+  }, liveCompetitiveConfig(store)), 24);
 
   publishCompetitiveConfig(store, 'tester');
   assert.equal(liveCompetitiveConfig(store).placementMatchesRequired, 7);
@@ -75,6 +79,53 @@ test('draft competitive edits do not affect live ranked behavior until published
     columnClears: 0,
     placementsPlayed: 7,
   }, liveCompetitiveConfig(store)), 50);
+});
+
+test('competitive preflight rejects malformed finish curves and search ranges', () => {
+  const result = validateCompetitiveConfig({
+    mmrDeltas: {
+      2: [-5, 5],
+      3: [30, 6, -36],
+      4: [36, 12, -12, -36],
+    },
+    matchmaking: {
+      firstRange: 500,
+      secondRange: 200,
+      maxRange: 300,
+    },
+  });
+
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some(error => error.includes('2-player')));
+  assert.ok(result.errors.some(error => error.includes('opening search range')));
+});
+
+test('competitive simulator exposes exact admin-only outcome math by confidence stage', () => {
+  const established = simulateCompetitiveRating({
+    playerCount: 4,
+    placement: 1,
+    stage: 'established',
+    mmr: 1200,
+    opponentMmr: 1200,
+  });
+  const calibration = simulateCompetitiveRating({
+    playerCount: 2,
+    placement: 1,
+    stage: 'calibration',
+    mmr: 1200,
+    opponentMmr: 1200,
+  });
+  const returningPlacement = simulateCompetitiveRating({
+    playerCount: 2,
+    placement: 1,
+    stage: 'placement',
+    mmr: 1200,
+    opponentMmr: 1200,
+  });
+
+  assert.equal(established.delta, 36);
+  assert.equal(calibration.delta, 28);
+  assert.equal(returningPlacement.delta, 32);
 });
 
 test('competitive rollback restores previous live config', () => {

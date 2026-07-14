@@ -79,6 +79,7 @@ export function RankEmblem({
   style?: StyleProp<ViewStyle>;
   showPips?: boolean;
 }) {
+  if (!league) return null;
   const emblem = rankEmblemForLeague(league);
   const gradientId = `rank-${emblem.tier}-${size}`;
   const shineId = `rank-shine-${emblem.tier}-${size}`;
@@ -191,9 +192,11 @@ export function ProgressAvatar({
         />
       </Svg>
       <PlayerAvatar cosmetics={cosmetics} fallbackInitial={fallbackInitial} size={avatarSize} />
-      <View pointerEvents="none" style={[styles.progressRank, { width: rankSize, height: rankSize, left: -2, bottom: -2 }]}>
-        <RankEmblem league={league} size={rankSize} />
-      </View>
+      {league ? (
+        <View pointerEvents="none" style={[styles.progressRank, { width: rankSize, height: rankSize, left: -2, bottom: -2 }]}>
+          <RankEmblem league={league} size={rankSize} />
+        </View>
+      ) : null}
     </>
   );
 
@@ -274,21 +277,23 @@ export function AvatarCluster({
         style={connectionBorderColor ? { borderColor: connectionBorderColor } : undefined}
         disabled={disabled}
       />
-      <View
-        pointerEvents="none"
-        style={[
-          styles.rankBadge,
-          {
-            width: badgeSize,
-            height: badgeSize,
-            borderRadius: badgeSize / 2,
-            left: -1,
-            bottom: mode === 'self' ? -2 : -3,
-          },
-        ]}
-      >
-        <RankEmblem league={league} size={badgeSize} />
-      </View>
+      {league ? (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.rankBadge,
+            {
+              width: badgeSize,
+              height: badgeSize,
+              borderRadius: badgeSize / 2,
+              left: -1,
+              bottom: mode === 'self' ? -2 : -3,
+            },
+          ]}
+        >
+          <RankEmblem league={league} size={badgeSize} />
+        </View>
+      ) : null}
       {hasAccessory ? (
         <View
           pointerEvents="none"

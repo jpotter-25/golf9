@@ -36,25 +36,19 @@ const MATCH_FILTERS: Array<{ key: MatchFilter; label: string }> = [
   { key: 'passplay', label: 'Pass' },
 ];
 
-const FALLBACK_RANK_BANDS: api.RankedLeagueBand[] = [
-  { league: 'Iron', min: 0, max: 799, divisions: ['III', 'II', 'I'] },
-  { league: 'Bronze', min: 800, max: 1599, divisions: ['III', 'II', 'I'] },
-  { league: 'Silver', min: 1600, max: 2399, divisions: ['III', 'II', 'I'] },
-  { league: 'Gold', min: 2400, max: 3199, divisions: ['III', 'II', 'I'] },
-  { league: 'Platinum', min: 3200, max: 3999, divisions: ['III', 'II', 'I'] },
-  { league: 'Diamond', min: 4000, max: 4799, divisions: ['III', 'II', 'I'] },
-  { league: 'Master', min: 4800, max: 5399, divisions: [] },
-  { league: 'Grandmaster', min: 5400, max: 5999, divisions: [] },
-  { league: 'Legend', min: 6000, max: null, divisions: [] },
-];
+const FALLBACK_RANK_PATH: api.RankedRankPath[] = [
+  'Iron III', 'Iron II', 'Iron I', 'Bronze III', 'Bronze II', 'Bronze I',
+  'Silver III', 'Silver II', 'Silver I', 'Gold III', 'Gold II', 'Gold I',
+  'Platinum III', 'Platinum II', 'Platinum I', 'Diamond III', 'Diamond II', 'Diamond I',
+  'Master', 'Grandmaster', 'Legend',
+].map(name => {
+  const [league, division = null] = name.split(' ');
+  return { league, division, name };
+});
 
 type RankStep = {
   id: string;
-  leagueName: string;
-  division: string | null;
   name: string;
-  minMmr: number;
-  maxMmr: number | null;
   league: api.RankedLeague;
 };
 
@@ -65,6 +59,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const [results, setResults] = useState<api.GameResult[]>([]);
   const [cosmetics, setCosmetics] = useState<api.CosmeticItem[]>([]);
   const [rankCatalog, setRankCatalog] = useState<api.RankedCatalog | null>(null);
+  const [rankProfile, setRankProfile] = useState<api.RankedProfileResponse | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [coinBurst, setCoinBurst] = useState<CoinClaimBurstState>(null);
 
@@ -74,6 +69,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
       api.myResults(token).then(response => setResults(response.results)).catch(() => setResults([]));
       api.cosmeticCatalog(token).then(response => setCosmetics(response.cosmetics)).catch(() => setCosmetics([]));
       api.rankedCatalog(token).then(response => setRankCatalog(response.catalog)).catch(() => setRankCatalog(null));
+      api.rankedProfile(token).then(setRankProfile).catch(() => setRankProfile(null));
     }
   }, [refreshProfile, token]));
 
@@ -94,11 +90,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const weeklyChallenges = user?.challenges?.weekly?.items ?? [];
   const rankSteps = useMemo(() => rankStepsFromCatalog(rankCatalog), [rankCatalog]);
   const activeLadder = user?.competitiveByPlayers?.['2'] ?? user?.competitive ?? null;
-  const currentRankStep = useMemo(
-    () => findRankStep(rankSteps, activeLadder?.league, activeLadder?.mmr),
-    [activeLadder?.league, activeLadder?.mmr, rankSteps]
-  );
-  const nextRank = useMemo(() => nextRankStep(rankSteps, currentRankStep), [currentRankStep, rankSteps]);
+  const currentRankStep = useMemo(() => findRankStep(rankSteps, activeLadder?.league), [activeLadder?.league, rankSteps]);
 
   const reloadBits = async () => {
     await refreshProfile().catch(() => {});
@@ -147,6 +139,28 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
     }
   };
 
+  const onDisplayRankPress = async (choice: api.DisplayRankEmblemChoice | null) => {
+    if (!token || busyId) return;
+    const busyKey = choice ? `rank-${choice.playerCount}-${choice.source}` : 'rank-none';
+    setBusyId(busyKey);
+    try {
+      const response = await api.updateDisplayRankEmblem(token, choice
+        ? { playerCount: choice.playerCount, source: choice.source }
+        : { remove: true });
+      setRankProfile(current => current ? {
+        ...current,
+        displayRankSelection: response.displayRankSelection,
+        displayRankEmblem: response.displayRankEmblem,
+        displayRankEmblemChoices: response.choices,
+      } : current);
+      await refreshProfile().catch(() => {});
+    } catch (error) {
+      Alert.alert('Emblem update failed', error instanceof Error ? error.message : 'Try again.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const onLinkSocialProvider = async (provider: api.AuthProviderKey) => {
     if (busyId) return;
     setBusyId(`link-${provider}`);
@@ -174,11 +188,11 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
       <PremiumPanel tone="felt" style={styles.hero}>
         <View style={styles.heroAvatarWrap}>
           <PlayerAvatar cosmetics={user?.inventory.equipped} fallbackInitial={user?.avatarInitial ?? '?'} size={82} />
-          <RankEmblem league={user?.competitive.league} size={38} style={styles.heroRankBadge} />
+          <RankEmblem league={user?.displayRankEmblem?.league} size={38} style={styles.heroRankBadge} />
         </View>
         <View style={styles.heroCopy}>
           <Text style={styles.name} numberOfLines={1}>{user?.displayName ?? 'Player'}</Text>
-          <Text style={styles.meta}>Level {progression?.level ?? 1} - {user?.competitive.league.name ?? 'Iron III'}</Text>
+          <Text style={styles.meta}>Level {progression?.level ?? 1}{user?.displayRankEmblem ? ` - ${user.displayRankEmblem.league.name}` : ''}</Text>
           <ProgressBar value={progression?.levelProgress ?? 0} />
           <Text style={styles.progressText}>{progression?.currentLevelXp ?? 0} / {progression?.nextLevelXp ?? 1000} XP</Text>
         </View>
@@ -198,7 +212,6 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
             competitive={activeLadder}
             steps={rankSteps}
             current={currentRankStep}
-            next={nextRank}
           />
 
           <View style={styles.statGrid}>
@@ -216,7 +229,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
             <View style={styles.cardHeader}>
               <View>
                 <Text style={styles.sectionTitle}>Ranked Ladders</Text>
-                <Text style={styles.sectionMeta}>Separate ratings for 2, 3, and 4 player ranked.</Text>
+                <Text style={styles.sectionMeta}>Separate ranks for 2, 3, and 4 player competitive tables.</Text>
               </View>
               <Trophy size={24} color={ui.palette.gold} strokeWidth={2.6} />
             </View>
@@ -226,9 +239,9 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
                 return (
                   <View key={count} style={styles.ladderCard}>
                     <Text style={styles.ladderCount}>{count}P</Text>
-                    <RankEmblem league={ladder?.league} size={44} style={styles.ladderEmblem} />
-                    <Text style={styles.ladderMmr} numberOfLines={1}>{ladder?.league.name ?? 'Iron III'}</Text>
-                    <Text style={styles.ladderLeague} numberOfLines={1}>{ladder?.mmr ?? 0} MMR</Text>
+                    {ladder?.placementComplete ? <RankEmblem league={ladder.league} size={44} style={styles.ladderEmblem} /> : null}
+                    <Text style={styles.ladderMmr} numberOfLines={1}>{ladder?.placementComplete ? ladder.league.name : 'Unranked'}</Text>
+                    <Text style={styles.ladderLeague} numberOfLines={1}>{ladder?.placementComplete ? `Best ${ladder.seasonBestLeague.name}` : `${ladder?.placementsPlayed ?? 0}/${ladder?.placementMatchesRequired ?? 5} placements`}</Text>
                     <Text style={styles.ladderLeague} numberOfLines={1}>{ladder?.rankedGames ?? 0} games</Text>
                   </View>
                 );
@@ -289,6 +302,12 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
             <CollectionItem label="Table" value={user?.inventory.equipped.tableTheme ?? 'classic-table-theme'} />
           </View>
           <Text style={styles.emptyText}>Seasonal accessories show beside your avatar at online tables.</Text>
+          <DisplayRankPicker
+            selected={rankProfile?.displayRankSelection ?? user?.displayRankEmblem ?? null}
+            choices={rankProfile?.displayRankEmblemChoices ?? []}
+            busyId={busyId}
+            onSelect={onDisplayRankPress}
+          />
           <ActionButton label="Edit Cosmetics" Icon={Pencil} onPress={() => setTab('cosmetics')} />
         </PremiumPanel>
       ) : null}
@@ -363,39 +382,35 @@ function RankRoadmap({
   competitive,
   steps,
   current,
-  next,
 }: {
   competitive: api.CompetitiveState | null;
   steps: RankStep[];
   current: RankStep | null;
-  next: RankStep | null;
 }) {
-  const currentMmr = competitive?.mmr ?? 0;
-  const currentLabel = current?.name ?? competitive?.league.name ?? 'Iron III';
-  const nextLabel = next?.name ?? 'Top Rank';
-  const mmrToNext = next ? Math.max(0, next.minMmr - currentMmr) : 0;
-  const progressWindow = next && current ? Math.max(1, next.minMmr - current.minMmr) : 1;
-  const rankProgress = next && current
-    ? Math.max(0, Math.min(1, (currentMmr - current.minMmr) / progressWindow))
-    : 1;
+  const placed = !!competitive?.placementComplete;
+  const currentLabel = placed ? (current?.name ?? competitive?.league.name ?? 'Ranked') : 'Unranked';
+  const currentIndex = placed ? steps.findIndex(step => step.id === current?.id) : -1;
+  const next = currentIndex >= 0 ? steps[currentIndex + 1] ?? null : steps[0] ?? null;
+  const placementProgress = (competitive?.placementsPlayed ?? 0) / Math.max(1, competitive?.placementMatchesRequired ?? 5);
 
   return (
     <PremiumPanel tone="felt" style={styles.rankRoadmap}>
       <View style={styles.rankOverview}>
-        <RankEmblem league={current?.league ?? competitive?.league} size={76} />
+        {placed ? <RankEmblem league={current?.league ?? competitive?.league} size={76} /> : <View style={styles.unrankedRoadmap}><Trophy size={32} color={ui.text.muted} strokeWidth={2.3} /></View>}
         <View style={styles.rankCopy}>
-          <Text style={styles.rankEyebrow}>Rank Path</Text>
+          <Text style={styles.rankEyebrow}>2P Rank Path</Text>
           <Text style={styles.rankName} numberOfLines={1}>{currentLabel}</Text>
           <Text style={styles.rankMeta}>
-            {next ? `${mmrToNext} MMR to ${nextLabel}` : 'You are at the top of the ladder.'}
+            {!placed
+              ? `${competitive?.placementsPlayed ?? 0}/${competitive?.placementMatchesRequired ?? 5} placement matches complete`
+              : next
+                ? `Next rank: ${next.name}. Your exact progress stays private.`
+                : 'You are at the top of this ladder.'}
           </Text>
         </View>
-        <View style={styles.mmrPill}>
-          <Text style={styles.mmrPillValue}>{currentMmr}</Text>
-          <Text style={styles.mmrPillLabel}>MMR</Text>
-        </View>
+        <StatusBadge label={placed ? 'PLACED' : 'PLACEMENT'} tone={placed ? 'emerald' : 'gold'} />
       </View>
-      <ProgressBar value={rankProgress} color={ui.palette.gold} />
+      {!placed ? <ProgressBar value={placementProgress} color={ui.palette.gold} /> : null}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -404,17 +419,64 @@ function RankRoadmap({
       >
         {steps.map(step => {
           const active = step.id === current?.id;
-          const passed = currentMmr >= step.minMmr && (step.maxMmr === null || currentMmr > step.maxMmr);
+          const stepIndex = steps.findIndex(item => item.id === step.id);
+          const passed = placed && currentIndex > stepIndex;
           return (
             <View key={step.id} style={[styles.rankStep, active && styles.rankStepActive, passed && styles.rankStepPassed]}>
               <RankEmblem league={step.league} size={48} />
               <Text style={styles.rankStepName} numberOfLines={1}>{step.name}</Text>
-              <Text style={styles.rankStepMeta} numberOfLines={1}>{formatRankRange(step)}</Text>
+              <Text style={styles.rankStepMeta} numberOfLines={1}>{active ? 'Current' : passed ? 'Passed' : 'Ahead'}</Text>
             </View>
           );
         })}
       </ScrollView>
     </PremiumPanel>
+  );
+}
+
+function DisplayRankPicker({
+  selected,
+  choices,
+  busyId,
+  onSelect,
+}: {
+  selected: api.DisplayRankSelection | null;
+  choices: api.DisplayRankEmblemChoice[];
+  busyId: string | null;
+  onSelect: (choice: api.DisplayRankEmblemChoice | null) => void;
+}) {
+  return (
+    <View style={styles.displayRankSection}>
+      <Text style={styles.sectionTitle}>Displayed Rank Emblem</Text>
+      <Text style={styles.sectionMeta}>Choose any current or career-best emblem you earned. Leave it hidden for no badge.</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.displayRankTrack} nestedScrollEnabled>
+        <Pressable
+          style={[styles.displayRankChoice, !selected && styles.displayRankChoiceActive]}
+          disabled={busyId === 'rank-none'}
+          onPress={() => onSelect(null)}
+        >
+          <View style={styles.noRankIcon}><Text style={styles.noRankMark}>-</Text></View>
+          <Text style={styles.displayRankName}>Hidden</Text>
+          <Text style={styles.displayRankMeta}>No emblem</Text>
+        </Pressable>
+        {choices.map(choice => {
+          const active = selected?.playerCount === choice.playerCount && selected.source === choice.source;
+          const busy = busyId === `rank-${choice.playerCount}-${choice.source}`;
+          return (
+            <Pressable
+              key={`${choice.playerCount}-${choice.source}`}
+              style={[styles.displayRankChoice, active && styles.displayRankChoiceActive, busy && styles.disabled]}
+              disabled={busy}
+              onPress={() => onSelect(choice)}
+            >
+              <RankEmblem league={choice.league} size={48} />
+              <Text style={styles.displayRankName} numberOfLines={1}>{choice.league.name}</Text>
+              <Text style={styles.displayRankMeta}>{choice.playerCount}P {choice.source === 'careerBest' ? 'Best' : 'Current'}</Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -556,63 +618,20 @@ function cosmeticTypeLabel(type: string) {
 }
 
 function rankStepsFromCatalog(catalog: api.RankedCatalog | null): RankStep[] {
-  const bands = catalog?.leagueBands?.length ? catalog.leagueBands : FALLBACK_RANK_BANDS;
-  return bands.flatMap((band) => {
-    const max = typeof band.max === 'number' ? band.max : null;
-    const divisions = Array.isArray(band.divisions) ? band.divisions.filter(Boolean) : [];
-    if (!divisions.length || max === null) {
-      return [rankStepFor(band.league, null, band.min, max)];
-    }
-    const width = Math.max(1, max - band.min + 1);
-    return divisions.map((division, index) => {
-      const minMmr = band.min + Math.floor((width * index) / divisions.length);
-      const maxMmr = index === divisions.length - 1
-        ? max
-        : band.min + Math.floor((width * (index + 1)) / divisions.length) - 1;
-      return rankStepFor(band.league, division, minMmr, maxMmr);
-    });
-  });
+  const path = catalog?.rankPath?.length ? catalog.rankPath : FALLBACK_RANK_PATH;
+  return path.map(item => ({
+    id: `${item.league}:${item.division ?? 'elite'}`,
+    name: item.name,
+    league: { league: item.league, division: item.division, name: item.name },
+  }));
 }
 
-function rankStepFor(leagueName: string, division: string | null, minMmr: number, maxMmr: number | null): RankStep {
-  const name = division ? `${leagueName} ${division}` : leagueName;
-  return {
-    id: `${leagueName}:${division ?? 'elite'}`,
-    leagueName,
-    division,
-    name,
-    minMmr,
-    maxMmr,
-    league: {
-      league: leagueName,
-      division,
-      name,
-      minMmr,
-      nextLeagueMmr: maxMmr === null ? null : maxMmr + 1,
-    },
-  };
-}
-
-function findRankStep(steps: RankStep[], league?: api.RankedLeague | null, mmr = 0) {
-  const byRange = steps.find(step => mmr >= step.minMmr && (step.maxMmr === null || mmr <= step.maxMmr));
-  if (byRange) return byRange;
+function findRankStep(steps: RankStep[], league?: api.RankedLeague | null) {
   if (!league) return steps[0] ?? null;
   return steps.find(step => step.name === league.name)
-    ?? steps.find(step => step.leagueName === league.league && step.division === league.division)
+    ?? steps.find(step => step.league.league === league.league && step.league.division === league.division)
     ?? steps[0]
     ?? null;
-}
-
-function nextRankStep(steps: RankStep[], current: RankStep | null) {
-  if (!current) return steps[0] ?? null;
-  const index = steps.findIndex(step => step.id === current.id);
-  if (index < 0) return null;
-  return steps[index + 1] ?? null;
-}
-
-function formatRankRange(step: RankStep) {
-  if (step.maxMmr === null) return `${step.minMmr}+`;
-  return `${step.minMmr}-${step.maxMmr}`;
 }
 
 function formatNullable(value: number | null | undefined) {
@@ -656,23 +675,11 @@ const styles = StyleSheet.create({
   progressText: { color: ui.text.muted, fontSize: 11, fontWeight: '800', marginTop: 5 },
   rankRoadmap: { marginBottom: 12 },
   rankOverview: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+  unrankedRoadmap: { width: 76, height: 76, borderRadius: 8, borderWidth: 2, borderColor: ui.border.strong, backgroundColor: ui.surface.glass, alignItems: 'center', justifyContent: 'center' },
   rankCopy: { flex: 1, minWidth: 0 },
   rankEyebrow: { color: ui.palette.gold, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
   rankName: { color: ui.text.primary, fontSize: 24, fontWeight: '900', marginTop: 3 },
   rankMeta: { color: ui.text.secondary, fontSize: 12, fontWeight: '800', lineHeight: 17, marginTop: 4 },
-  mmrPill: {
-    minWidth: 66,
-    minHeight: 58,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: ui.border.soft,
-    backgroundColor: ui.surface.glass,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-  },
-  mmrPillValue: { color: ui.palette.gold, fontSize: 18, fontWeight: '900' },
-  mmrPillLabel: { color: ui.text.muted, fontSize: 10, fontWeight: '900', marginTop: 2 },
   rankTrack: { gap: 8, paddingTop: 12, paddingBottom: 2 },
   rankStep: {
     width: 104,
@@ -689,6 +696,14 @@ const styles = StyleSheet.create({
   rankStepPassed: { borderColor: 'rgba(82, 229, 167, 0.42)' },
   rankStepName: { color: ui.text.primary, fontSize: 12, fontWeight: '900', marginTop: 7, textAlign: 'center' },
   rankStepMeta: { color: ui.text.muted, fontSize: 10, fontWeight: '900', marginTop: 3 },
+  displayRankSection: { borderTopWidth: 1, borderTopColor: ui.border.soft, paddingTop: 14, marginTop: 4, marginBottom: 16 },
+  displayRankTrack: { gap: 8, paddingTop: 12, paddingBottom: 2 },
+  displayRankChoice: { width: 108, minHeight: 126, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.glass, alignItems: 'center', justifyContent: 'center', padding: 9 },
+  displayRankChoiceActive: { borderColor: ui.palette.gold, backgroundColor: 'rgba(255, 204, 102, 0.13)' },
+  displayRankName: { color: ui.text.primary, fontSize: 12, fontWeight: '900', textAlign: 'center', marginTop: 8, width: '100%' },
+  displayRankMeta: { color: ui.text.muted, fontSize: 10, fontWeight: '900', textAlign: 'center', marginTop: 3 },
+  noRankIcon: { width: 48, height: 48, borderRadius: 24, borderWidth: 2, borderColor: ui.text.muted, alignItems: 'center', justifyContent: 'center' },
+  noRankMark: { color: ui.text.muted, fontSize: 25, fontWeight: '900', lineHeight: 28 },
   tabRow: { flexDirection: 'row', gap: 6, marginBottom: 12 },
   tab: {
     flex: 1,

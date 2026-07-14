@@ -1,4 +1,9 @@
-import { normalizeCompetitiveState, publicCompetitiveByPlayers, publicCompetitiveState } from './ranked.js';
+import {
+  normalizeCompetitiveState,
+  publicCompetitiveByPlayers,
+  publicCompetitiveState,
+  resolveDisplayRankEmblem,
+} from './ranked.js';
 import { publicDailyBonus } from './economy.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -257,7 +262,7 @@ function effectiveCosmeticPrice(item, now = Date.now()) {
 function cosmeticEligibility(user, item, rankedSeason = null, now = Date.now(), competitiveConfig = null) {
   if (!item.unlockRequirement) return { eligible: true, lockedReason: null, unlockStatus: 'unlocked' };
   if (item.unlockRequirement === 'rank') {
-    const competitive = publicCompetitiveState(user, rankedSeason || undefined, competitiveConfig);
+    const competitive = normalizeCompetitiveState(user, rankedSeason || undefined, competitiveConfig);
     const earned = competitive.seasonBestMmr >= Number(item.requiredMmr ?? 0);
     const windowOpen = rankedSeasonPurchaseWindowOpen(item, rankedSeason, now);
     if (!earned) {
@@ -287,15 +292,16 @@ function cosmeticEligibility(user, item, rankedSeason = null, now = Date.now(), 
 }
 
 function publicCosmeticItem(user, item, rankedSeason = null, now = Date.now(), competitiveConfig = null) {
+  const publicItem = { ...item };
+  delete publicItem.requiredMmr;
   const owned = user.inventory.cosmetics.includes(item.id);
   const equipped = user.inventory.equipped[item.type] === item.id;
   const eligibility = owned ? { eligible: true, lockedReason: null, unlockStatus: 'owned' } : cosmeticEligibility(user, item, rankedSeason, now, competitiveConfig);
   const price = effectiveCosmeticPrice(item, now);
   const disabled = item.enabled === false || !!item.archivedAt;
   return {
-    ...item,
+    ...publicItem,
     unlockRequirement: item.unlockRequirement || null,
-    requiredMmr: item.requiredMmr ?? null,
     requiredLeague: item.requiredLeague ?? null,
     seasonId: item.seasonId ?? null,
     shopCategory: item.shopCategory || 'coin',
@@ -416,6 +422,7 @@ export function publicUserProfile(user, rankedSeason = null, competitiveConfig =
     challenges: publicChallenges(user),
     competitive: publicCompetitiveState(user, rankedSeason || undefined, competitiveConfig),
     competitiveByPlayers: publicCompetitiveByPlayers(user, rankedSeason || undefined, competitiveConfig),
+    displayRankEmblem: resolveDisplayRankEmblem(user, rankedSeason || undefined, competitiveConfig),
   };
 }
 

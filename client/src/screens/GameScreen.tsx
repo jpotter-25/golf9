@@ -1663,8 +1663,8 @@ export default function GameScreen({ route, navigation }: Props) {
     ? user?.avatarInitial ?? avatarHubName
     : avatarHubProfile?.avatarInitial ?? avatarHubRoomPlayer?.avatarInitial ?? avatarHubPlayer?.avatarInitial ?? avatarHubName;
   const avatarHubLeague = avatarHubIsSelf
-    ? user?.competitive.league
-    : avatarHubProfile?.competitive.league ?? avatarHubRoomPlayer?.competitive?.league;
+    ? user?.displayRankEmblem?.league
+    : avatarHubProfile?.displayRankEmblem?.league ?? avatarHubRoomPlayer?.displayRankEmblem?.league ?? avatarHubPlayer?.displayRankEmblem?.league;
   const avatarHubProgress = avatarHubIsSelf
     ? user?.progression
     : avatarHubProfile?.progression ?? avatarHubRoomPlayer?.progression ?? null;
@@ -1713,7 +1713,7 @@ export default function GameScreen({ route, navigation }: Props) {
             fallbackInitial={p.avatarInitial ?? p.name}
             size={34}
             mode="opponent"
-            league={roomPlayer?.competitive?.league}
+            league={roomPlayer?.displayRankEmblem?.league ?? p.displayRankEmblem?.league}
             showGift={isOnline && p.userId !== user?.userId}
             giftIcon={activeGift?.giftIcon ?? activeGiftOption?.icon ?? null}
             giftAccent={activeGiftOption?.accent ?? null}
@@ -1861,7 +1861,7 @@ export default function GameScreen({ route, navigation }: Props) {
               fallbackInitial={bottomPlayer.avatarInitial ?? bottomPlayer.name}
               size={48}
               mode="self"
-              league={user?.competitive.league ?? bottomRoomPlayer?.competitive?.league}
+              league={user?.displayRankEmblem?.league ?? bottomRoomPlayer?.displayRankEmblem?.league ?? bottomPlayer.displayRankEmblem?.league}
               showGift={!!bottomActiveGift}
               giftIcon={bottomActiveGift?.giftIcon ?? bottomActiveGiftOption?.icon ?? null}
               giftAccent={bottomActiveGiftOption?.accent ?? null}
@@ -2007,8 +2007,8 @@ export default function GameScreen({ route, navigation }: Props) {
                     {avatarHubLoading
                       ? 'Loading...'
                       : avatarHubIsSelf
-                        ? `Level ${user?.progression.level ?? 1} - ${user?.competitive.league.name ?? 'Iron III'}`
-                        : `${avatarHubLeague?.name ?? 'Iron III'} - ${(avatarHubRoomPlayer?.connected ?? avatarHubProfile?.status.online) ? 'Online' : 'Offline'}`}
+                        ? `Level ${user?.progression.level ?? 1}${user?.displayRankEmblem ? ` - ${user.displayRankEmblem.league.name}` : ''}`
+                        : `${avatarHubProfile?.competitive.league.name ?? avatarHubRoomPlayer?.competitive?.league.name ?? 'Unranked'} - ${(avatarHubRoomPlayer?.connected ?? avatarHubProfile?.status.online) ? 'Online' : 'Offline'}`}
                   </Text>
                 </View>
                 <Pressable style={styles.avatarHubCloseButton} onPress={() => setAvatarHubUserId(null)}>
@@ -2027,7 +2027,7 @@ export default function GameScreen({ route, navigation }: Props) {
               <View style={styles.avatarHubBody}>
                 <View style={styles.avatarHubStatRow}>
                   <HubStat label="Level" value={String(user?.progression.level ?? 1)} />
-                  <HubStat label="Rank" value={rankEmblemForLeague(user?.competitive.league).label} />
+                  <HubStat label="Emblem" value={user?.displayRankEmblem ? rankEmblemForLeague(user.displayRankEmblem.league).label : 'Hidden'} />
                   <HubStat label="Ready" value={String(selfClaimableCount)} />
                 </View>
                 <View style={styles.avatarHubActionGrid}>
@@ -2112,7 +2112,7 @@ export default function GameScreen({ route, navigation }: Props) {
                 <View style={styles.avatarHubStatRow}>
                   <HubStat label="Games" value={String(avatarHubProfile?.statistics.gamesPlayed ?? avatarHubProfile?.stats.gamesPlayed ?? '--')} />
                   <HubStat label="Wins" value={String(avatarHubProfile?.statistics.wins ?? avatarHubProfile?.stats.wins ?? '--')} />
-                  <HubStat label="Rank" value={rankEmblemForLeague(avatarHubLeague).label} />
+                  <HubStat label="Emblem" value={avatarHubLeague ? rankEmblemForLeague(avatarHubLeague).label : 'Hidden'} />
                 </View>
                 <View style={styles.avatarHubActionGrid}>
                   <Pressable

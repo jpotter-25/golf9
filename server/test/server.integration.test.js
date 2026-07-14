@@ -47,7 +47,11 @@ async function json(res) {
 }
 
 function authHeaders(token) {
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+    'X-Golf9-Build': '39',
+  };
 }
 
 function adminHeaders(session) {
@@ -859,9 +863,18 @@ test('admin competitive operations manage config, players, and ranked queues', a
     const overview = await json(await fetch(`${baseUrl}/admin/api/competitive/overview`, { headers: { Cookie: cookie } }));
     assert.ok(overview.overview.season.id);
     assert.ok(overview.overview.config.leagueBands.some(band => band.league === 'Legend'));
+    assert.deepEqual(Object.keys(overview.overview.ladders), ['2', '3', '4']);
 
     const config = await json(await fetch(`${baseUrl}/admin/api/competitive/config`, { headers: { Cookie: cookie } }));
     assert.equal(config.live.placementMatchesRequired, 5);
+    assert.equal(config.preflight.valid, true);
+
+    const simulation = await json(await fetch(`${baseUrl}/admin/api/competitive/simulate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ playerCount: 4, placement: 1, stage: 'established', mmr: 1000, opponentMmr: 1000 }),
+    }));
+    assert.equal(simulation.simulation.delta, 36);
 
     const draft = await json(await fetch(`${baseUrl}/admin/api/competitive/config/draft`, {
       method: 'PATCH',
@@ -883,11 +896,20 @@ test('admin competitive operations manage config, players, and ranked queues', a
     const adjusted = await json(await fetch(`${baseUrl}/admin/api/users/${player.user.userId}/competitive/adjust`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
-      body: JSON.stringify({ reason: 'Integration test MMR correction', mmr: 2500, placementsPlayed: 6 }),
+      body: JSON.stringify({ reason: 'Integration test MMR correction', playerCount: 4, mmr: 2500, placementsPlayed: 6 }),
     }));
+    assert.equal(adjusted.competitive.playerCount, 4);
     assert.equal(adjusted.competitive.mmr, 2500);
     assert.equal(adjusted.competitive.league.league, 'Gold');
     assert.equal(adjusted.competitive.placementComplete, true);
+
+    const emblem = await json(await fetch(`${baseUrl}/ranked/display-emblem`, {
+      method: 'PATCH',
+      headers: authHeaders(player.token),
+      body: JSON.stringify({ playerCount: 4, source: 'current' }),
+    }));
+    assert.equal(emblem.displayRankEmblem.playerCount, 4);
+    assert.equal(emblem.displayRankEmblem.league.league, 'Gold');
 
     const rollback = await json(await fetch(`${baseUrl}/admin/api/competitive/config/rollback`, {
       method: 'POST',
@@ -1247,8 +1269,10 @@ test('loads durable profile stats and completed results', async () => {
     assert.deepEqual(profile.user.stats, { gamesPlayed: 3, wins: 2 });
     assert.equal(profile.user.statistics.gamesPlayed, 3);
     assert.equal(profile.user.progression.level, 1);
-    assert.equal(profile.user.competitive.mmr, 0);
-    assert.equal(profile.user.competitive.league.name, 'Iron III');
+    assert.equal(Object.hasOwn(profile.user.competitive, 'mmr'), false);
+    assert.equal(Object.hasOwn(profile.user.competitive, 'calibrationMatchesPlayed'), false);
+    assert.equal(profile.user.competitive.placementComplete, false);
+    assert.equal(profile.user.competitive.league.name, 'Unranked');
     assert.ok(profile.user.achievements.some(item => item.id === 'first_match'));
 
     const completed = await json(await fetch(`${baseUrl}/results/me`, { headers: authHeaders(token) }));
@@ -1674,9 +1698,10 @@ test('ranked queue creates a human-only ranked room and starts automatically', a
     await earnFreeCoins(baseUrl, two.token);
 
     const catalog = await json(await fetch(`${baseUrl}/ranked/catalog`, { headers: authHeaders(one.token) }));
-    assert.equal(catalog.catalog.baseMmr, 0);
-    assert.equal(catalog.catalog.leagueBands[0].league, 'Iron');
-    assert.equal(catalog.catalog.leagueBands.at(-1).league, 'Legend');
+    assert.equal(Object.hasOwn(catalog.catalog, 'baseMmr'), false);
+    assert.equal(Object.hasOwn(catalog.catalog, 'leagueBands'), false);
+    assert.equal(catalog.catalog.rankPath[0].name, 'Iron III');
+    assert.equal(catalog.catalog.rankPath.at(-1).name, 'Legend');
 
     const first = await json(await fetch(`${baseUrl}/ranked/queue`, {
       method: 'POST',
@@ -1686,7 +1711,9 @@ test('ranked queue creates a human-only ranked room and starts automatically', a
     assert.equal(first.queue.queued, true);
     assert.equal(first.queue.matchedRoomCode, null);
     assert.equal(first.queue.rounds, 9);
-    assert.equal(first.competitive.mmr, 0);
+    assert.equal(Object.hasOwn(first.competitive, 'mmr'), false);
+    assert.equal(Object.hasOwn(first.competitive, 'confidenceStage'), false);
+    assert.equal(first.competitive.league.name, 'Unranked');
     assert.equal(first.competitive.playerCount, 2);
 
     const second = await json(await fetch(`${baseUrl}/ranked/queue`, {
@@ -1723,6 +1750,24 @@ test('ranked queue creates a human-only ranked room and starts automatically', a
       socketTwo.disconnect();
     }
   }, { ROOM_COUNTDOWN_MS: '50' });
+});
+
+test('ranked endpoints reject pre-39 clients without exposing competitive data', async () => {
+  await withServer(async (baseUrl) => {
+    const account = await signup(baseUrl, `OldRank${Date.now()}`);
+    const response = await fetch(`${baseUrl}/ranked/me`, {
+      headers: {
+        Authorization: `Bearer ${account.token}`,
+        'X-Golf9-Build': '38',
+      },
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 426);
+    assert.equal(body.code, 'RANKED_UPDATE_REQUIRED');
+    assert.equal(body.minimumBuild, 39);
+    assert.equal(Object.hasOwn(body, 'competitive'), false);
+  });
 });
 
 test('ranked is free while wager tables charge buy-ins on start', async () => {

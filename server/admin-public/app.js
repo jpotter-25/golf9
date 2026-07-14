@@ -123,6 +123,8 @@ function bindConsoleActions() {
   document.querySelector('#publishCompetitive').addEventListener('click', publishCompetitive);
   document.querySelector('#rollbackCompetitive').addEventListener('click', rollbackCompetitive);
   document.querySelector('#competitiveConfigEditor').addEventListener('submit', saveCompetitiveDraft);
+  document.querySelector('#competitiveSimulator').addEventListener('submit', runCompetitiveSimulation);
+  document.querySelector('#competitiveSimulator select[name="playerCount"]').addEventListener('change', updateCompetitivePlacementOptions);
   document.querySelector('#createSeason').addEventListener('click', createCompetitiveSeason);
   document.querySelector('#loadRankedQueues').addEventListener('click', loadRankedQueues);
   document.querySelector('#competitivePlayerEditor').addEventListener('submit', adjustCompetitivePlayer);
@@ -1113,34 +1115,73 @@ async function loadCompetitive() {
 function renderCompetitiveOverview(overview) {
   const output = document.querySelector('#competitiveOverview');
   const seasonEnds = overview.season?.endsAt ? new Date(overview.season.endsAt).toLocaleString() : 'Unknown';
-  const leagues = Object.entries(overview.leagueDistribution || {})
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
-    .map(([league, count]) => `${escapeHtml(league)}: ${count}`)
-    .join('<br />');
+  const ladderCards = [2, 3, 4].map(playerCount => {
+    const ladder = overview.ladders?.[String(playerCount)] || {};
+    const confidence = ladder.confidence || {};
+    const leagues = Object.entries(ladder.leagueDistribution || {})
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([league, count]) => `${escapeHtml(league)} ${count}`)
+      .join(' / ');
+    return `
+      <div class="card ladder-summary">
+        <div class="split-header"><strong>${playerCount}P Ladder</strong><span class="chip">${Number(ladder.participants || 0)} active</span></div>
+        <div class="metric-value">${Number(ladder.averageMmr || 0).toLocaleString()}</div>
+        <p class="muted">Average private rating</p>
+        <div class="statline">
+          <span class="chip">${Number(confidence.placements || 0)} placement</span>
+          <span class="chip blue">${Number(confidence.calibration || 0)} calibrating</span>
+          <span class="chip gold">${Number(confidence.established || 0)} established</span>
+        </div>
+        <p class="muted ladder-distribution">${leagues || 'No ranked activity yet.'}</p>
+      </div>
+    `;
+  }).join('');
   output.innerHTML = `
     <div class="card"><strong>${escapeHtml(overview.season?.name || 'Active Season')}</strong><p class="muted">${escapeHtml(overview.season?.id || '')}<br />Ends ${escapeHtml(seasonEnds)}</p></div>
     <div class="card"><strong>${overview.rankedPlayers}/${overview.totalPlayers}</strong><p class="muted">Ranked players</p></div>
-    <div class="card"><strong>${overview.averageMmr}</strong><p class="muted">Average MMR</p></div>
     <div class="card"><strong>${overview.activeQueues}</strong><p class="muted">Queued players</p></div>
     <div class="card"><strong>${overview.activeRankedRooms}</strong><p class="muted">Active ranked rooms</p></div>
-    <div class="card"><strong>League Distribution</strong><p class="muted">${leagues || 'No players yet.'}</p></div>
+    ${ladderCards}
   `;
 }
 
 function renderCompetitiveConfig(data) {
   const form = document.querySelector('#competitiveConfigEditor');
   const draft = data.draft || data.live;
-  form.elements.placementMatchesRequired.value = draft.placementMatchesRequired;
-  form.elements.placementMultiplier.value = draft.placementMultiplier;
-  form.elements.strengthAdjustmentCap.value = draft.strengthAdjustmentCap;
-  form.elements.performanceBonusCap.value = draft.performanceBonusCap;
-  form.elements.seasonLengthDays.value = draft.seasonLengthDays;
-  form.elements.rewardGraceDays.value = draft.rewardGraceDays;
-  form.elements.mmrDeltas.value = JSON.stringify(draft.mmrDeltas, null, 2);
-  form.elements.matchmaking.value = JSON.stringify(draft.matchmaking, null, 2);
+  const setValue = (name, value) => {
+    if (form.elements[name]) form.elements[name].value = value ?? '';
+  };
+  setValue('placementMatchesRequired', draft.placementMatchesRequired);
+  setValue('calibrationMatchesRequired', draft.confidence?.calibrationMatchesRequired);
+  setValue('strengthAdjustmentCap', draft.strengthAdjustmentCap);
+  setValue('returningPlacementMultiplier', draft.confidence?.returningPlacementMultiplier);
+  setValue('calibrationGainMultiplier', draft.confidence?.calibrationGainMultiplier);
+  setValue('calibrationLossMultiplier', draft.confidence?.calibrationLossMultiplier);
+  setValue('firstPlacementStrengthCap', draft.confidence?.firstPlacementStrengthCap);
+  [2, 3, 4].forEach(playerCount => {
+    (draft.mmrDeltas?.[String(playerCount)] || []).forEach((value, index) => setValue(`delta${playerCount}_${index + 1}`, value));
+  });
+  setValue('firstRange', draft.matchmaking?.firstRange);
+  setValue('secondRange', draft.matchmaking?.secondRange);
+  setValue('maxRange', draft.matchmaking?.maxRange);
+  setValue('expandStartSeconds', Math.round(Number(draft.matchmaking?.expandStartMs || 0) / 1000));
+  setValue('expandEverySeconds', Math.round(Number(draft.matchmaking?.expandEveryMs || 0) / 1000));
+  setValue('expandStep', draft.matchmaking?.expandStep);
+  setValue('expandBase', draft.matchmaking?.expandBase);
+  setValue('seasonLengthDays', draft.seasonLengthDays);
+  setValue('rewardGraceDays', draft.rewardGraceDays);
+  setValue('softResetMultiplier', draft.softReset?.multiplier);
+  setValue('softResetAnchor', draft.softReset?.anchorMmr);
+  setValue('softResetFloor', draft.softReset?.floor);
   form.elements.leagueBands.value = JSON.stringify(draft.leagueBands, null, 2);
   form.elements.rewards.value = JSON.stringify(draft.rewards, null, 2);
+  const simulator = document.querySelector('#competitiveSimulator');
+  simulator.elements.mmr.value = draft.baseMmr ?? 0;
+  simulator.elements.opponentMmr.value = draft.baseMmr ?? 0;
+  document.querySelector('#competitiveDraftBadge').textContent = `Draft ${escapeHtml(String(draft.versionId || '').slice(0, 18))}`;
+  renderCompetitivePreflight(data.preflight);
+  renderCompetitiveLeaguePreview(draft.leagueBands || []);
   const seasons = document.querySelector('#seasonOutput');
   seasons.replaceChildren(...(data.seasons || []).map(season => {
     const card = document.createElement('div');
@@ -1159,6 +1200,84 @@ function renderCompetitiveConfig(data) {
   }));
 }
 
+function renderCompetitivePreflight(preflight = {}) {
+  const output = document.querySelector('#competitivePreflight');
+  const errors = Array.isArray(preflight.errors) ? preflight.errors : [];
+  const warnings = Array.isArray(preflight.warnings) ? preflight.warnings : [];
+  const valid = preflight.valid !== false && !errors.length;
+  output.className = `competitive-preflight ${valid ? 'ok' : 'error'}`;
+  output.innerHTML = `
+    <div>
+      <strong>${valid ? 'Preflight passed' : 'Draft needs attention'}</strong>
+      <p class="muted">${valid ? 'The draft is structurally safe to publish.' : `${errors.length} blocking issue${errors.length === 1 ? '' : 's'} must be corrected.`}</p>
+    </div>
+    <div class="preflight-messages">
+      ${errors.map(message => `<span class="danger-chip">${escapeHtml(message)}</span>`).join('')}
+      ${warnings.map(message => `<span class="chip gold">${escapeHtml(message)}</span>`).join('')}
+      ${valid && !warnings.length ? '<span class="chip">No warnings</span>' : ''}
+    </div>
+  `;
+  document.querySelector('#publishCompetitive').disabled = !valid;
+}
+
+function renderCompetitiveLeaguePreview(bands = []) {
+  const output = document.querySelector('#competitiveLeaguePreview');
+  output.replaceChildren(...bands.map((band, index) => {
+    const row = document.createElement('div');
+    row.className = 'league-preview-row';
+    const upper = band.max === null || band.max === undefined ? 'open' : Number(band.max).toLocaleString();
+    row.innerHTML = `
+      <span class="league-order">${index + 1}</span>
+      <div><strong>${escapeHtml(band.league)}</strong><p class="muted">${(band.divisions || []).map(escapeHtml).join(' / ') || 'Single division'}</p></div>
+      <span class="mono-cell">${Number(band.min || 0).toLocaleString()} - ${upper}</span>
+    `;
+    return row;
+  }));
+}
+
+function updateCompetitivePlacementOptions() {
+  const form = document.querySelector('#competitiveSimulator');
+  const count = Number(form.elements.playerCount.value) || 2;
+  const previous = Number(form.elements.placement.value) || 1;
+  form.elements.placement.replaceChildren(...Array.from({ length: count }, (_unused, index) => {
+    const option = document.createElement('option');
+    option.value = String(index + 1);
+    option.textContent = `${index + 1}${index === 0 ? 'st' : index === 1 ? 'nd' : index === 2 ? 'rd' : 'th'}`;
+    return option;
+  }));
+  form.elements.placement.value = String(Math.min(previous, count));
+}
+
+async function runCompetitiveSimulation(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const output = document.querySelector('#competitiveSimulationOutput');
+  output.textContent = 'Running draft model...';
+  try {
+    const result = await api('/competitive/simulate', {
+      method: 'POST',
+      body: JSON.stringify({
+        useDraft: true,
+        playerCount: Number(form.elements.playerCount.value),
+        placement: Number(form.elements.placement.value),
+        stage: form.elements.stage.value,
+        mmr: Number(form.elements.mmr.value),
+        opponentMmr: Number(form.elements.opponentMmr.value),
+      }),
+    });
+    const simulation = result.simulation;
+    const direction = simulation.delta > 0 ? 'gain' : simulation.delta < 0 ? 'loss' : 'no change';
+    output.className = `simulator-output ${simulation.delta >= 0 ? 'positive' : 'negative'}`;
+    output.innerHTML = `
+      <span class="simulation-delta">${simulation.delta > 0 ? '+' : ''}${simulation.delta}</span>
+      <div><strong>${escapeHtml(direction)}</strong><p class="muted">${Number(simulation.ratingBefore).toLocaleString()} to ${Number(simulation.ratingAfter).toLocaleString()} in ${escapeHtml(simulation.stage)}</p></div>
+    `;
+  } catch (error) {
+    output.className = 'simulator-output negative';
+    output.textContent = error.message;
+  }
+}
+
 function parseJsonField(form, name) {
   try {
     return JSON.parse(form.elements[name].value || 'null');
@@ -1175,13 +1294,35 @@ async function saveCompetitiveDraft(event) {
     if (!reason) return;
     const config = {
       placementMatchesRequired: Number(form.elements.placementMatchesRequired.value),
-      placementMultiplier: Number(form.elements.placementMultiplier.value),
       strengthAdjustmentCap: Number(form.elements.strengthAdjustmentCap.value),
-      performanceBonusCap: Number(form.elements.performanceBonusCap.value),
       seasonLengthDays: Number(form.elements.seasonLengthDays.value),
       rewardGraceDays: Number(form.elements.rewardGraceDays.value),
-      mmrDeltas: parseJsonField(form, 'mmrDeltas'),
-      matchmaking: parseJsonField(form, 'matchmaking'),
+      confidence: {
+        returningPlacementMultiplier: Number(form.elements.returningPlacementMultiplier.value),
+        calibrationGainMultiplier: Number(form.elements.calibrationGainMultiplier.value),
+        calibrationLossMultiplier: Number(form.elements.calibrationLossMultiplier.value),
+        calibrationMatchesRequired: Number(form.elements.calibrationMatchesRequired.value),
+        firstPlacementStrengthCap: Number(form.elements.firstPlacementStrengthCap.value),
+      },
+      softReset: {
+        anchorMmr: Number(form.elements.softResetAnchor.value),
+        multiplier: Number(form.elements.softResetMultiplier.value),
+        floor: Number(form.elements.softResetFloor.value),
+      },
+      mmrDeltas: {
+        2: [Number(form.elements.delta2_1.value), Number(form.elements.delta2_2.value)],
+        3: [Number(form.elements.delta3_1.value), Number(form.elements.delta3_2.value), Number(form.elements.delta3_3.value)],
+        4: [Number(form.elements.delta4_1.value), Number(form.elements.delta4_2.value), Number(form.elements.delta4_3.value), Number(form.elements.delta4_4.value)],
+      },
+      matchmaking: {
+        firstRange: Number(form.elements.firstRange.value),
+        secondRange: Number(form.elements.secondRange.value),
+        expandStartMs: Number(form.elements.expandStartSeconds.value) * 1000,
+        expandEveryMs: Number(form.elements.expandEverySeconds.value) * 1000,
+        expandStep: Number(form.elements.expandStep.value),
+        expandBase: Number(form.elements.expandBase.value),
+        maxRange: Number(form.elements.maxRange.value),
+      },
       leagueBands: parseJsonField(form, 'leagueBands'),
       rewards: parseJsonField(form, 'rewards'),
     };
@@ -1289,8 +1430,12 @@ async function adjustCompetitivePlayer(event) {
   if (!userId) return alert('Enter a player user id or display name.');
   const reason = prompt('Reason for audit log');
   if (!reason) return;
-  const payload = { reason, clearHistory: form.elements.clearHistory.checked };
-  ['mmr', 'seasonBestMmr', 'placementsPlayed', 'rankedGames', 'wins', 'losses'].forEach(key => {
+  const payload = {
+    reason,
+    playerCount: Number(form.elements.playerCount.value),
+    clearHistory: form.elements.clearHistory.checked,
+  };
+  ['mmr', 'seasonBestMmr', 'careerBestMmr', 'placementsPlayed', 'calibrationMatchesPlayed', 'rankedGames', 'wins', 'losses'].forEach(key => {
     if (form.elements[key].value !== '') payload[key] = Number(form.elements[key].value);
   });
   const result = await api(`/users/${encodeURIComponent(userId)}/competitive/adjust`, { method: 'POST', body: JSON.stringify(payload) });

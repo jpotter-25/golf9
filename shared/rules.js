@@ -19,6 +19,7 @@ export function sanitizePlayerIdentity(user) {
     userId: user.userId,
     displayName: user.displayName || 'Player',
     avatarInitial: (user.displayName || 'P').trim().slice(0, 1).toUpperCase(),
+    displayRankEmblem: user.displayRankEmblem || null,
     cosmetics: {
       cardBack: user.inventory?.equipped?.cardBack || user.cosmetics?.cardBack || 'classic-card-back',
       avatarFrame: user.inventory?.equipped?.avatarFrame || user.cosmetics?.avatarFrame || 'rookie-avatar-frame',
@@ -108,6 +109,7 @@ export function createGameState(playerIdentities, options = {}) {
       userId: identity.userId || `local-${index + 1}`,
       name: identity.displayName || identity.name || `Player ${index + 1}`,
       avatarInitial: identity.avatarInitial || (identity.displayName || identity.name || 'P').slice(0, 1).toUpperCase(),
+      displayRankEmblem: identity.displayRankEmblem || null,
       cosmetics: identity.cosmetics || {
         cardBack: 'classic-card-back',
         avatarFrame: 'rookie-avatar-frame',

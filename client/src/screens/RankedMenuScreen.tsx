@@ -1,7 +1,7 @@
 // src/screens/RankedMenuScreen.tsx
 // Purpose: Focused ranked entry with per-table ladders, season context, and matchmaking.
 
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { CalendarDays, ChevronRight, Medal, ShieldCheck, Trophy, Users, WifiOff } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -24,12 +24,10 @@ export default function RankedMenuScreen({ navigation }: Props) {
   const seasonDaysLeft = ladder?.season?.endsAt
     ? Math.max(0, Math.ceil((ladder.season.endsAt - Date.now()) / (24 * 60 * 60 * 1000)))
     : 0;
-  const rankProgress = useMemo(() => {
-    if (!ladder) return 0;
-    if (ladder.league.nextLeagueMmr === null) return 1;
-    const span = Math.max(1, ladder.league.nextLeagueMmr - ladder.league.minMmr);
-    return Math.max(0, Math.min(1, (ladder.mmr - ladder.league.minMmr) / span));
-  }, [ladder]);
+  const placementsRequired = ladder?.placementMatchesRequired ?? 5;
+  const placementsPlayed = ladder?.placementsPlayed ?? 0;
+  const placementProgress = Math.min(1, placementsPlayed / Math.max(1, placementsRequired));
+  const visibleRank = ladder?.placementComplete ? ladder.league.name : 'Unranked';
 
   return (
     <ScreenShell scroll centered>
@@ -50,7 +48,7 @@ export default function RankedMenuScreen({ navigation }: Props) {
             <Pressable key={option} onPress={() => setPlayers(option)} style={[styles.ladderTab, active && styles.ladderTabActive]}>
               <Text style={[styles.ladderTabCount, active && styles.ladderTabCountActive]}>{option}P</Text>
               <Text style={[styles.ladderTabLeague, active && styles.ladderTabLeagueActive]} numberOfLines={1}>
-                {optionLadder?.league.name ?? 'Iron III'}
+                {optionLadder?.placementComplete ? optionLadder.league.name : 'Unranked'}
               </Text>
             </Pressable>
           );
@@ -58,17 +56,17 @@ export default function RankedMenuScreen({ navigation }: Props) {
       </View>
 
       <PremiumPanel tone="gold" style={styles.rankHero}>
-        <RankEmblem league={ladder?.league} size={66} />
+        {ladder?.placementComplete
+          ? <RankEmblem league={ladder.league} size={66} />
+          : <View style={styles.unrankedEmblem}><ShieldCheck size={31} color={ui.text.inverse} strokeWidth={2.5} /></View>}
         <View style={styles.rankHeroCopy}>
-          <Text style={styles.rankLeague}>{ladder?.league.name ?? 'Iron III'}</Text>
+          <Text style={styles.rankLeague}>{visibleRank}</Text>
           <Text style={styles.rankFormat}>{players}-player ladder</Text>
-          <ProgressBar value={ladder?.placementComplete ? rankProgress : 0} color={ui.text.inverse} />
+          <ProgressBar value={ladder?.placementComplete ? 1 : placementProgress} color={ui.text.inverse} />
           <Text style={styles.rankProgressText}>
             {ladder?.placementComplete
-              ? ladder.league.nextLeagueMmr === null
-                ? 'Top league reached'
-                : `${Math.max(0, ladder.league.nextLeagueMmr - ladder.mmr)} rating to the next rank`
-              : `${ladder?.placementsRemaining ?? 5} placement matches remaining`}
+              ? 'Rank updates after each completed match'
+              : `${placementsPlayed}/${placementsRequired} placement matches complete`}
           </Text>
         </View>
       </PremiumPanel>
@@ -85,7 +83,7 @@ export default function RankedMenuScreen({ navigation }: Props) {
           <RankStat Icon={Trophy} label="Wins" value={String(ladder?.wins ?? 0)} />
           <RankStat Icon={Users} label="Matches" value={String(ladder?.rankedGames ?? 0)} />
           <RankStat Icon={ShieldCheck} label="Record" value={`${ladder?.wins ?? 0}W / ${ladder?.losses ?? 0}L`} />
-          <RankStat Icon={Medal} label="Season Best" value={ladder?.seasonBestLeague.name ?? 'Iron III'} />
+          <RankStat Icon={Medal} label="Season Best" value={ladder?.placementComplete ? ladder.seasonBestLeague.name : 'Unranked'} />
         </View>
       </PremiumPanel>
 
@@ -132,6 +130,7 @@ const styles = StyleSheet.create({
   ladderTabLeague: { color: ui.text.muted, fontSize: 10, fontWeight: '800', marginTop: 3, width: '100%', textAlign: 'center' },
   ladderTabLeagueActive: { color: ui.text.primary },
   rankHero: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  unrankedEmblem: { width: 66, height: 66, borderRadius: 8, borderWidth: 2, borderColor: ui.text.inverse, alignItems: 'center', justifyContent: 'center' },
   rankHeroCopy: { flex: 1, minWidth: 0 },
   rankLeague: { color: ui.text.inverse, fontSize: 26, fontWeight: '900' },
   rankFormat: { color: '#4D3D17', fontSize: 12, fontWeight: '900', marginTop: 2, marginBottom: 10 },

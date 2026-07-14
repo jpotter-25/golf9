@@ -189,7 +189,7 @@
             <div class="split-header">
               <div>
                 <h2>Competitive Operations</h2>
-                <p class="muted">Manage seasons, league math, ranked queues, and competitive support corrections.</p>
+                <p class="muted">Control the hidden ranked model, seasons, matchmaking, queues, and support corrections.</p>
               </div>
               <div class="actions-inline">
                 <button id="loadCompetitive">Refresh</button>
@@ -198,38 +198,146 @@
               </div>
             </div>
             <div id="competitiveOverview" class="grid"></div>
+            <div id="competitivePreflight" class="competitive-preflight"></div>
           </div>
-          <div class="workspace">
-            <form id="competitiveConfigEditor" class="panel compact">
-              <h3>League Studio</h3>
-              <div class="row two">
-                <label>Placement matches <input name="placementMatchesRequired" type="number" min="1" /></label>
-                <label>Placement multiplier <input name="placementMultiplier" type="number" min="0" step="0.01" /></label>
+          <div class="competitive-workspace">
+            <form id="competitiveConfigEditor" class="panel compact competitive-editor">
+              <div class="split-header">
+                <div>
+                  <h3>Ranked Rules Studio</h3>
+                  <p class="muted">Changes stay in draft until preflight passes and an administrator publishes them.</p>
+                </div>
+                <span id="competitiveDraftBadge" class="chip blue">Draft</span>
               </div>
-              <div class="row two">
-                <label>Strength cap <input name="strengthAdjustmentCap" type="number" min="0" /></label>
-                <label>Performance cap <input name="performanceBonusCap" type="number" min="0" /></label>
+
+              <div class="competitive-section">
+                <div>
+                  <h4>Placement And Confidence</h4>
+                  <p class="muted">Five visible placements followed by a quiet calibration period for new ladders.</p>
+                </div>
+                <div class="row three">
+                  <label>Placement matches <input name="placementMatchesRequired" type="number" min="1" max="20" /></label>
+                  <label>Hidden calibration matches <input name="calibrationMatchesRequired" type="number" min="0" max="50" /></label>
+                  <label>Strength adjustment cap <input name="strengthAdjustmentCap" type="number" min="0" max="50" /></label>
+                </div>
+                <div class="row three">
+                  <label>Returning placement x <input name="returningPlacementMultiplier" type="number" min="0.1" max="3" step="0.05" /></label>
+                  <label>Calibration wins x <input name="calibrationGainMultiplier" type="number" min="0.1" max="3" step="0.05" /></label>
+                  <label>Calibration losses x <input name="calibrationLossMultiplier" type="number" min="0.1" max="3" step="0.05" /></label>
+                </div>
+                <label>First-placement strength cap <input name="firstPlacementStrengthCap" type="number" min="0" max="1000" /></label>
               </div>
-              <div class="row two">
-                <label>Season days <input name="seasonLengthDays" type="number" min="1" /></label>
-                <label>Reward grace days <input name="rewardGraceDays" type="number" min="0" /></label>
+
+              <div class="competitive-section">
+                <div>
+                  <h4>Finish Curves</h4>
+                  <p class="muted">Set the baseline rating movement for each finishing position. Strength correction is applied separately.</p>
+                </div>
+                <div class="curve-row">
+                  <strong>2 players</strong>
+                  <label>1st <input name="delta2_1" type="number" /></label>
+                  <label>2nd <input name="delta2_2" type="number" /></label>
+                </div>
+                <div class="curve-row">
+                  <strong>3 players</strong>
+                  <label>1st <input name="delta3_1" type="number" /></label>
+                  <label>2nd <input name="delta3_2" type="number" /></label>
+                  <label>3rd <input name="delta3_3" type="number" /></label>
+                </div>
+                <div class="curve-row">
+                  <strong>4 players</strong>
+                  <label>1st <input name="delta4_1" type="number" /></label>
+                  <label>2nd <input name="delta4_2" type="number" /></label>
+                  <label>3rd <input name="delta4_3" type="number" /></label>
+                  <label>4th <input name="delta4_4" type="number" /></label>
+                </div>
               </div>
-              <label>MMR deltas JSON <textarea name="mmrDeltas" rows="4"></textarea></label>
-              <label>Matchmaking JSON <textarea name="matchmaking" rows="5"></textarea></label>
-              <label>League bands JSON <textarea name="leagueBands" rows="8"></textarea></label>
-              <label>Season rewards JSON <textarea name="rewards" rows="8"></textarea></label>
+
+              <div class="competitive-section">
+                <div>
+                  <h4>Matchmaking Expansion</h4>
+                  <p class="muted">Control how quickly the private search window widens while a player waits.</p>
+                </div>
+                <div class="row three">
+                  <label>Opening range <input name="firstRange" type="number" min="0" /></label>
+                  <label>Second range <input name="secondRange" type="number" min="0" /></label>
+                  <label>Maximum range <input name="maxRange" type="number" min="0" /></label>
+                </div>
+                <div class="row three">
+                  <label>Expansion begins (sec) <input name="expandStartSeconds" type="number" min="1" /></label>
+                  <label>Expand every (sec) <input name="expandEverySeconds" type="number" min="1" /></label>
+                  <label>Expansion step <input name="expandStep" type="number" min="0" /></label>
+                </div>
+                <label>Expansion base <input name="expandBase" type="number" min="0" /></label>
+              </div>
+
+              <div class="competitive-section">
+                <div>
+                  <h4>Season Reset And Rewards</h4>
+                  <p class="muted">Tune season cadence and the soft reset applied to returning ranked players.</p>
+                </div>
+                <div class="row three">
+                  <label>Season days <input name="seasonLengthDays" type="number" min="1" /></label>
+                  <label>Reward grace days <input name="rewardGraceDays" type="number" min="0" /></label>
+                  <label>Reset retention <input name="softResetMultiplier" type="number" min="0" max="1" step="0.05" /></label>
+                </div>
+                <div class="row two">
+                  <label>Reset anchor <input name="softResetAnchor" type="number" min="0" /></label>
+                  <label>Reset floor <input name="softResetFloor" type="number" min="0" /></label>
+                </div>
+              </div>
+
+              <details class="advanced-editor">
+                <summary>Advanced League And Reward Data</summary>
+                <p class="muted">Exact thresholds are private administrator data and never appear in player responses.</p>
+                <label>League bands JSON <textarea name="leagueBands" rows="10"></textarea></label>
+                <label>Season rewards JSON <textarea name="rewards" rows="8"></textarea></label>
+              </details>
+
               <div class="actions">
-                <button type="submit">Save Draft</button>
+                <button type="submit">Save Ranked Draft</button>
               </div>
             </form>
-            <div class="panel compact">
-              <h3>Season Studio</h3>
-              <div class="row">
-                <input id="seasonName" placeholder="Season name" />
-                <button id="createSeason">Create Season</button>
+
+            <aside class="competitive-sidebar">
+              <form id="competitiveSimulator" class="panel compact">
+                <h3>Outcome Simulator</h3>
+                <p class="muted">Preview the draft model without changing a player.</p>
+                <div class="row two">
+                  <label>Table size
+                    <select name="playerCount"><option value="2">2 players</option><option value="3">3 players</option><option value="4">4 players</option></select>
+                  </label>
+                  <label>Finish
+                    <select name="placement"><option value="1">1st</option><option value="2">2nd</option></select>
+                  </label>
+                </div>
+                <label>Confidence stage
+                  <select name="stage"><option value="placement">Returning placement</option><option value="calibration">Calibration</option><option value="established" selected>Established</option></select>
+                </label>
+                <div class="row two">
+                  <label>Player rating <input name="mmr" type="number" min="0" /></label>
+                  <label>Field average <input name="opponentMmr" type="number" min="0" /></label>
+                </div>
+                <p class="muted">First-time placement is finalized after all placement matches; this single-result preview models returning placements.</p>
+                <button type="submit">Run Simulation</button>
+                <div id="competitiveSimulationOutput" class="simulator-output muted">Choose a scenario to preview its movement.</div>
+              </form>
+
+              <div class="panel compact">
+                <h3>League Map</h3>
+                <p class="muted">Private thresholds used by every ladder.</p>
+                <div id="competitiveLeaguePreview" class="league-preview"></div>
               </div>
-              <div id="seasonOutput" class="list"></div>
-            </div>
+
+              <div class="panel compact">
+                <h3>Season Studio</h3>
+                <div class="row">
+                  <input id="seasonName" placeholder="Season name" />
+                  <button id="createSeason">Create Season</button>
+                </div>
+                <div id="seasonOutput" class="list"></div>
+              </div>
+            </aside>
           </div>
           <div class="workspace">
             <div class="panel compact">
@@ -240,12 +348,19 @@
             <form id="competitivePlayerEditor" class="panel compact">
               <h3>Ranked Player Tools</h3>
               <input name="userId" placeholder="Player user id or display name" />
+              <label>Ladder
+                <select name="playerCount"><option value="2">2-player</option><option value="3">3-player</option><option value="4">4-player</option></select>
+              </label>
               <div class="row two">
                 <input name="mmr" type="number" min="0" placeholder="MMR" />
                 <input name="seasonBestMmr" type="number" min="0" placeholder="Season best MMR" />
               </div>
               <div class="row two">
+                <input name="careerBestMmr" type="number" min="0" placeholder="Career best MMR" />
                 <input name="placementsPlayed" type="number" min="0" placeholder="Placements played" />
+              </div>
+              <div class="row two">
+                <input name="calibrationMatchesPlayed" type="number" min="0" placeholder="Calibration matches" />
                 <input name="rankedGames" type="number" min="0" placeholder="Ranked games" />
               </div>
               <div class="row two">

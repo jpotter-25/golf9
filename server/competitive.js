@@ -1,12 +1,14 @@
 import crypto from 'crypto';
 import {
   BASE_MMR,
+  DEFAULT_CONFIDENCE_RULES,
   DEFAULT_LEAGUE_BANDS,
   DEFAULT_MATCHMAKING,
   DEFAULT_MMR_DELTAS,
   DEFAULT_SOFT_RESET,
   PLACEMENT_MATCHES_REQUIRED,
   SEASON_REWARDS,
+  previewRankedDelta,
 } from './ranked.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -95,9 +97,8 @@ export function defaultCompetitiveConfig(timestamp = now()) {
     placementMatchesRequired: PLACEMENT_MATCHES_REQUIRED,
     seasonLengthDays: 90,
     rewardGraceDays: 30,
-    placementMultiplier: 1.25,
     strengthAdjustmentCap: 8,
-    performanceBonusCap: 5,
+    confidence: { ...DEFAULT_CONFIDENCE_RULES },
     softReset: { ...DEFAULT_SOFT_RESET },
     matchmaking: { ...DEFAULT_MATCHMAKING },
     mmrDeltas: clone(DEFAULT_MMR_DELTAS),
@@ -118,9 +119,20 @@ export function normalizeCompetitiveConfig(input = null, fallback = defaultCompe
     placementMatchesRequired: Math.max(1, safeInteger(source.placementMatchesRequired, fallback.placementMatchesRequired)),
     seasonLengthDays: Math.max(1, safeInteger(source.seasonLengthDays, fallback.seasonLengthDays)),
     rewardGraceDays: Math.max(0, safeInteger(source.rewardGraceDays, fallback.rewardGraceDays)),
-    placementMultiplier: Number.isFinite(Number(source.placementMultiplier)) ? Number(source.placementMultiplier) : fallback.placementMultiplier,
     strengthAdjustmentCap: Math.max(0, safeInteger(source.strengthAdjustmentCap, fallback.strengthAdjustmentCap)),
-    performanceBonusCap: Math.max(0, safeInteger(source.performanceBonusCap, fallback.performanceBonusCap)),
+    confidence: {
+      returningPlacementMultiplier: Number.isFinite(Number(source.confidence?.returningPlacementMultiplier))
+        ? Number(source.confidence.returningPlacementMultiplier)
+        : fallback.confidence.returningPlacementMultiplier,
+      calibrationGainMultiplier: Number.isFinite(Number(source.confidence?.calibrationGainMultiplier))
+        ? Number(source.confidence.calibrationGainMultiplier)
+        : fallback.confidence.calibrationGainMultiplier,
+      calibrationLossMultiplier: Number.isFinite(Number(source.confidence?.calibrationLossMultiplier))
+        ? Number(source.confidence.calibrationLossMultiplier)
+        : fallback.confidence.calibrationLossMultiplier,
+      calibrationMatchesRequired: Math.max(0, safeInteger(source.confidence?.calibrationMatchesRequired, fallback.confidence.calibrationMatchesRequired)),
+      firstPlacementStrengthCap: Math.max(0, safeInteger(source.confidence?.firstPlacementStrengthCap, fallback.confidence.firstPlacementStrengthCap)),
+    },
     softReset: {
       anchorMmr: migrateLegacyRankDefaults ? DEFAULT_SOFT_RESET.anchorMmr : Math.max(0, safeInteger(source.softReset?.anchorMmr, fallback.softReset.anchorMmr)),
       multiplier: Number.isFinite(Number(source.softReset?.multiplier)) ? Number(source.softReset.multiplier) : fallback.softReset.multiplier,
@@ -183,6 +195,7 @@ export function saveDraftCompetitiveConfig(store, patch = {}) {
   store.draft = normalizeCompetitiveConfig({
     ...store.draft,
     ...patch,
+    confidence: { ...store.draft.confidence, ...(patch.confidence || {}) },
     softReset: { ...store.draft.softReset, ...(patch.softReset || {}) },
     matchmaking: { ...store.draft.matchmaking, ...(patch.matchmaking || {}) },
     mmrDeltas: patch.mmrDeltas || store.draft.mmrDeltas,
@@ -190,6 +203,62 @@ export function saveDraftCompetitiveConfig(store, patch = {}) {
     rewards: patch.rewards || store.draft.rewards,
   }, store.live);
   return { draft: store.draft };
+}
+
+export function validateCompetitiveConfig(input) {
+  const config = normalizeCompetitiveConfig(input);
+  const errors = [];
+  const warnings = [];
+  const bands = config.leagueBands;
+  for (let index = 0; index < bands.length; index += 1) {
+    const band = bands[index];
+    const previous = bands[index - 1];
+    if (previous && previous.max !== null && band.min !== previous.max + 1) {
+      errors.push(`${band.league} must begin immediately after ${previous.league}.`);
+    }
+    if (band.max !== null && band.max < band.min) errors.push(`${band.league} has an invalid rating band.`);
+    if (band.max === null && index !== bands.length - 1) errors.push(`${band.league} can only be open-ended as the final league.`);
+  }
+  for (const count of [2, 3, 4]) {
+    const deltas = config.mmrDeltas[count];
+    if (deltas.length !== count) errors.push(`${count}-player finish curve needs ${count} values.`);
+    for (let index = 1; index < deltas.length; index += 1) {
+      if (deltas[index] > deltas[index - 1]) errors.push(`${count}-player finish rewards must descend from first to last.`);
+    }
+    if (deltas[0] <= 0 || deltas.at(-1) >= 0) errors.push(`${count}-player curve must reward first and penalize last.`);
+  }
+  if (config.matchmaking.firstRange > config.matchmaking.secondRange) errors.push('The opening search range cannot exceed the second search range.');
+  if (config.matchmaking.secondRange > config.matchmaking.maxRange) errors.push('The second search range cannot exceed the maximum range.');
+  if (config.confidence.calibrationGainMultiplier < 1) warnings.push('Calibration wins are not accelerated.');
+  if (config.confidence.calibrationLossMultiplier > 1) warnings.push('Calibration losses are amplified.');
+  if (config.softReset.multiplier < 0 || config.softReset.multiplier > 1) errors.push('Season reset retention must be between 0 and 1.');
+  return { valid: errors.length === 0, errors, warnings, config };
+}
+
+export function simulateCompetitiveRating(input = {}, configInput = null) {
+  const config = normalizeCompetitiveConfig(configInput);
+  const playerCount = [2, 3, 4].includes(safeInteger(input.playerCount, 2)) ? safeInteger(input.playerCount, 2) : 2;
+  const mmr = Math.max(0, safeInteger(input.mmr, config.baseMmr));
+  const opponentMmr = Math.max(0, safeInteger(input.opponentMmr, mmr));
+  const stage = ['placement', 'calibration', 'established'].includes(input.stage) ? input.stage : 'established';
+  const delta = previewRankedDelta({
+    mmr,
+    opponentMmrs: Array(playerCount - 1).fill(opponentMmr),
+    playerCount,
+    placement: Math.max(1, Math.min(playerCount, Number(input.placement) || 1)),
+    placementsPlayed: stage === 'placement' ? 0 : config.placementMatchesRequired,
+    placementComplete: stage !== 'placement',
+    returningPlacement: stage === 'placement',
+    calibrationMatchesPlayed: stage === 'calibration' ? 0 : config.confidence.calibrationMatchesRequired,
+  }, config);
+  return {
+    playerCount,
+    placement: Math.max(1, Math.min(playerCount, Number(input.placement) || 1)),
+    stage,
+    ratingBefore: mmr,
+    ratingAfter: Math.max(0, mmr + delta),
+    delta,
+  };
 }
 
 export function publishCompetitiveConfig(store, adminName = 'admin') {

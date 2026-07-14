@@ -2,6 +2,7 @@
 // Purpose: Typed REST helpers for authentication and room setup.
 
 import { SERVER_URL } from '../config';
+import Constants from 'expo-constants';
 import type { GameState } from '../game/types';
 import { getInstallId } from '../utils/deviceIdentity';
 
@@ -18,6 +19,7 @@ export type UserProfile = {
   challenges: ChallengeBuckets;
   competitive: CompetitiveState;
   competitiveByPlayers: RankedLadders;
+  displayRankEmblem: DisplayRankEmblem | null;
   club: ClubSummary | null;
   authProviders: AuthProviderStatus;
 };
@@ -52,6 +54,7 @@ export type RoomPlayer = {
   level?: number;
   progression?: ProgressionState | null;
   competitive?: Pick<CompetitiveState, 'league' | 'placementComplete' | 'placementsRemaining' | 'rankedGames' | 'wins' | 'losses' | 'seasonBestLeague'> | null;
+  displayRankEmblem?: DisplayRankEmblem | null;
   cosmetics?: PlayerInventory['equipped'] | null;
   club?: ClubSummary | null;
   ready: boolean;
@@ -126,6 +129,7 @@ export type PublicPlayerSummary = {
   statistics: Pick<PlayerStatistics, 'gamesPlayed' | 'wins' | 'bestTotal' | 'bestRound' | 'columnClears'>;
   competitive: Pick<CompetitiveState, 'league' | 'rankedGames' | 'wins'>;
   competitiveByPlayers?: RankedLadders;
+  displayRankEmblem?: DisplayRankEmblem | null;
   cosmetics: PlayerInventory['equipped'];
   club: ClubSummary | null;
   relationship: SocialRelationship;
@@ -178,6 +182,7 @@ export type PublicPlayerProfile = {
     seasonBestLeague: RankedLeague;
   };
   competitiveByPlayers?: RankedLadders;
+  displayRankEmblem?: DisplayRankEmblem | null;
   cosmetics: PlayerInventory['equipped'];
   club: ClubSummary | null;
   relationship: SocialRelationship;
@@ -319,8 +324,6 @@ export type WagerTable = {
 
 export type RankedFee = {
   league: string;
-  minMmr: number;
-  maxMmr: number | null;
   buyIn: number;
 };
 
@@ -347,7 +350,6 @@ export type CosmeticItem = {
   price: number;
   shopCategory: 'starter' | 'coin' | 'ranked' | 'club' | 'event' | string;
   unlockRequirement: 'level' | 'achievement' | 'rank' | 'club' | 'event' | 'season' | null;
-  requiredMmr: number | null;
   requiredLeague: string | null;
   seasonId: string | null;
   eligible: boolean;
@@ -404,22 +406,19 @@ export type RankedLeague = {
   league: string;
   division: string | null;
   name: string;
-  minMmr: number;
-  nextLeagueMmr: number | null;
 };
 
-export type RankedLeagueBand = {
+export type RankedRankPath = {
   league: string;
-  min: number;
-  max: number | null;
-  divisions: string[];
+  division: string | null;
+  name: string;
 };
 
 export type RankedSeasonReward = {
   id: string;
   name: string;
   league: string;
-  minMmr: number;
+  requiredRank: string;
   cosmeticId: string;
   earned: boolean;
   claimed: boolean;
@@ -429,7 +428,6 @@ export type RankedSeasonReward = {
 export type CompetitiveState = {
   playerCount: 2 | 3 | 4;
   seasonId: string;
-  mmr: number;
   league: RankedLeague;
   placementsPlayed: number;
   placementMatchesRequired: number;
@@ -438,9 +436,8 @@ export type CompetitiveState = {
   rankedGames: number;
   wins: number;
   losses: number;
-  seasonBestMmr: number;
   seasonBestLeague: RankedLeague;
-  claimedSeasonRewards: string[];
+  careerBestLeague: RankedLeague;
   matchHistory: RankedMatchSummary[];
   season: {
     id: string;
@@ -452,8 +449,7 @@ export type CompetitiveState = {
 };
 
 export type RankedCatalog = {
-  baseMmr: number;
-  leagueBands: RankedLeagueBand[];
+  rankPath: RankedRankPath[];
   placementMatchesRequired: number;
   season: {
     id: string;
@@ -470,9 +466,6 @@ export type RankedMatchSummary = {
   matchType: 'ranked';
   playerCount?: number;
   seasonId: string;
-  mmrBefore: number;
-  mmrAfter: number;
-  mmrDelta: number;
   leagueBefore: RankedLeague;
   leagueAfter: RankedLeague;
   placement: number;
@@ -491,10 +484,29 @@ export type RankedQueueStatus = {
   maxPlayers?: number;
   rounds?: 5 | 9;
   joinedAt?: number;
-  searchRange?: number;
   buyIn?: number;
   pot?: number;
   queuedPlayers?: number;
+};
+
+export type DisplayRankSelection = {
+  playerCount: 2 | 3 | 4;
+  source: 'current' | 'careerBest';
+};
+
+export type DisplayRankEmblem = DisplayRankSelection & {
+  league: RankedLeague;
+};
+
+export type DisplayRankEmblemChoice = DisplayRankEmblem;
+
+export type RankedProfileResponse = {
+  competitive: CompetitiveState;
+  competitiveByPlayers: RankedLadders;
+  queue: RankedQueueStatus;
+  displayRankSelection: DisplayRankSelection | null;
+  displayRankEmblem: DisplayRankEmblem | null;
+  displayRankEmblemChoices: DisplayRankEmblemChoice[];
 };
 
 export type OpenRoomFilters = {
@@ -727,6 +739,7 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
         'Content-Type': 'application/json',
         'X-Golf9-Device-Id': installId,
         'X-Golf9-Platform': 'mobile',
+        'X-Golf9-Build': Constants.nativeBuildVersion || '39',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options.headers || {}),
       },
@@ -1155,8 +1168,15 @@ export function wagerPlayOnlineRoom(token: string, maxPlayers: number, rounds: n
   return request<{ room: RoomSummary }>('/rooms/wager-play', { method: 'POST', body: JSON.stringify({ maxPlayers, rounds, buyIn }) }, token);
 }
 
-export function rankedProfile(token: string): Promise<{ competitive: CompetitiveState; competitiveByPlayers: RankedLadders; queue: RankedQueueStatus }> {
-  return request<{ competitive: CompetitiveState; competitiveByPlayers: RankedLadders; queue: RankedQueueStatus }>('/ranked/me', {}, token);
+export function rankedProfile(token: string): Promise<RankedProfileResponse> {
+  return request<RankedProfileResponse>('/ranked/me', {}, token);
+}
+
+export function updateDisplayRankEmblem(
+  token: string,
+  selection: DisplayRankSelection | { remove: true }
+): Promise<{ displayRankSelection: DisplayRankSelection | null; displayRankEmblem: DisplayRankEmblem | null; choices: DisplayRankEmblemChoice[]; user: UserProfile }> {
+  return request('/ranked/display-emblem', { method: 'PATCH', body: JSON.stringify(selection) }, token);
 }
 
 export function rankedCatalog(token: string): Promise<{ catalog: RankedCatalog }> {
