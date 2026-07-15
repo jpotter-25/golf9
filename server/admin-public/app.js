@@ -136,6 +136,7 @@ function bindConsoleActions() {
     if (event.key === 'Enter') searchLiveOpsTesters();
   });
   document.querySelector('#saveLiveOpsTesters').addEventListener('click', saveLiveOpsTesters);
+  document.querySelector('#afkConfigEditor').addEventListener('submit', saveAfkConfig);
   document.querySelector('#loadCompetitive').addEventListener('click', loadCompetitive);
   document.querySelector('#publishCompetitive').addEventListener('click', publishCompetitive);
   document.querySelector('#rollbackCompetitive').addEventListener('click', rollbackCompetitive);
@@ -1179,7 +1180,41 @@ function renderLiveOps() {
   renderLiveOpsTesterResults();
   renderLiveOpsSchedules();
   renderLiveOpsRevisions();
+  populateAfkConfigEditor();
   applyLiveOpsPermissions();
+}
+
+function populateAfkConfigEditor() {
+  const form = document.querySelector('#afkConfigEditor');
+  const config = liveOpsData?.afkConfig || {};
+  form.elements.takeoverMisses.value = config.takeoverMisses ?? 2;
+  form.elements.penaltyAutomatedWindows.value = config.penaltyAutomatedWindows ?? 4;
+  form.elements.sourceCueMs.value = config.sourceCueMs ?? 1300;
+  form.elements.commitMs.value = config.commitMs ?? 3200;
+  form.elements.coinPenalty.value = config.coinPenalty ?? 100;
+  form.elements.reason.value = '';
+}
+
+async function saveAfkConfig(event) {
+  event.preventDefault();
+  if (!liveOpsCanWrite) return;
+  const form = event.currentTarget;
+  const reason = form.elements.reason.value.trim();
+  if (!reason) return status('An administrative reason is required.', 'error');
+  const config = {
+    takeoverMisses: Number(form.elements.takeoverMisses.value),
+    penaltyAutomatedWindows: Number(form.elements.penaltyAutomatedWindows.value),
+    sourceCueMs: Number(form.elements.sourceCueMs.value),
+    commitMs: Number(form.elements.commitMs.value),
+    coinPenalty: Number(form.elements.coinPenalty.value),
+  };
+  const result = await api('/live-ops/afk', {
+    method: 'POST',
+    body: JSON.stringify({ config, reason }),
+  });
+  liveOpsData.afkConfig = result.afkConfig;
+  status('Online AFK autoplay settings saved.', 'ok');
+  populateAfkConfigEditor();
 }
 
 function renderLiveOpsImpact() {
@@ -1459,6 +1494,9 @@ function applyLiveOpsPermissions() {
   document.querySelector('#liveOpsGlobalSwitch').disabled = !liveOpsCanWrite;
   document.querySelector('#saveLiveOpsTesters').disabled = !liveOpsCanWrite;
   document.querySelector('#liveOpsTesterReason').disabled = !liveOpsCanWrite;
+  document.querySelector('#afkConfigEditor').querySelectorAll('input, button').forEach(control => {
+    control.disabled = !liveOpsCanWrite;
+  });
   document.querySelector('#liveOpsReadOnly').classList.toggle('hidden', liveOpsCanWrite);
 }
 

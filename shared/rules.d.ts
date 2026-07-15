@@ -14,6 +14,14 @@ export type GameState = {
   sweepActive?: boolean; sweepStarterIndex?: number | null; completed?: boolean; revision?: number; lastRoundScores?: number[];
   turnSerial?: number; lastRoundNumber?: number; lastRoundTotals?: number[]; pendingDecision?: PendingDecision | null;
   viewerHeldCard?: Card | null; viewerHeldSource?: 'draw' | 'discard' | null; viewerHeldMustReplace?: boolean; viewerHeldCanDiscard?: boolean; simultaneousPeek?: boolean;
+  viewerAutoplay?: {
+    active: boolean;
+    consecutiveMisses: number;
+    automatedWindows: number;
+    penaltyPending: boolean;
+    takeoverThreshold: number;
+    penaltyThreshold: number;
+  };
 };
 export const ROWS: number;
 export const COLS: number;

@@ -24,6 +24,15 @@ export type ChatMessage = {
 
 export type ChatMessageType = ChatMessage['type'];
 export type GameCelebration = ChatMessage;
+export type AutoplayCue = {
+  userId: string;
+  phase: 'peek' | 'turn';
+  source: 'peek' | 'draw' | 'discard';
+  intent: string;
+  round: number;
+  turnSerial: number;
+  windowKey: string;
+};
 
 let socket: Socket | null = null;
 let activeToken: string | null = null;
@@ -103,6 +112,11 @@ export function onSocketConnect(cb: () => void) {
 export function onGameUpdate(cb: (state: GameState) => void) {
   socket?.on('game:state', cb);
   return () => { socket?.off('game:state', cb); };
+}
+
+export function onAutoplayCue(cb: (cue: AutoplayCue) => void) {
+  socket?.on('game:autoplay:cue', cb);
+  return () => { socket?.off('game:autoplay:cue', cb); };
 }
 
 export function onChatHistory(cb: (messages: ChatMessage[]) => void) {
@@ -207,6 +221,17 @@ export function sendGameIntent(token: string, code: string, type: string, payloa
     s.emit('game:intent', { code, actionId, type, payload }, (res: { error?: string; drawn?: unknown }) => {
       if (res.error) reject(new Error(res.error));
       else resolve({ drawn: res.drawn });
+    });
+  });
+}
+
+export function takeBackControl(token: string, code: string): Promise<{ game: GameState }> {
+  const s = connect(token);
+  return new Promise((resolve, reject) => {
+    s.emit('game:take-control', { code }, (res: { error?: string; game?: GameState }) => {
+      if (res.error) reject(new Error(res.error));
+      else if (!res.game) reject(new Error('Unable to restore player control.'));
+      else resolve({ game: res.game });
     });
   });
 }

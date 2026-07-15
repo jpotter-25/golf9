@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Path, Polygon, Stop } from 'react-native-svg';
-import { Crown, Gem, Gift, Rocket, Watch, type LucideIcon } from 'lucide-react-native';
+import { Bot, Crown, Gem, Gift, Rocket, Watch, type LucideIcon } from 'lucide-react-native';
 import { PlayerAvatar } from './PlayerAvatar';
 import { getAvatarAccessoryVisual, type EquippedCosmetics } from '../theme/cosmetics';
 
@@ -221,6 +221,7 @@ type AvatarClusterProps = {
   giftIcon?: string | null;
   giftAccent?: string | null;
   connectionState?: 'online' | 'offline';
+  autoplayActive?: boolean;
   showClaim?: boolean;
   onPress?: () => void;
   onGiftPress?: () => void;
@@ -238,6 +239,7 @@ export function AvatarCluster({
   giftIcon = null,
   giftAccent = null,
   connectionState,
+  autoplayActive = false,
   showClaim = false,
   onPress,
   onGiftPress,
@@ -266,6 +268,8 @@ export function AvatarCluster({
   );
   const connectionBorderColor =
     connectionState === 'offline' ? '#FF6B6B' : connectionState === 'online' ? '#52E5A7' : null;
+  const autoplayWidth = Math.max(34, Math.round(size * 0.78));
+  const autoplayHeight = Math.max(18, Math.round(size * 0.36));
 
   return (
     <View style={[styles.cluster, { width: size + 12, height: size + 12 }]}>
@@ -274,9 +278,30 @@ export function AvatarCluster({
         fallbackInitial={fallbackInitial}
         size={size}
         onPress={onPress}
-        style={connectionBorderColor ? { borderColor: connectionBorderColor } : undefined}
+        style={{
+          ...(connectionBorderColor ? { borderColor: connectionBorderColor } : {}),
+          opacity: autoplayActive ? 0.42 : 1,
+        }}
         disabled={disabled}
       />
+      {autoplayActive ? (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.autoplayBadge,
+            {
+              width: autoplayWidth,
+              height: autoplayHeight,
+              borderRadius: autoplayHeight / 2,
+              left: ((size + 12) - autoplayWidth) / 2,
+              top: ((size + 12) - autoplayHeight) / 2,
+            },
+          ]}
+        >
+          <Bot color="#E8ECF1" size={Math.max(10, Math.round(autoplayHeight * 0.58))} strokeWidth={2.8} />
+          <Text style={[styles.autoplayText, { fontSize: Math.max(7, Math.round(autoplayHeight * 0.36)) }]}>AUTO</Text>
+        </View>
+      ) : null}
       {league ? (
         <View
           pointerEvents="none"
@@ -402,6 +427,22 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 7,
     elevation: 7,
+  },
+  autoplayBadge: {
+    position: 'absolute',
+    zIndex: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(232,236,241,0.72)',
+    backgroundColor: 'rgba(11,16,35,0.92)',
+  },
+  autoplayText: {
+    color: '#E8ECF1',
+    fontWeight: '900',
+    letterSpacing: 0,
   },
   giftItem: {
     textAlign: 'center',

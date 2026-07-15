@@ -28,7 +28,19 @@ import {
   resolveExpiredTimers,
   sanitizePlayerIdentity,
   takeDiscard,
+  PEEK_DURATION,
+  TURN_DURATION,
 } from '../shared/rules.js';
+import { aiPlayTurn, chooseAiMove } from '../shared/soloAi.js';
+import {
+  applyAfkCoinPenalty,
+  normalizeAfkConfig,
+  normalizeAfkPlayerState,
+  placementsWithAfkPenalty,
+  recordAutomatedAfkWindow,
+  recordHumanAfkAction,
+  recordMissedAfkWindow,
+} from './afk.js';
 import {
   applyMatchProgression,
   claimChallengeReward,
@@ -62,7 +74,6 @@ import {
   normalizeCompetitiveState,
   normalizeRankedPlayerCount,
   normalizeRankedSeason,
-  placementForTotals,
   publicCompetitiveByPlayers,
   publicCompetitiveState,
   rankedDisplayEmblemChoices,
@@ -404,6 +415,7 @@ const adminStore = normalizeAdminStore({});
 const catalogStore = normalizeCatalogStore({});
 const economyStore = normalizeEconomyConfigStore({});
 let availabilityStore = normalizeAvailabilityStore({});
+let afkConfigStore = normalizeAfkConfig({});
 const postgresStore = createPostgresStore(DATABASE_URL);
 const googleOAuthClient = new OAuth2Client();
 const MINIMUM_RANKED_BUILD = 39;
@@ -890,6 +902,7 @@ function applyStoreState(parsed = {}) {
   seedCatalogStore(catalogStore);
   Object.assign(economyStore, normalizeEconomyConfigStore(parsed.economyConfig || {}));
   availabilityStore = normalizeAvailabilityStore(parsed.availabilityConfig || {});
+  afkConfigStore = normalizeAfkConfig(parsed.afkConfig || {});
   normalizeAdminStore(Object.assign(adminStore, {
     admins: parsed.admins || [],
     adminSessions: parsed.adminSessions || [],
@@ -944,6 +957,7 @@ function storeSnapshot() {
     competitiveConfig: competitiveStore,
     economyConfig: economyStore,
     availabilityConfig: availabilityStore,
+    afkConfig: afkConfigStore,
     catalog: catalogStore,
     clubs: [...clubs.values()],
     admins: adminStore.admins,
@@ -2013,6 +2027,7 @@ function roomSummary(room) {
         club: safeAccount?.club || null,
         ready: true,
         connected: room.connected.get(player.userId) || false,
+        autoplayActive: afkPlayerState(room, player.userId).autoplayActive,
         isHost: player.userId === room.hostUserId,
       };
     }),
@@ -2021,6 +2036,7 @@ function roomSummary(room) {
 
 function broadcastRoom(room) {
   if (!syncRoomCountdown(room)) return;
+  ensureAutoplaySchedules(room);
   io.to(room.code).emit('room:update', roomSummary(room));
   if (room.game) {
     for (const player of room.players) {
@@ -2035,6 +2051,7 @@ function maybeSendTurnPush(room) {
   if (!game || game.completed || game.phase !== 'turn') return;
   const activePlayer = game.players?.[game.currentPlayerIndex];
   if (!activePlayer?.userId) return;
+  if (afkPlayerState(room, activePlayer.userId).autoplayActive) return;
   const foreground = room.foreground?.get(activePlayer.userId);
   const connected = room.connected?.get(activePlayer.userId) || false;
   if (foreground || (foreground == null && connected)) return;
@@ -2081,7 +2098,7 @@ function queueDailyBonusPushes(now = Date.now()) {
 }
 
 function gameViewFor(room, userId) {
-  return publicGameState(
+  const view = publicGameState(
     room.game,
     userId,
     room.held.get(userId) || null,
@@ -2089,6 +2106,195 @@ function gameViewFor(room, userId) {
     room.heldMustReplace?.get(userId) || false,
     room.heldCanDiscard?.get(userId) || false
   );
+  const playerAfk = afkPlayerState(room, userId);
+  return {
+    ...view,
+    viewerAutoplay: {
+      active: playerAfk.autoplayActive,
+      consecutiveMisses: playerAfk.consecutiveMisses,
+      automatedWindows: playerAfk.automatedWindows,
+      penaltyPending: playerAfk.penaltyPending,
+      takeoverThreshold: afkConfigStore.takeoverMisses,
+      penaltyThreshold: afkConfigStore.penaltyAutomatedWindows,
+    },
+  };
+}
+
+function afkPlayerState(room, userId) {
+  room.afkStates ||= new Map();
+  const normalized = normalizeAfkPlayerState(room.afkStates.get(userId));
+  room.afkStates.set(userId, normalized);
+  return normalized;
+}
+
+function setAfkPlayerState(room, userId, state) {
+  room.afkStates ||= new Map();
+  const normalized = normalizeAfkPlayerState(state);
+  room.afkStates.set(userId, normalized);
+  return normalized;
+}
+
+function autoplayWindowFor(room, userId) {
+  const game = room.game;
+  if (!game || game.completed || room.status !== 'playing') return null;
+  if (!afkPlayerState(room, userId).autoplayActive) return null;
+  if (game.phase === 'turn') {
+    const player = game.players?.[game.currentPlayerIndex];
+    if (player?.userId !== userId) return null;
+    return {
+      phase: 'turn',
+      key: `${game.id}:turn:${game.round || 1}:${game.turnEndsAt || 0}:${userId}`,
+    };
+  }
+  if (game.phase === 'peek') {
+    const player = game.players?.find(item => item.userId === userId);
+    if (!player || player.peekFlips >= 2) return null;
+    return {
+      phase: 'peek',
+      key: `${game.id}:peek:${game.round || 1}:${game.peekEndsAt || 0}:${userId}`,
+    };
+  }
+  return null;
+}
+
+function cancelAutoplaySchedule(room, userId) {
+  const schedule = room.autoplaySchedules?.get(userId);
+  if (!schedule) return;
+  clearTimeout(schedule.cueTimer);
+  clearTimeout(schedule.commitTimer);
+  room.autoplaySchedules.delete(userId);
+}
+
+function cancelAllAutoplaySchedules(room) {
+  for (const userId of room.autoplaySchedules?.keys?.() || []) cancelAutoplaySchedule(room, userId);
+}
+
+function autoplayCueFor(room, userId, window) {
+  if (window.phase === 'peek') {
+    return { source: 'peek', intent: 'complete-initial-peek' };
+  }
+  const playerIndex = getRoomPlayerIndex(room, userId);
+  const move = chooseAiMove(room.game, playerIndex, 'easy');
+  return {
+    source: move?.source || 'draw',
+    intent: move?.intent || 'easy-autoplay',
+  };
+}
+
+function emitAutoplayCue(room, userId, window) {
+  const current = autoplayWindowFor(room, userId);
+  if (!current || current.key !== window.key) return;
+  const cue = autoplayCueFor(room, userId, window);
+  io.to(room.code).emit('game:autoplay:cue', {
+    userId,
+    phase: window.phase,
+    source: cue.source,
+    intent: cue.intent,
+    round: room.game.round || 1,
+    turnSerial: room.game.turnSerial || 0,
+    windowKey: window.key,
+  });
+}
+
+function recordAutomatedWindow(room, userId) {
+  return setAfkPlayerState(
+    room,
+    userId,
+    recordAutomatedAfkWindow(afkPlayerState(room, userId), afkConfigStore)
+  );
+}
+
+function commitAutoplayWindow(room, userId, window) {
+  const scheduled = room.autoplaySchedules?.get(userId);
+  if (!scheduled || scheduled.key !== window.key) return;
+  room.autoplaySchedules.delete(userId);
+  const current = autoplayWindowFor(room, userId);
+  if (!current || current.key !== window.key) return;
+
+  const playerIndex = getRoomPlayerIndex(room, userId);
+  if (playerIndex < 0) return;
+  const beforeGame = room.game;
+  let next = room.game;
+  if (window.phase === 'turn') {
+    next = aiPlayTurn(room.game, playerIndex, 'easy');
+  } else {
+    for (let r = 0; r < 3 && next.phase === 'peek' && next.players[playerIndex]?.peekFlips < 2; r += 1) {
+      for (let c = 0; c < 3 && next.phase === 'peek' && next.players[playerIndex]?.peekFlips < 2; c += 1) {
+        if (!next.players[playerIndex]?.grid?.[r]?.[c]?.faceUp) {
+          const flipped = flipForPeek(next, playerIndex, r, c);
+          if (!flipped.error) next = flipped.state;
+        }
+      }
+    }
+  }
+  if (next === beforeGame || (next.revision || 0) === (beforeGame.revision || 0)) return;
+
+  trackColumnClears(room, userId, countNewClearedColumns(beforeGame, next, playerIndex));
+  room.game = next;
+  recordAutomatedWindow(room, userId);
+  captureRoundProgress(room);
+  recordCompletedGame(room);
+  room.updatedAt = Date.now();
+  broadcastRoom(room);
+}
+
+function scheduleAutoplayWindow(room, userId, window) {
+  const config = normalizeAfkConfig(afkConfigStore);
+  const cueTimer = setTimeout(() => emitAutoplayCue(room, userId, window), config.sourceCueMs);
+  const commitTimer = setTimeout(() => commitAutoplayWindow(room, userId, window), config.commitMs);
+  cueTimer.unref?.();
+  commitTimer.unref?.();
+  room.autoplaySchedules.set(userId, { ...window, cueTimer, commitTimer });
+}
+
+function ensureAutoplaySchedules(room) {
+  room.autoplaySchedules ||= new Map();
+  const desired = new Map();
+  for (const player of room.players || []) {
+    const window = autoplayWindowFor(room, player.userId);
+    if (window) desired.set(player.userId, window);
+  }
+  for (const [userId, schedule] of room.autoplaySchedules) {
+    if (desired.get(userId)?.key !== schedule.key) cancelAutoplaySchedule(room, userId);
+  }
+  for (const [userId, window] of desired) {
+    if (!room.autoplaySchedules.has(userId)) scheduleAutoplayWindow(room, userId, window);
+  }
+}
+
+function roomMissWindowKey(room, userId, phase) {
+  const game = room.game;
+  return phase === 'peek'
+    ? `${game.id}:peek:${game.round || 1}:${game.peekEndsAt || 0}:${userId}`
+    : `${game.id}:turn:${game.round || 1}:${game.turnEndsAt || 0}:${userId}`;
+}
+
+function recordRoomMissedWindow(room, userId, phase) {
+  if (!userId) return false;
+  room.afkProcessedWindows ||= new Set();
+  const key = roomMissWindowKey(room, userId, phase);
+  if (room.afkProcessedWindows.has(key)) return false;
+  room.afkProcessedWindows.add(key);
+  const result = recordMissedAfkWindow(afkPlayerState(room, userId), afkConfigStore);
+  setAfkPlayerState(room, userId, result.state);
+  if (result.activated) {
+    queuePushToUser(userId, {
+      type: 'autoplay',
+      keyName: 'autoplay',
+      dedupeKey: `${room.code}:${key}`,
+      title: 'Autoplay is active',
+      body: 'Golf 9 is playing for you. Tap to take back control.',
+      data: { type: 'autoplay', roomCode: room.code, roomId: room.game?.id },
+    });
+  }
+  return true;
+}
+
+function recordHumanRoomAction(room, userId) {
+  const current = afkPlayerState(room, userId);
+  if (!current.autoplayActive && current.consecutiveMisses === 0) return current;
+  cancelAutoplaySchedule(room, userId);
+  return setAfkPlayerState(room, userId, recordHumanAfkAction(current));
 }
 
 function getRoomPlayerIndex(room, userId) {
@@ -2172,6 +2378,7 @@ function resolveRoomExpiredTimers(room) {
   if (room.game.phase === 'turn' && room.game.turnEndsAt && now >= room.game.turnEndsAt) {
     const idx = room.game.currentPlayerIndex;
     const userId = room.game.players[idx]?.userId;
+    recordRoomMissedWindow(room, userId, 'turn');
     const heldCard = userId ? room.held.get(userId) : null;
     if (userId && room.game.pendingDecision && !heldCard) {
       const result = resolvePendingGridDecisionWithoutHeld(room.game, idx);
@@ -2208,6 +2415,12 @@ function resolveRoomExpiredTimers(room) {
         room.heldCanDiscard.delete(userId);
         return true;
       }
+    }
+  }
+
+  if (room.game.phase === 'peek' && room.game.peekEndsAt && now >= room.game.peekEndsAt) {
+    for (const player of room.game.players || []) {
+      if (player.peekFlips < 2) recordRoomMissedWindow(room, player.userId, 'peek');
     }
   }
 
@@ -2305,6 +2518,7 @@ function refundWaitingRoom(room) {
 function cancelUnavailableLobby(room, resolution) {
   if (!room || room.status !== 'lobby') return false;
   cancelRoomCountdown(room);
+  cancelAllAutoplaySchedules(room);
   refundWaitingRoom(room);
   const payload = unavailablePayload(resolution || blockedRoomAvailability(room));
   io.to(room.code).emit('room:cancelled', payload);
@@ -2428,6 +2642,9 @@ function makeRoom(hostUser, {
     roundSummaryAcks: new Set(),
     progressionStats: new Map(),
     progressionRoundKeys: new Set(),
+    afkStates: new Map(),
+    afkProcessedWindows: new Set(),
+    autoplaySchedules: new Map(),
     chat: [],
     chatRate: new Map(),
     countdownEndsAt: null,
@@ -2661,6 +2878,7 @@ function startRoomGame(room, { requireReady = false } = {}) {
   if (requireReady && !room.players.every(player => room.ready.get(player.userId))) throw new Error('All players must be ready.');
   chargeRoomBuyIns(room);
   cancelRoomCountdown(room);
+  cancelAllAutoplaySchedules(room);
   room.status = 'playing';
   room.held = new Map();
   room.heldSource = new Map();
@@ -2669,6 +2887,9 @@ function startRoomGame(room, { requireReady = false } = {}) {
   room.roundSummaryAcks = new Set();
   room.progressionStats = new Map();
   room.progressionRoundKeys = new Set();
+  room.afkStates = new Map();
+  room.afkProcessedWindows = new Set();
+  room.autoplaySchedules = new Map();
   room.game = createGameState(
     room.players.map(player => {
       const account = users.get(player.userId) || player;
@@ -2691,6 +2912,8 @@ function recordCompletedGame(room) {
   const totals = room.game.totals || room.game.players.map(player => 0);
   const winningTotal = Math.min(...totals);
   const matchType = room.matchType === 'ranked' ? 'ranked' : room.matchType === 'wager' ? 'wager' : 'casual';
+  const afkPenaltyFlags = room.game.players.map(player => afkPlayerState(room, player.userId).penaltyPending);
+  const rankedPlacements = placementsWithAfkPenalty(totals, afkPenaltyFlags);
   const result = {
     resultId: crypto.randomUUID(),
     completedAt: Date.now(),
@@ -2704,6 +2927,12 @@ function recordCompletedGame(room) {
       displayName: player.name,
       total: totals[index] || 0,
       won: (totals[index] || 0) === winningTotal,
+      afk: {
+        automatedWindows: afkPlayerState(room, player.userId).automatedWindows,
+        penaltyApplied: afkPlayerState(room, player.userId).penaltyPending,
+        forcedRankedLast: matchType === 'ranked' && afkPlayerState(room, player.userId).penaltyPending,
+        coinPenalty: 0,
+      },
     })),
   };
   const payoutMap = applyEconomyPayouts(room, result);
@@ -2743,13 +2972,20 @@ function recordCompletedGame(room) {
         matchId: result.resultId,
         roomCode: room.code,
         playerCount: result.players.length,
-        placement: placementForTotals(totals, playerIndex),
+        placement: rankedPlacements[playerIndex],
         total: player.total,
         opponentMmrs,
         columnClears: telemetry.columnClears || 0,
       }, rankedSeason, result.completedAt, rankedConfig());
       player.ranked = ranked;
       player.progression.ranked = ranked;
+    }
+    if (player.afk.penaltyApplied) {
+      user.currency ||= { coins: 0 };
+      const penalty = applyAfkCoinPenalty(user.currency.coins, afkConfigStore);
+      user.currency.coins = penalty.balance;
+      player.afk.coinPenalty = penalty.deducted;
+      player.progression.afk = player.afk;
     }
     const roomPlayer = room.players.find(item => item.userId === player.userId);
     emitProgressionCelebrations(room, player.userId, player.displayName, roomPlayer?.avatarInitial, player.progression);
@@ -3103,7 +3339,25 @@ app.get('/admin/api/live-ops', requireAdmin(adminStore, 'availability:read'), (_
       level: user.progression?.level || 1,
     })),
     impact: liveOpsImpactSummary(),
+    afkConfig: afkConfigStore,
   });
+});
+
+app.post('/admin/api/live-ops/afk', requireAdmin(adminStore, 'availability:write'), (req, res) => {
+  try {
+    const reason = cleanAdminReason(req.body?.reason);
+    const previous = afkConfigStore;
+    afkConfigStore = normalizeAfkConfig(req.body?.config || {});
+    writeAudit(adminStore, req, req.admin.admin, 'admin.live_ops.afk.update', { scope: 'online_matches' }, {
+      reason,
+      previous,
+      next: afkConfigStore,
+    });
+    saveStore();
+    return res.json({ ok: true, afkConfig: afkConfigStore });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
 });
 
 app.get('/admin/api/live-ops/testers', requireAdmin(adminStore, 'availability:read'), (req, res) => {
@@ -5564,7 +5818,10 @@ io.on('connection', (socket) => {
     room.foreground?.delete(userId);
     if (room.hostUserId === userId && room.players.length) room.hostUserId = room.players[0].userId;
     cancelRoomCountdown(room);
-    if (!room.players.length) rooms.delete(room.code);
+    if (!room.players.length) {
+      cancelAllAutoplaySchedules(room);
+      rooms.delete(room.code);
+    }
     else broadcastRoom(room);
     room.chatRate?.delete(userId);
     socket.leave(room.code);
@@ -5760,6 +6017,7 @@ io.on('connection', (socket) => {
       }
     }
     if (result.error) return cb({ error: result.error });
+    if (type !== 'continueRound') recordHumanRoomAction(room, userId);
     trackColumnClears(room, userId, countNewClearedColumns(beforeGame, result.state, idx));
     room.game = result.state;
     captureRoundProgress(room);
@@ -5768,6 +6026,26 @@ io.on('connection', (socket) => {
     room.updatedAt = Date.now();
     broadcastRoom(room);
     return cb({ ok: true, drawn });
+  });
+
+  socket.on('game:take-control', ({ code }, cb = () => {}) => {
+    const room = rooms.get(String(code || '').toUpperCase());
+    const userId = socket.auth.user.userId;
+    if (!room?.game || room.game.completed || room.status !== 'playing') return cb({ error: 'Game not found.' });
+    const playerIndex = getRoomPlayerIndex(room, userId);
+    if (playerIndex < 0) return cb({ error: 'You are not seated in this game.' });
+    const afk = afkPlayerState(room, userId);
+    if (!afk.autoplayActive) return cb({ ok: true, game: gameViewFor(room, userId) });
+    recordHumanRoomAction(room, userId);
+    if (room.game.phase === 'turn' && room.game.currentPlayerIndex === playerIndex) {
+      room.game = { ...room.game, turnEndsAt: Date.now() + TURN_DURATION };
+    } else if (room.game.phase === 'peek' && room.game.players[playerIndex]?.peekFlips < 2) {
+      room.game = { ...room.game, peekEndsAt: Date.now() + PEEK_DURATION };
+    }
+    room.updatedAt = Date.now();
+    broadcastRoom(room);
+    saveStore();
+    return cb({ ok: true, game: gameViewFor(room, userId) });
   });
 
   socket.on('disconnect', () => {
@@ -5813,12 +6091,14 @@ setInterval(() => {
     const keepActiveMatch = room.status === 'playing' && room.game && !room.game.completed;
     if (!keepActiveMatch && now - room.updatedAt > ROOM_TTL_MS) {
       cancelRoomCountdown(room);
+      cancelAllAutoplaySchedules(room);
       rooms.delete(code);
     }
     else if (gameChanged) {
       room.updatedAt = now;
       broadcastRoom(room);
     }
+    else ensureAutoplaySchedules(room);
   }
   saveStore();
 }, 1000);

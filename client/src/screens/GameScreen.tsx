@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as NavigationBar from 'expo-navigation-bar';
 import { Audio } from 'expo-av';
-import { Bell, Gem, LockKeyhole, MessageCircle, Settings, ShoppingBag, Trophy, UserPlus, Users, X } from 'lucide-react-native';
+import { Bell, Bot, Gem, LockKeyhole, MessageCircle, Settings, ShoppingBag, Trophy, UserPlus, Users, X } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import type { GameState, Card, Grid, PlayerIdentity } from '../game/types';
@@ -35,13 +35,16 @@ import {
   joinRoomSocket,
   onChatHistory,
   onChatMessage,
+  onAutoplayCue,
   onGameCelebration,
   onGameUpdate,
   onRoomUpdate,
   onSocketConnect,
   sendChatMessage,
   sendGameIntent,
+  takeBackControl,
   updateRoomPresence,
+  type AutoplayCue,
   type ChatMessage,
   type ChatMessageType,
 } from '../services/network';
@@ -255,6 +258,9 @@ export default function GameScreen({ route, navigation }: Props) {
   const [dismissedPeekPromptKey, setDismissedPeekPromptKey] = useState<string | null>(null);
   const [gameplayPrefs, setGameplayPrefs] = useState<GameplayPreferences>(getGameplayPreferences());
   const [matchProgression, setMatchProgression] = useState<api.MatchProgressionSummary | null>(null);
+  const [autoplayCue, setAutoplayCue] = useState<AutoplayCue | null>(null);
+  const [autoplayNoticeVisible, setAutoplayNoticeVisible] = useState(false);
+  const [takingControl, setTakingControl] = useState(false);
 
   const [sweepActive, setSweepActive] = useState(false);
   const sweepStarter = useRef<number | null>(null);
@@ -279,6 +285,9 @@ export default function GameScreen({ route, navigation }: Props) {
   const matchProgressionKey = useRef<string | null>(null);
   const localRoundScores = useRef<number[]>([]);
   const localColumnClears = useRef<number[]>(Array.from({ length: players }, () => 0));
+  const autoplayCueTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoplayNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousViewerAutoplay = useRef(false);
 
   const metrics = useBoardMetrics(state.players.length);
   const isSolo = mode === 'solo';
@@ -302,6 +311,7 @@ export default function GameScreen({ route, navigation }: Props) {
   const currentTurnPlayer = state.players[state.currentPlayerIndex];
   const currentTurnUserId = currentTurnPlayer?.userId;
   const currentTurnName = currentTurnPlayer?.name ?? 'Player';
+  const viewerAutoplayActive = isOnline && !!state.viewerAutoplay?.active;
   const sweepStarterName = state.sweepStarterIndex == null ? 'A player' : state.players[state.sweepStarterIndex]?.name ?? 'A player';
   const viewerCosmetics = user?.inventory?.equipped;
   const tableTheme = getTableThemeVisual(viewerCosmetics?.tableTheme);
@@ -505,6 +515,20 @@ export default function GameScreen({ route, navigation }: Props) {
     resyncOnlineRoom({ quiet: true });
   }, [resyncOnlineRoom]);
 
+  const handleTakeBackControl = useCallback(async () => {
+    if (!isOnline || !token || !roomCode || takingControl) return;
+    setTakingControl(true);
+    try {
+      const response = await takeBackControl(token, roomCode);
+      applyOnlineGameState(response.game);
+      setAutoplayNoticeVisible(false);
+    } catch (error) {
+      handleOnlineActionError('Unable to take control', error);
+    } finally {
+      setTakingControl(false);
+    }
+  }, [applyOnlineGameState, handleOnlineActionError, isOnline, roomCode, takingControl, token]);
+
   useEffect(() => {
     if (!isOnline || !token || !roomCode) return;
     let cancelled = false;
@@ -517,6 +541,15 @@ export default function GameScreen({ route, navigation }: Props) {
     });
     const cleanupGame = onGameUpdate(next => {
       if (!cancelled) applyOnlineGameState(next);
+    });
+    const cleanupAutoplayCue = onAutoplayCue(cue => {
+      if (cancelled) return;
+      setAutoplayCue(cue);
+      if (autoplayCueTimer.current) clearTimeout(autoplayCueTimer.current);
+      autoplayCueTimer.current = setTimeout(() => {
+        setAutoplayCue(current => current?.windowKey === cue.windowKey ? null : current);
+        autoplayCueTimer.current = null;
+      }, 2400);
     });
     const cleanupHistory = onChatHistory(messages => {
       if (!cancelled) setChatMessages(messages);
@@ -540,11 +573,36 @@ export default function GameScreen({ route, navigation }: Props) {
       cleanupRoom();
       cleanupConnect();
       cleanupGame();
+      cleanupAutoplayCue();
       cleanupHistory();
       cleanupMessage();
       cleanupCelebration();
     };
   }, [applyOnlineGameState, isOnline, resyncOnlineRoom, roomCode, showSocialBurst, token, user?.userId]);
+
+  useEffect(() => {
+    const wasActive = previousViewerAutoplay.current;
+    previousViewerAutoplay.current = viewerAutoplayActive;
+    if (!viewerAutoplayActive) {
+      if (autoplayNoticeTimer.current) clearTimeout(autoplayNoticeTimer.current);
+      autoplayNoticeTimer.current = null;
+      setAutoplayNoticeVisible(false);
+      return;
+    }
+    if (!wasActive) {
+      setAutoplayNoticeVisible(true);
+      if (autoplayNoticeTimer.current) clearTimeout(autoplayNoticeTimer.current);
+      autoplayNoticeTimer.current = setTimeout(() => {
+        setAutoplayNoticeVisible(false);
+        autoplayNoticeTimer.current = null;
+      }, 5000);
+    }
+  }, [viewerAutoplayActive]);
+
+  useEffect(() => () => {
+    if (autoplayCueTimer.current) clearTimeout(autoplayCueTimer.current);
+    if (autoplayNoticeTimer.current) clearTimeout(autoplayNoticeTimer.current);
+  }, []);
 
   useEffect(() => {
     if (!isOnline || state.completed) return;
@@ -995,6 +1053,26 @@ export default function GameScreen({ route, navigation }: Props) {
   const roomPlayersById = useMemo(() => {
     return new Map(roomPlayers.map(player => [player.userId, player]));
   }, [roomPlayers]);
+  const activeRoomPlayer = currentTurnUserId ? roomPlayersById.get(currentTurnUserId) : undefined;
+  const peekAutoplayActive = state.phase === 'peek' && state.players.some(player => {
+    const roomPlayer = roomPlayersById.get(player.userId);
+    const active = !!roomPlayer?.autoplayActive
+      || (player.userId === user?.userId && viewerAutoplayActive);
+    return active && player.peekFlips < 2;
+  });
+  const tableAutoplayActive = isOnline && (
+    (state.phase === 'turn' && (
+      !!activeRoomPlayer?.autoplayActive
+      || (currentTurnUserId === user?.userId && viewerAutoplayActive)
+    ))
+    || peekAutoplayActive
+  );
+  const activeAutoplayCueSource = autoplayCue?.phase === 'turn'
+    && state.phase === 'turn'
+    && autoplayCue.userId === currentTurnUserId
+    && (autoplayCue.source === 'draw' || autoplayCue.source === 'discard')
+      ? autoplayCue.source
+      : null;
   const visibleRoundScores = useMemo(
     () => state.players.map(player => visibleGridScore(player.grid)),
     [state.players]
@@ -1686,6 +1764,10 @@ export default function GameScreen({ route, navigation }: Props) {
   // ===== Render =====
   const bottomRoomPlayer = roomPlayersById.get(bottomPlayer.userId);
   const bottomConnected = !isOnline || (bottomRoomPlayer?.connected ?? bottomPlayer.connected ?? true);
+  const bottomAutoplayActive = isOnline && (
+    !!bottomRoomPlayer?.autoplayActive
+    || (bottomPlayer.userId === user?.userId && viewerAutoplayActive)
+  );
   const bottomClubTag = bottomRoomPlayer?.club?.tag ?? (bottomPlayer.userId === user?.userId ? user?.club?.tag : null);
   const selfClaimableCount =
     (user?.currency.dailyBonus.canClaim ? 1 : 0)
@@ -1725,7 +1807,7 @@ export default function GameScreen({ route, navigation }: Props) {
   }, [avatarHubCosmeticCatalog]);
   const bottomActiveGift = avatarGifts[bottomPlayer.userId]?.type === 'gift' ? avatarGifts[bottomPlayer.userId] : null;
   const bottomActiveGiftOption = bottomActiveGift?.giftId ? TABLE_GIFTS_BY_ID.get(bottomActiveGift.giftId) : null;
-  const timerLabel = `${secsLeft}s`;
+  const timerLabel = tableAutoplayActive ? 'AUTOPLAY' : `${secsLeft}s`;
   const renderOpponentCard = (opponent: (typeof opponents)[number], slot: 'top' | 'side') => {
     const { p, i } = opponent;
     const roomPlayer = roomPlayersById.get(p.userId);
@@ -1762,6 +1844,7 @@ export default function GameScreen({ route, navigation }: Props) {
             giftIcon={activeGift?.giftIcon ?? activeGiftOption?.icon ?? null}
             giftAccent={activeGiftOption?.accent ?? null}
             connectionState={connected ? 'online' : 'offline'}
+            autoplayActive={!!roomPlayer?.autoplayActive}
             onPress={() => openAvatarHub(p.userId)}
             onGiftPress={() => openAvatarHub(p.userId)}
             disabled={!isOnline && p.userId !== user?.userId}
@@ -1845,8 +1928,12 @@ export default function GameScreen({ route, navigation }: Props) {
           <Settings size={22} color={ui.text.primary} strokeWidth={2.7} />
         </Pressable>
         {gameLayerState.hud.showTimer ? (
-          <View style={[styles.timerChip, secsLeft <= 5 && !isRoundReveal && !isRoundSummary && styles.timerDanger]}>
-            <Text style={styles.timerText}>{timerLabel}</Text>
+          <View style={[
+            styles.timerChip,
+            tableAutoplayActive && styles.timerAutoplayChip,
+            !tableAutoplayActive && secsLeft <= 5 && !isRoundReveal && !isRoundSummary && styles.timerDanger,
+          ]}>
+            <Text style={[styles.timerText, tableAutoplayActive && styles.timerAutoplayText]}>{timerLabel}</Text>
             <Text style={styles.roundText}>R{round}/{TOTAL_ROUNDS}</Text>
           </View>
         ) : null}
@@ -1879,7 +1966,7 @@ export default function GameScreen({ route, navigation }: Props) {
               compact
               onDraw={onDraw}
               onTakeDiscard={onTakeDiscard}
-              activeSource={activeSource}
+              activeSource={activeSource ?? activeAutoplayCueSource}
               cardBackId={bottomCardBackId}
               disableDraw={!canUsePiles && !canSwitchDiscardToDraw}
               disableTake={!canUsePiles || isDrawOnlyTurn || !!state.pendingDecision || !state.topDiscard}
@@ -1899,9 +1986,20 @@ export default function GameScreen({ route, navigation }: Props) {
             { borderTopColor: tableTheme.accentColor, backgroundColor: tableTheme.activePanelColor },
           ],
         ]}
-        pointerEvents={canUseGrid ? 'auto' : 'none'}
+        pointerEvents="auto"
       >
         <SocialBurstBubble burst={socialBursts[bottomPlayer.userId]} />
+        {autoplayNoticeVisible && bottomAutoplayActive ? (
+          <View pointerEvents="none" style={styles.autoplayNotice}>
+            <View style={styles.autoplayNoticeIcon}>
+              <Bot color="#52E5A7" size={20} strokeWidth={2.8} />
+            </View>
+            <View style={styles.autoplayNoticeCopy}>
+              <Text style={styles.autoplayNoticeTitle}>Autoplay is active</Text>
+              <Text style={styles.autoplayNoticeBody}>Easy AI is keeping the table moving for you.</Text>
+            </View>
+          </View>
+        ) : null}
         <View style={styles.localTitleRow}>
           <View style={styles.localIdentity}>
             <AvatarCluster
@@ -1914,6 +2012,7 @@ export default function GameScreen({ route, navigation }: Props) {
               giftIcon={bottomActiveGift?.giftIcon ?? bottomActiveGiftOption?.icon ?? null}
               giftAccent={bottomActiveGiftOption?.accent ?? null}
               connectionState={bottomConnected ? 'online' : 'offline'}
+              autoplayActive={bottomAutoplayActive}
               onPress={() => openAvatarHub(bottomPlayer.userId ?? user?.userId)}
               disabled={!(bottomPlayer.userId ?? user?.userId) || (!isOnline && (bottomPlayer.userId ?? user?.userId) !== user?.userId)}
             />
@@ -1926,7 +2025,11 @@ export default function GameScreen({ route, navigation }: Props) {
                 {isOnline ? (bottomRoomPlayer?.displayName ?? bottomPlayer.name ?? 'Your Grid') : isSolo ? bottomPlayer.name : bottomPlayer.name}
               </Text>
               <Text style={styles.playerGridMeta}>
-                {bottomIsActive && !isRoundReveal && !isRoundSummary ? (state.phase === 'peek' ? 'PEEK' : 'TURN') : bottomConnected ? 'ONLINE' : 'OFFLINE'}
+                {bottomAutoplayActive
+                  ? 'AUTOPLAY'
+                  : bottomIsActive && !isRoundReveal && !isRoundSummary
+                    ? (state.phase === 'peek' ? 'PEEK' : 'TURN')
+                    : bottomConnected ? 'ONLINE' : 'OFFLINE'}
               </Text>
               {user?.progression ? (
                 <View style={styles.selfXpTrack}>
@@ -1940,6 +2043,22 @@ export default function GameScreen({ route, navigation }: Props) {
             <Text style={styles.scoreValue}>Tot {totals[bottomIndex] ?? 0}</Text>
           </View>
         </View>
+        {bottomAutoplayActive && bottomPlayer.userId === user?.userId ? (
+          <Pressable
+            style={({ pressed }) => [
+              styles.takeControlButton,
+              takingControl && styles.takeControlButtonDisabled,
+              pressed && !takingControl && styles.takeControlButtonPressed,
+            ]}
+            onPress={handleTakeBackControl}
+            disabled={takingControl}
+            accessibilityRole="button"
+            accessibilityLabel="Take back control from autoplay"
+          >
+            <Bot color="#0B1023" size={18} strokeWidth={3} />
+            <Text style={styles.takeControlButtonText}>{takingControl ? 'Restoring Control...' : 'Take Back Control'}</Text>
+          </Pressable>
+        ) : null}
         <GridView
           grid={bottomPlayer.grid}
           onPressCard={onPressGrid}
@@ -2579,6 +2698,11 @@ function RewardSummary({ progression }: { progression: api.MatchProgressionSumma
           Prize: {progression.economy.payout} coins  Net {progression.economy.net >= 0 ? '+' : ''}{progression.economy.net}
         </Text>
       ) : null}
+      {progression.afk?.penaltyApplied ? (
+        <Text style={styles.rewardAfk}>
+          Autoplay penalty: -{progression.afk.coinPenalty} coins{progression.afk.forcedRankedLast ? ' and last-place ranked finish' : ''}
+        </Text>
+      ) : null}
       {progression.ranked ? (
         <>
           <Text style={styles.rewardRanked}>
@@ -2652,6 +2776,9 @@ function formatProgressionSummary(progression: api.MatchProgressionSummary | nul
   }
   if (progression.economy) {
     lines.push(`Prize: ${progression.economy.payout} coins (${progression.economy.net >= 0 ? '+' : ''}${progression.economy.net} net)`);
+  }
+  if (progression.afk?.penaltyApplied) {
+    lines.push(`Autoplay penalty: -${progression.afk.coinPenalty} coins${progression.afk.forcedRankedLast ? ' and last-place ranked finish' : ''}`);
   }
   if (progression.levelAfter > progression.levelBefore) {
     lines.push(`Level up: ${progression.levelBefore} -> ${progression.levelAfter}`);
@@ -2770,7 +2897,13 @@ const styles = StyleSheet.create({
     borderColor: '#FF6B6B',
     backgroundColor: '#3A1723',
   },
+  timerAutoplayChip: {
+    minWidth: 70,
+    borderColor: '#52E5A7',
+    backgroundColor: '#123B32',
+  },
   timerText: { color: '#E8ECF1', fontSize: 17, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  timerAutoplayText: { color: '#52E5A7', fontSize: 11 },
   roundText: { color: '#9BA3C7', fontSize: 11, fontWeight: '800', marginTop: 1 },
   roundChip: {
     minWidth: 58,
@@ -3226,6 +3359,33 @@ const styles = StyleSheet.create({
 
   localPanel: { position: 'relative', flexShrink: 0, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 6, borderTopWidth: 1, borderTopColor: 'transparent' },
   localPanelActive: { borderTopColor: '#4DA3FF', backgroundColor: '#0F1530' },
+  autoplayNotice: {
+    position: 'absolute',
+    top: -55,
+    left: 10,
+    right: 10,
+    zIndex: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: '#52E5A7',
+    backgroundColor: '#123B32',
+  },
+  autoplayNoticeIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0B1023',
+  },
+  autoplayNoticeCopy: { flex: 1, minWidth: 0 },
+  autoplayNoticeTitle: { color: '#E8ECF1', fontSize: 12, fontWeight: '900' },
+  autoplayNoticeBody: { color: '#B7EED5', fontSize: 10, fontWeight: '700', marginTop: 1 },
   localTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
   localIdentity: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 },
   localTitlePressable: { flex: 1, minWidth: 0 },
@@ -3245,6 +3405,19 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: '#52E5A7',
   },
+  takeControlButton: {
+    minHeight: 38,
+    marginBottom: 7,
+    borderRadius: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    backgroundColor: '#52E5A7',
+  },
+  takeControlButtonDisabled: { opacity: 0.58 },
+  takeControlButtonPressed: { opacity: 0.82 },
+  takeControlButtonText: { color: '#0B1023', fontSize: 12, fontWeight: '900' },
   turnBadge: {
     color: '#0B1023',
     backgroundColor: '#52E5A7',
@@ -3387,6 +3560,7 @@ const styles = StyleSheet.create({
   rewardTitle: { color: '#FFCC66', fontSize: 14, fontWeight: '900', textAlign: 'center', marginBottom: 5 },
   rewardLine: { color: '#E8ECF1', fontSize: 13, fontWeight: '900', textAlign: 'center' },
   rewardPrize: { color: '#FFCC66', fontSize: 13, fontWeight: '900', textAlign: 'center', marginTop: 4 },
+  rewardAfk: { color: '#FF9B9B', fontSize: 12, fontWeight: '900', textAlign: 'center', marginTop: 4 },
   rewardRanked: { color: '#FFCC66', fontSize: 13, fontWeight: '900', textAlign: 'center', marginTop: 4 },
   rewardRankedMeta: { color: '#9BA3C7', fontSize: 12, fontWeight: '900', textAlign: 'center', marginTop: 2 },
   rewardLevel: { color: '#52E5A7', fontSize: 12, fontWeight: '900', textAlign: 'center', marginTop: 4 },

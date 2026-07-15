@@ -490,6 +490,27 @@
             </div>
           </div>
 
+          <form id="afkConfigEditor" class="panel compact editor">
+            <div class="split-header">
+              <div>
+                <h3>Online AFK Autoplay</h3>
+                <p class="muted">Tune when Easy AI takes over an absent player and when the cumulative match penalty applies.</p>
+              </div>
+              <span class="chip blue">Casual, Wager, Ranked</span>
+            </div>
+            <div class="row three">
+              <label>Misses before takeover <input name="takeoverMisses" type="number" min="1" max="10" /></label>
+              <label>Automated windows before penalty <input name="penaltyAutomatedWindows" type="number" min="1" max="50" /></label>
+              <label>Coin fine <input name="coinPenalty" type="number" min="0" max="1000000" step="1" /></label>
+            </div>
+            <div class="row two">
+              <label>Source cue delay (ms) <input name="sourceCueMs" type="number" min="250" max="10000" step="50" /></label>
+              <label>Move commit delay (ms) <input name="commitMs" type="number" min="500" max="30000" step="50" /></label>
+            </div>
+            <label>Administrative reason <input name="reason" maxlength="240" placeholder="Required for the audit trail" required /></label>
+            <button type="submit">Save AFK Settings</button>
+          </form>
+
           <div class="panel compact">
             <div class="split-header">
               <div>

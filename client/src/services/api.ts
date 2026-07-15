@@ -113,6 +113,7 @@ export type RoomPlayer = {
   club?: ClubSummary | null;
   ready: boolean;
   connected: boolean;
+  autoplayActive?: boolean;
   isHost: boolean;
 };
 export type RoomSummary = {
@@ -260,7 +261,23 @@ export type GameResult = {
   mode?: 'online' | 'solo' | 'passplay';
   round: number;
   totalRounds: number;
-  players: Array<{ userId: string; displayName: string; total: number; won: boolean; progression?: MatchProgressionSummary; ranked?: RankedMatchSummary; economy?: MatchEconomyResult }>;
+  players: Array<{
+    userId: string;
+    displayName: string;
+    total: number;
+    won: boolean;
+    progression?: MatchProgressionSummary;
+    ranked?: RankedMatchSummary;
+    economy?: MatchEconomyResult;
+    afk?: AfkMatchResult;
+  }>;
+};
+
+export type AfkMatchResult = {
+  automatedWindows: number;
+  penaltyApplied: boolean;
+  forcedRankedLast: boolean;
+  coinPenalty: number;
 };
 
 export type ProgressionState = {
@@ -328,6 +345,7 @@ export type MatchProgressionSummary = {
   ranked?: RankedMatchSummary;
   economy?: MatchEconomyResult;
   club?: ClubContributionSummary;
+  afk?: AfkMatchResult;
 };
 
 export type Challenge = {
