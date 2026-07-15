@@ -21,6 +21,7 @@ test('postgres store loads and saves economy config metadata', async () => {
             { key: 'economyConfig', value: { wagerTables: [{ id: 'wager-50000', buyIn: 50000 }] } },
             { key: 'notificationConfig', value: { enabled: true, types: { turn: { title: 'Turn ready' } } } },
             { key: 'afkConfig', value: { takeoverMisses: 2, coinPenalty: 100 } },
+            { key: 'releasePolicy', value: { revision: 3, entries: { 'playtest.android': { latestBuild: 43 } } } },
           ],
         };
       }
@@ -34,6 +35,7 @@ test('postgres store loads and saves economy config metadata', async () => {
   assert.equal(loaded.economyConfig.wagerTables[0].buyIn, 50000);
   assert.equal(loaded.notificationConfig.types.turn.title, 'Turn ready');
   assert.equal(loaded.afkConfig.takeoverMisses, 2);
+  assert.equal(loaded.releasePolicy.entries['playtest.android'].latestBuild, 43);
 
   await store.save({
     rankedSeason: { id: 'season-two' },
@@ -41,6 +43,7 @@ test('postgres store loads and saves economy config metadata', async () => {
     economyConfig: { wagerTables: [{ id: 'wager-25000', buyIn: 25000 }] },
     notificationConfig: { enabled: false },
     afkConfig: { takeoverMisses: 3, coinPenalty: 250 },
+    releasePolicy: { revision: 4, entries: { 'playtest.android': { latestBuild: 44 } } },
   });
 
   const economySave = savedQueries.find(query => query.params[0] === 'economyConfig');
@@ -52,4 +55,7 @@ test('postgres store loads and saves economy config metadata', async () => {
   const afkSave = savedQueries.find(query => query.params[0] === 'afkConfig');
   assert.ok(afkSave);
   assert.equal(JSON.parse(afkSave.params[1]).coinPenalty, 250);
+  const releasePolicySave = savedQueries.find(query => query.params[0] === 'releasePolicy');
+  assert.ok(releasePolicySave);
+  assert.equal(JSON.parse(releasePolicySave.params[1]).entries['playtest.android'].latestBuild, 44);
 });

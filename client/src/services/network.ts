@@ -4,8 +4,10 @@
 import { io, Socket } from 'socket.io-client';
 import { SOCKET_URL } from '../config';
 import { getInstallIdSync } from '../utils/deviceIdentity';
+import { releaseSocketAuth } from '../utils/releaseInfo';
 import type { GameState } from '../game/types';
-import type { AvailabilityResponse, ClubAnnouncement, ClubChatMessage, ClubProfile, MailSummary, RoomSummary, SocialSummary } from './api';
+import type { AvailabilityResponse, ClubAnnouncement, ClubChatMessage, ClubProfile, MailSummary, ReleasePolicyResponse, RoomSummary, SocialSummary } from './api';
+import { emitReleaseRequired } from './releasePolicyEvents';
 
 export type ChatMessage = {
   id: string;
@@ -43,7 +45,7 @@ export function connect(token: string): Socket {
   activeToken = token;
   socket = io(SOCKET_URL, {
     transports: ['websocket'],
-    auth: { token, deviceId: getInstallIdSync(), platform: 'mobile' },
+    auth: { token, deviceId: getInstallIdSync(), ...releaseSocketAuth() },
     reconnection: true,
   });
   return socket;
@@ -147,6 +149,24 @@ export function onMailUpdate(cb: (summary: MailSummary) => void) {
 export function onAvailabilityUpdate(cb: (update: { revision: number; availability?: AvailabilityResponse }) => void) {
   socket?.on('availability:update', cb);
   return () => { socket?.off('availability:update', cb); };
+}
+
+export function onReleasePolicyUpdate(cb: (policy: ReleasePolicyResponse) => void) {
+  socket?.on('release-policy:update', cb);
+  return () => { socket?.off('release-policy:update', cb); };
+}
+
+export function onReleasePolicyRequired(cb: (policy: ReleasePolicyResponse) => void) {
+  const listener = (payload: { release?: ReleasePolicyResponse } | ReleasePolicyResponse) => {
+    const policy: ReleasePolicyResponse | undefined = 'release' in payload
+      ? payload.release
+      : payload as ReleasePolicyResponse;
+    if (!policy) return;
+    emitReleaseRequired(policy);
+    cb(policy);
+  };
+  socket?.on('release-policy:required', listener);
+  return () => { socket?.off('release-policy:required', listener); };
 }
 
 export function joinClubSocket(token: string, clubId: string): Promise<{ club: ClubProfile; chat: ClubChatMessage[] }> {

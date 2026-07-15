@@ -7,7 +7,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as NavigationBar from 'expo-navigation-bar';
-import { ActivityIndicator, AppState, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, BackHandler, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   LoginScreen,
@@ -32,6 +32,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ClubRealtimeProvider } from './context/ClubRealtimeContext';
 import { ConnectivityProvider, useConnectivity } from './context/ConnectivityContext';
 import { AvailabilityProvider, useAvailability } from './context/AvailabilityContext';
+import { ReleasePolicyProvider, useReleasePolicy } from './context/ReleasePolicyContext';
 import { OfflineSyncProvider } from './context/OfflineSyncContext';
 import * as api from './services/api';
 import { getGameplayPreferences, subscribeGameplayPreferences, type GameplayPreferences } from './services/preferences';
@@ -379,6 +380,185 @@ function PlayerProfileRoute(props: React.ComponentProps<typeof PlayerProfileScre
   return <AvailabilityRoute featureKey="profile"><PlayerProfileScreen {...props} /></AvailabilityRoute>;
 }
 
+function ReleaseUpdateGate({ navigationTick }: { navigationTick: number }) {
+  const { token, user, signOut } = useAuth();
+  const { isOnline } = useConnectivity();
+  const {
+    policy,
+    loading,
+    refreshing,
+    updating,
+    error,
+    recommendedVisible,
+    refresh,
+    updateNow,
+    remindLater,
+  } = useReleasePolicy();
+  const [activeMatch, setActiveMatch] = useState<api.RoomSummary | null>(null);
+  const [checkingActiveMatch, setCheckingActiveMatch] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    if (policy?.status !== 'required' || policy.enforcement !== 'after_match' || !token || !user?.userId) {
+      setActiveMatch(null);
+      setCheckingActiveMatch(false);
+      return () => {
+        mounted = false;
+      };
+    }
+    setCheckingActiveMatch(true);
+    const check = isOnline
+      ? api.activeRoom(token).then(response => response.mustRejoin ? response.room : null)
+      : loadCachedActiveMatch(user.userId).then(cached => cached ? ({
+        code: cached.roomCode,
+        hostUserId: '',
+        status: 'playing' as const,
+        matchType: 'casual' as const,
+        isPublic: false,
+        maxPlayers: cached.maxPlayers,
+        rounds: cached.rounds,
+        openSeats: 0,
+        economy: { buyIn: 0, pot: 0, chargedAt: null },
+        players: [],
+      }) : null);
+    void check
+      .then(room => {
+        if (mounted) setActiveMatch(room);
+      })
+      .catch(() => {
+        if (mounted) setActiveMatch(null);
+      })
+      .finally(() => {
+        if (mounted) setCheckingActiveMatch(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [isOnline, navigationTick, policy?.enforcement, policy?.revision, policy?.status, token, user?.userId]);
+
+  const currentRoute = navigationRef.getCurrentRoute();
+  const gameParams = currentRoute?.params as Partial<RootStackParamList['Game']> | undefined;
+  const isLocalGame = currentRoute?.name === 'Game' && (gameParams?.mode === 'solo' || gameParams?.mode === 'passplay');
+  const isEssentialRoute = currentRoute?.name === 'Inbox'
+    || currentRoute?.name === 'Settings'
+    || currentRoute?.name === 'Rules'
+    || currentRoute?.name === 'Tutorial';
+  const isOfflineRoute = currentRoute?.name === 'OfflineMenu' || isLocalGame;
+  const finishActiveMatchFirst = policy?.status === 'required'
+    && policy.enforcement === 'after_match'
+    && !!activeMatch;
+  const requiredVisible = policy?.status === 'required'
+    && !finishActiveMatchFirst
+    && !checkingActiveMatch
+    && !isOfflineRoute
+    && !isEssentialRoute;
+  const recommendationVisible = policy?.status === 'recommended'
+    && recommendedVisible
+    && currentRoute?.name !== 'Game';
+
+  useEffect(() => {
+    if (!requiredVisible) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => true);
+    return () => subscription.remove();
+  }, [requiredVisible]);
+
+  if (!policy && loading) return null;
+
+  return (
+    <>
+      {finishActiveMatchFirst ? (
+        <View pointerEvents="none" style={styles.updateAfterMatchBanner}>
+          <Text style={styles.updateAfterMatchText}>Update required after this match</Text>
+        </View>
+      ) : null}
+      {requiredVisible ? (
+        <View style={styles.releaseGateOverlay}>
+          <View style={styles.releaseGateCard}>
+            <Text style={styles.releaseGateEyebrow}>Golf 9 Update</Text>
+            <Text style={styles.releaseGateTitle}>{policy.title || 'Update required'}</Text>
+            <Text style={styles.releaseGateCopy}>
+              {policy.message || 'Install the latest version of Golf 9 to continue online.'}
+            </Text>
+            <View style={styles.releaseVersionRow}>
+              <View style={styles.releaseVersionCell}>
+                <Text style={styles.releaseVersionLabel}>Installed</Text>
+                <Text style={styles.releaseVersionValue}>Build {policy.installedBuild}</Text>
+              </View>
+              <View style={styles.releaseVersionCell}>
+                <Text style={styles.releaseVersionLabel}>Available</Text>
+                <Text style={styles.releaseVersionValue}>Build {policy.latestBuild}</Text>
+              </View>
+            </View>
+            {error ? <Text style={styles.releaseError}>{error}</Text> : null}
+            <Pressable
+              style={[styles.releasePrimaryButton, updating && styles.releaseButtonDisabled]}
+              disabled={updating}
+              onPress={() => void updateNow()}
+            >
+              <Text style={styles.releasePrimaryButtonText}>{updating ? 'Opening Google Play...' : 'Update Now'}</Text>
+            </Pressable>
+            {token ? (
+              <Pressable
+                style={styles.releaseSecondaryButton}
+                onPress={() => {
+                  if (!navigationRef.isReady()) return;
+                  navigationRef.reset({ index: 0, routes: [{ name: 'OfflineMenu' }] });
+                }}
+              >
+                <Text style={styles.releaseSecondaryButtonText}>Play Offline</Text>
+              </Pressable>
+            ) : null}
+            <View style={styles.releaseEssentialRow}>
+              {token ? (
+                <Pressable style={styles.releaseLinkButton} onPress={() => navigationRef.navigate('Inbox')}>
+                  <Text style={styles.releaseLink}>Inbox</Text>
+                </Pressable>
+              ) : null}
+              {token ? (
+                <Pressable style={styles.releaseLinkButton} onPress={() => navigationRef.navigate('Settings')}>
+                  <Text style={styles.releaseLink}>Settings</Text>
+                </Pressable>
+              ) : null}
+              <Pressable style={styles.releaseLinkButton} onPress={() => void Linking.openURL('https://games.joinup.us/privacy')}>
+                <Text style={styles.releaseLink}>Privacy</Text>
+              </Pressable>
+              {token ? (
+                <Pressable style={styles.releaseLinkButton} onPress={() => void signOut()}>
+                  <Text style={styles.releaseLink}>Log Out</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            <Pressable style={styles.releaseCheckButton} disabled={refreshing} onPress={() => void refresh()}>
+              <Text style={styles.releaseCheckText}>{refreshing ? 'Checking...' : 'Check Again'}</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+      <Modal
+        visible={recommendationVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => void remindLater()}
+      >
+        <View style={styles.releaseModalBackdrop}>
+          <View style={styles.releasePromptCard}>
+            <Text style={styles.releaseGateEyebrow}>New Build Available</Text>
+            <Text style={styles.releasePromptTitle}>{policy?.title || 'Golf 9 update available'}</Text>
+            <Text style={styles.releaseGateCopy}>{policy?.message}</Text>
+            {error ? <Text style={styles.releaseError}>{error}</Text> : null}
+            <Pressable style={styles.releasePrimaryButton} onPress={() => void updateNow()} disabled={updating}>
+              <Text style={styles.releasePrimaryButtonText}>{updating ? 'Opening Store...' : 'Update'}</Text>
+            </Pressable>
+            <Pressable style={styles.releaseSecondaryButton} onPress={() => void remindLater()}>
+              <Text style={styles.releaseSecondaryButtonText}>Later</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    </>
+  );
+}
+
 function AppNavigator() {
   const { token, loading } = useAuth();
   const [navigationTick, setNavigationTick] = useState(0);
@@ -427,6 +607,7 @@ function AppNavigator() {
         )}
       </Stack.Navigator>
       {token ? <ActiveMatchGate navigationTick={navigationTick} /> : null}
+      <ReleaseUpdateGate navigationTick={navigationTick} />
     </NavigationContainer>
   );
 }
@@ -463,14 +644,16 @@ export default function App() {
       <StatusBar hidden />
       <ConnectivityProvider>
         <AuthProvider>
-          <AvailabilityProvider>
-            <OfflineSyncProvider>
-              <ClubRealtimeProvider>
-                <PushNotificationRegistration />
-                <AppNavigator />
-              </ClubRealtimeProvider>
-            </OfflineSyncProvider>
-          </AvailabilityProvider>
+          <ReleasePolicyProvider>
+            <AvailabilityProvider>
+              <OfflineSyncProvider>
+                <ClubRealtimeProvider>
+                  <PushNotificationRegistration />
+                  <AppNavigator />
+                </ClubRealtimeProvider>
+              </OfflineSyncProvider>
+            </AvailabilityProvider>
+          </ReleasePolicyProvider>
         </AuthProvider>
       </ConnectivityProvider>
     </SafeAreaProvider>
@@ -478,6 +661,175 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  releaseGateOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1200,
+    elevation: 1200,
+    backgroundColor: '#080C1C',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  releaseGateCard: {
+    width: '100%',
+    maxWidth: 440,
+    borderWidth: 1,
+    borderColor: '#455181',
+    borderRadius: 8,
+    backgroundColor: '#121737',
+    padding: 24,
+  },
+  releaseGateEyebrow: {
+    color: '#FFCC66',
+    fontSize: 13,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  releaseGateTitle: {
+    color: '#F4F7FF',
+    fontSize: 31,
+    fontWeight: '900',
+    marginTop: 8,
+  },
+  releaseGateCopy: {
+    color: '#C9D1EA',
+    fontSize: 16,
+    lineHeight: 23,
+    fontWeight: '700',
+    marginTop: 12,
+  },
+  releaseVersionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 20,
+  },
+  releaseVersionCell: {
+    flex: 1,
+    minHeight: 74,
+    borderWidth: 1,
+    borderColor: '#303A68',
+    borderRadius: 8,
+    backgroundColor: '#0D1230',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+  },
+  releaseVersionLabel: {
+    color: '#8F99BA',
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  releaseVersionValue: {
+    color: '#F4F7FF',
+    fontSize: 18,
+    fontWeight: '900',
+    marginTop: 4,
+  },
+  releaseError: {
+    color: '#FF858F',
+    fontSize: 13,
+    fontWeight: '800',
+    marginTop: 14,
+  },
+  releasePrimaryButton: {
+    minHeight: 56,
+    borderRadius: 8,
+    backgroundColor: '#52E5A7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 20,
+  },
+  releasePrimaryButtonText: {
+    color: '#0B1023',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  releaseSecondaryButton: {
+    minHeight: 50,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#455181',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+  },
+  releaseSecondaryButtonText: {
+    color: '#F4F7FF',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  releaseButtonDisabled: {
+    opacity: 0.65,
+  },
+  releaseEssentialRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 14,
+  },
+  releaseLinkButton: {
+    minHeight: 34,
+    justifyContent: 'center',
+    paddingHorizontal: 7,
+  },
+  releaseLink: {
+    color: '#8FBFFF',
+    fontSize: 13,
+    fontWeight: '800',
+    textDecorationLine: 'underline',
+  },
+  releaseCheckButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 38,
+    marginTop: 6,
+  },
+  releaseCheckText: {
+    color: '#9BA6C9',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  releaseModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(4, 7, 17, 0.88)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  releasePromptCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderWidth: 1,
+    borderColor: '#455181',
+    borderRadius: 8,
+    backgroundColor: '#121737',
+    padding: 22,
+  },
+  releasePromptTitle: {
+    color: '#F4F7FF',
+    fontSize: 26,
+    fontWeight: '900',
+    marginTop: 8,
+  },
+  updateAfterMatchBanner: {
+    position: 'absolute',
+    zIndex: 1100,
+    elevation: 1100,
+    top: 8,
+    alignSelf: 'center',
+    borderWidth: 1,
+    borderColor: '#FFCC66',
+    borderRadius: 6,
+    backgroundColor: 'rgba(18, 23, 55, 0.96)',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  updateAfterMatchText: {
+    color: '#FFCC66',
+    fontSize: 12,
+    fontWeight: '900',
+  },
   availabilityScreen: {
     flex: 1,
     backgroundColor: '#080C1C',

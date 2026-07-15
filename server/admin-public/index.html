@@ -418,6 +418,98 @@
             <div id="liveOpsImpact" class="live-ops-impact"></div>
           </div>
 
+          <div class="release-ops-heading split-header">
+            <div>
+              <p class="eyebrow">Store Delivery</p>
+              <h2>App Releases</h2>
+              <p class="muted">Recommend or require a store build without publishing another server change.</p>
+            </div>
+            <div class="actions-inline">
+              <span id="releasePolicyRevision" class="chip blue">Revision 0</span>
+              <span id="releasePolicyStatus" class="chip">Store not confirmed</span>
+            </div>
+          </div>
+
+          <div class="release-ops-workspace">
+            <form id="releasePolicyEditor" class="panel compact release-policy-editor">
+              <div class="row two">
+                <label>Release channel
+                  <select id="releasePolicyChannel" name="channel">
+                    <option value="playtest">Play internal testing</option>
+                    <option value="production">Production</option>
+                  </select>
+                </label>
+                <label>Platform
+                  <select id="releasePolicyPlatform" name="platform">
+                    <option value="android">Android</option>
+                    <option value="ios">iOS</option>
+                  </select>
+                </label>
+              </div>
+              <div class="row three">
+                <label>Latest store build <input name="latestBuild" type="number" min="0" step="1" /></label>
+                <label>Store version <input name="latestVersion" maxlength="40" placeholder="0.1.0" /></label>
+                <label>Minimum allowed build <input name="minimumBuild" type="number" min="0" step="1" /></label>
+              </div>
+              <label>Store listing URL <input name="storeUrl" maxlength="500" placeholder="https://play.google.com/store/apps/details?id=..." /></label>
+              <label class="checkline release-store-confirmation">
+                <input name="storeReady" type="checkbox" />
+                <span><strong>Store release ready</strong><small>I confirmed this build is fully processed and downloadable on the selected testing or production track.</small></span>
+              </label>
+              <label>Active-match enforcement
+                <select name="enforcement">
+                  <option value="after_match">Finish active match, then require update</option>
+                  <option value="immediate">Emergency: require update immediately</option>
+                </select>
+              </label>
+              <div class="row two release-message-grid">
+                <div class="release-message-fields">
+                  <h4>Recommended Update</h4>
+                  <label>Title <input name="recommendedTitle" maxlength="80" /></label>
+                  <label>Message <textarea name="recommendedMessage" maxlength="280" rows="3"></textarea></label>
+                </div>
+                <div class="release-message-fields">
+                  <h4>Required Update</h4>
+                  <label>Title <input name="requiredTitle" maxlength="80" /></label>
+                  <label>Message <textarea name="requiredMessage" maxlength="280" rows="3"></textarea></label>
+                </div>
+              </div>
+              <div id="releasePolicyPreview" class="release-policy-preview"></div>
+              <div class="row two">
+                <label>Scheduled activation <input name="activateAt" type="datetime-local" /></label>
+                <label>Administrative reason <input name="reason" maxlength="240" placeholder="Required for the audit trail" /></label>
+              </div>
+              <div class="actions-inline">
+                <button id="publishReleasePolicy" type="submit">Publish Now</button>
+                <button id="scheduleReleasePolicy" type="button" class="ghost">Schedule</button>
+              </div>
+              <p class="release-safety-note"><strong>Safe rollout:</strong> publish the latest build with minimum build 0 first. Raise the minimum only after Google Play confirms that build is available to every intended tester.</p>
+              <p id="releasePolicyReadOnly" class="muted hidden">Your admin role has read-only app release access.</p>
+            </form>
+
+            <div class="release-ops-sidebar">
+              <div class="panel compact">
+                <div class="split-header">
+                  <div>
+                    <h3>Scheduled Releases</h3>
+                    <p class="muted">One pending schedule per platform and channel.</p>
+                  </div>
+                  <span id="releasePolicyScheduleCount" class="chip">0 scheduled</span>
+                </div>
+                <div id="releasePolicySchedules" class="list"></div>
+              </div>
+              <div class="panel compact">
+                <div class="split-header">
+                  <div>
+                    <h3>Release History</h3>
+                    <p class="muted">Restore a prior store policy with a recorded reason.</p>
+                  </div>
+                </div>
+                <div id="releasePolicyRevisions" class="release-policy-revisions"></div>
+              </div>
+            </div>
+          </div>
+
           <div class="live-ops-workspace">
             <div class="panel compact live-ops-tree-panel">
               <div class="split-header">

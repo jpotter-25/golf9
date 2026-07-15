@@ -194,6 +194,17 @@ import {
   unavailablePayload,
   updateAvailabilityTesters,
 } from './availability.js';
+import {
+  cancelReleasePolicySchedule,
+  normalizeReleasePolicyStore,
+  processReleasePolicySchedules,
+  publishReleasePolicyChange,
+  releasePolicyAdminView,
+  resolveReleasePolicy,
+  restoreReleasePolicyRevision,
+  scheduleReleasePolicyChange,
+  updateRequiredPayload,
+} from './releasePolicy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DATA_DIR = path.join(__dirname, 'data');
@@ -416,9 +427,9 @@ const catalogStore = normalizeCatalogStore({});
 const economyStore = normalizeEconomyConfigStore({});
 let availabilityStore = normalizeAvailabilityStore({});
 let afkConfigStore = normalizeAfkConfig({});
+let releasePolicyStore = normalizeReleasePolicyStore({});
 const postgresStore = createPostgresStore(DATABASE_URL);
 const googleOAuthClient = new OAuth2Client();
-const MINIMUM_RANKED_BUILD = 39;
 let storeReady = false;
 let storeLoadError = null;
 let lastDailyPushScanAt = 0;
@@ -903,6 +914,7 @@ function applyStoreState(parsed = {}) {
   Object.assign(economyStore, normalizeEconomyConfigStore(parsed.economyConfig || {}));
   availabilityStore = normalizeAvailabilityStore(parsed.availabilityConfig || {});
   afkConfigStore = normalizeAfkConfig(parsed.afkConfig || {});
+  releasePolicyStore = normalizeReleasePolicyStore(parsed.releasePolicy || {});
   normalizeAdminStore(Object.assign(adminStore, {
     admins: parsed.admins || [],
     adminSessions: parsed.adminSessions || [],
@@ -958,6 +970,7 @@ function storeSnapshot() {
     economyConfig: economyStore,
     availabilityConfig: availabilityStore,
     afkConfig: afkConfigStore,
+    releasePolicy: releasePolicyStore,
     catalog: catalogStore,
     clubs: [...clubs.values()],
     admins: adminStore.admins,
@@ -1977,17 +1990,70 @@ function blockRoomFeature(room, userId, res) {
   return true;
 }
 
-function requireRankedBuild(req, res, next) {
-  const build = Number.parseInt(String(req.headers['x-golf9-build'] || ''), 10);
-  if (!Number.isFinite(build) || build < MINIMUM_RANKED_BUILD) {
-    return res.status(426).json({
-      error: 'Update Golf 9 to continue playing ranked.',
-      code: 'RANKED_UPDATE_REQUIRED',
-      minimumBuild: MINIMUM_RANKED_BUILD,
-    });
-  }
-  return next();
+function normalizeReleasePlatform(value) {
+  const platform = String(value || '').trim().toLowerCase();
+  if (platform === 'mobile') return 'android';
+  return ['android', 'ios'].includes(platform) ? platform : null;
 }
+
+function normalizeReleaseChannel(value) {
+  const channel = String(value || '').trim().toLowerCase();
+  return ['playtest', 'production'].includes(channel) ? channel : 'playtest';
+}
+
+function releaseClientFromHeaders(headers = {}) {
+  const platform = normalizeReleasePlatform(headers['x-golf9-platform']);
+  if (!platform) return null;
+  return {
+    platform,
+    channel: normalizeReleaseChannel(headers['x-golf9-channel']),
+    build: Number.parseInt(String(headers['x-golf9-build'] || '0'), 10) || 0,
+    version: String(headers['x-golf9-version'] || ''),
+  };
+}
+
+function releaseClientFromSocket(socket) {
+  const auth = socket.handshake.auth || {};
+  return {
+    platform: normalizeReleasePlatform(auth.platform || socket.handshake.headers?.['x-golf9-platform']) || 'android',
+    channel: normalizeReleaseChannel(auth.channel || socket.handshake.headers?.['x-golf9-channel']),
+    build: Number.parseInt(String(auth.build || socket.handshake.headers?.['x-golf9-build'] || '0'), 10) || 0,
+    version: String(auth.version || socket.handshake.headers?.['x-golf9-version'] || ''),
+  };
+}
+
+function releasePolicyForClient(client) {
+  return client ? resolveReleasePolicy(releasePolicyStore, client) : null;
+}
+
+function releaseGuardExemptPath(pathname) {
+  return [
+    '/app/release-policy',
+    '/app/availability',
+    '/rooms/active',
+    '/health',
+    '/admin',
+    '/auth',
+    '/mail',
+    '/support',
+    '/feedback',
+    '/push-tokens',
+    '/privacy',
+    '/terms',
+    '/account/delete',
+  ].some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+app.use((req, res, next) => {
+  const client = releaseClientFromHeaders(req.headers);
+  if (!client || releaseGuardExemptPath(req.path)) return next();
+  const policy = releasePolicyForClient(client);
+  if (!policy || policy.status !== 'required') return next();
+  const auth = optionalPlayerAuth(req);
+  const activeRoom = auth ? activePlayingRoomForUser(auth.user.userId) : null;
+  if (policy.enforcement === 'after_match' && activeRoom) return next();
+  return res.status(426).json(updateRequiredPayload(policy));
+});
 
 function roomSummary(room) {
   return {
@@ -3115,6 +3181,16 @@ app.get('/app/availability', (req, res) => {
   return res.json(publicAvailability(availabilityStore, auth?.user?.userId || null));
 });
 
+app.get('/app/release-policy', (req, res) => {
+  const client = releaseClientFromHeaders(req.headers) || {
+    platform: normalizeReleasePlatform(req.query.platform) || 'android',
+    channel: normalizeReleaseChannel(req.query.channel),
+    build: Number.parseInt(String(req.query.build || '0'), 10) || 0,
+    version: String(req.query.version || ''),
+  };
+  return res.json(resolveReleasePolicy(releasePolicyStore, client));
+});
+
 app.get('/privacy', (_req, res) => sendLegalPage(res, 'Privacy Policy', [
   {
     title: 'What Golf 9 Collects',
@@ -3328,6 +3404,14 @@ function applyAvailabilityStore(nextStore, revision = null, { reconcile = true }
   });
 }
 
+function applyReleasePolicyStore(nextStore, revision = null) {
+  releasePolicyStore = normalizeReleasePolicyStore(nextStore);
+  saveStore();
+  for (const socket of io.sockets.sockets.values()) {
+    socket.emit('release-policy:update', releasePolicyForClient(socket.releaseClient));
+  }
+}
+
 app.get('/admin/api/live-ops', requireAdmin(adminStore, 'availability:read'), (_req, res) => {
   const view = availabilityAdminView(availabilityStore);
   return res.json({
@@ -3340,7 +3424,99 @@ app.get('/admin/api/live-ops', requireAdmin(adminStore, 'availability:read'), (_
     })),
     impact: liveOpsImpactSummary(),
     afkConfig: afkConfigStore,
+    releasePolicy: releasePolicyAdminView(releasePolicyStore),
   });
+});
+
+app.post('/admin/api/live-ops/releases/publish', requireAdmin(adminStore, 'availability:write'), (req, res) => {
+  try {
+    const reason = cleanAdminReason(req.body?.reason);
+    const result = publishReleasePolicyChange(releasePolicyStore, {
+      platform: req.body?.platform,
+      channel: req.body?.channel,
+      entry: req.body?.entry,
+      actor: req.admin.admin.displayName,
+      reason,
+    });
+    applyReleasePolicyStore(result.store, result.revision);
+    writeAudit(adminStore, req, req.admin.admin, 'admin.live_ops.release.publish', {
+      platform: req.body?.platform,
+      channel: req.body?.channel,
+    }, {
+      reason,
+      latestBuild: result.entry.latestBuild,
+      minimumBuild: result.entry.minimumBuild,
+      storeReady: result.entry.storeReady,
+      enforcement: result.entry.enforcement,
+    });
+    return res.json({ ok: true, releasePolicy: releasePolicyAdminView(releasePolicyStore) });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/admin/api/live-ops/releases/schedule', requireAdmin(adminStore, 'availability:write'), (req, res) => {
+  try {
+    const reason = cleanAdminReason(req.body?.reason);
+    const result = scheduleReleasePolicyChange(releasePolicyStore, {
+      platform: req.body?.platform,
+      channel: req.body?.channel,
+      entry: req.body?.entry,
+      activateAt: req.body?.activateAt,
+      replace: req.body?.replace === true,
+      actor: req.admin.admin.displayName,
+      reason,
+    });
+    applyReleasePolicyStore(result.store, result.revision);
+    writeAudit(adminStore, req, req.admin.admin, 'admin.live_ops.release.schedule', {
+      key: result.schedule.key,
+    }, {
+      reason,
+      activateAt: result.schedule.activateAt,
+      replace: req.body?.replace === true,
+    });
+    return res.json({ ok: true, releasePolicy: releasePolicyAdminView(releasePolicyStore) });
+  } catch (error) {
+    const status = /pending schedule/i.test(error.message) ? 409 : 400;
+    return res.status(status).json({ error: error.message });
+  }
+});
+
+app.post('/admin/api/live-ops/releases/schedules/:key/cancel', requireAdmin(adminStore, 'availability:write'), (req, res) => {
+  try {
+    const reason = cleanAdminReason(req.body?.reason);
+    const result = cancelReleasePolicySchedule(releasePolicyStore, req.params.key, {
+      actor: req.admin.admin.displayName,
+      reason,
+    });
+    applyReleasePolicyStore(result.store, result.revision);
+    writeAudit(adminStore, req, req.admin.admin, 'admin.live_ops.release.schedule.cancel', {
+      key: req.params.key,
+    }, { reason });
+    return res.json({ ok: true, releasePolicy: releasePolicyAdminView(releasePolicyStore) });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/admin/api/live-ops/releases/revisions/:revisionId/restore', requireAdmin(adminStore, 'availability:write'), (req, res) => {
+  try {
+    const reason = cleanAdminReason(req.body?.reason);
+    const result = restoreReleasePolicyRevision(releasePolicyStore, req.params.revisionId, {
+      actor: req.admin.admin.displayName,
+      reason,
+    });
+    applyReleasePolicyStore(result.store, result.revision);
+    writeAudit(adminStore, req, req.admin.admin, 'admin.live_ops.release.revision.restore', {
+      revisionId: req.params.revisionId,
+    }, {
+      reason,
+      restoredRevision: result.restoredRevision.revision,
+    });
+    return res.json({ ok: true, releasePolicy: releasePolicyAdminView(releasePolicyStore) });
+  } catch (error) {
+    return res.status(/not found/i.test(error.message) ? 404 : 400).json({ error: error.message });
+  }
 });
 
 app.post('/admin/api/live-ops/afk', requireAdmin(adminStore, 'availability:write'), (req, res) => {
@@ -5309,11 +5485,11 @@ app.post('/economy/daily-bonus/claim', requireAuth, (req, res) => {
   return res.json({ ...result, user: safeUser(req.auth.user), economy: publicEconomyCatalog(req.auth.user, economyConfig()) });
 });
 
-app.get('/ranked/catalog', requireAuth, requireRankedBuild, (_req, res) => {
+app.get('/ranked/catalog', requireAuth, (_req, res) => {
   return res.json({ catalog: publicRankedCatalog() });
 });
 
-app.get('/ranked/me', requireAuth, requireRankedBuild, (req, res) => {
+app.get('/ranked/me', requireAuth, (req, res) => {
   rankedSeason = normalizeRankedSeason(rankedSeason, Date.now(), rankedConfig());
   normalizeCompetitiveState(req.auth.user, rankedSeason, rankedConfig());
   return res.json({
@@ -5326,7 +5502,7 @@ app.get('/ranked/me', requireAuth, requireRankedBuild, (req, res) => {
   });
 });
 
-app.patch('/ranked/display-emblem', requireAuth, requireRankedBuild, (req, res) => {
+app.patch('/ranked/display-emblem', requireAuth, (req, res) => {
   const result = setDisplayRankEmblem(req.auth.user, req.body || null, rankedSeason, rankedConfig());
   if (result.error) return res.status(400).json(result);
   for (const room of rooms.values()) {
@@ -5338,7 +5514,7 @@ app.patch('/ranked/display-emblem', requireAuth, requireRankedBuild, (req, res) 
   return res.json({ ...result, user: safeUser(req.auth.user), choices: rankedDisplayEmblemChoices(req.auth.user, rankedSeason, rankedConfig()) });
 });
 
-app.post('/ranked/queue', requireAuth, requireRankedBuild, requireFeature(req => rankedFeatureKey(req.body?.maxPlayers)), (req, res) => {
+app.post('/ranked/queue', requireAuth, requireFeature(req => rankedFeatureKey(req.body?.maxPlayers)), (req, res) => {
   rankedSeason = normalizeRankedSeason(rankedSeason, Date.now(), rankedConfig());
   if (blockActiveMatch(req, res)) return;
   const activeRoom = activeRankedRoomForUser(req.auth.user.userId);
@@ -5364,7 +5540,7 @@ app.post('/ranked/queue', requireAuth, requireRankedBuild, requireFeature(req =>
   });
 });
 
-app.get('/ranked/queue', requireAuth, requireRankedBuild, requireFeature(req => {
+app.get('/ranked/queue', requireAuth, requireFeature(req => {
   const queue = rankedQueue.get(req.auth.user.userId);
   return rankedFeatureKey(queue?.maxPlayers || req.query.maxPlayers || 2);
 }), (req, res) => {
@@ -5378,12 +5554,12 @@ app.get('/ranked/queue', requireAuth, requireRankedBuild, requireFeature(req => 
   });
 });
 
-app.delete('/ranked/queue', requireAuth, requireRankedBuild, (req, res) => {
+app.delete('/ranked/queue', requireAuth, (req, res) => {
   removeUserFromRankedQueue(req.auth.user.userId);
   return res.json({ queue: publicRankedQueueStatus(req.auth.user.userId) });
 });
 
-app.post('/ranked/season/rewards/claim', requireAuth, requireRankedBuild, (req, res) => {
+app.post('/ranked/season/rewards/claim', requireAuth, (req, res) => {
   rankedSeason = normalizeRankedSeason(rankedSeason, Date.now(), rankedConfig());
   const result = claimSeasonRewards(req.auth.user, rankedSeason, rankedConfig());
   saveStore();
@@ -5730,11 +5906,37 @@ io.use((socket, next) => {
   const auth = socketAuth(socket);
   if (!auth) return next(new Error('Authentication required.'));
   socket.auth = auth;
+  socket.releaseClient = releaseClientFromSocket(socket);
   return next();
 });
 
 io.on('connection', (socket) => {
   const connectedUserId = socket.auth.user.userId;
+  const connectedReleasePolicy = releasePolicyForClient(socket.releaseClient);
+  socket.emit('release-policy:update', connectedReleasePolicy);
+  socket.use(([eventName, payload], next) => {
+    const policy = releasePolicyForClient(socket.releaseClient);
+    if (!policy || policy.status !== 'required') return next();
+    const activeRoom = activePlayingRoomForUser(connectedUserId);
+    const activeRoomCode = activeRoom?.code || null;
+    const eventRoomCode = String(payload?.code || '').trim().toUpperCase();
+    const activeMatchEvents = new Set([
+      'room:join',
+      'presence:state',
+      'chat:send',
+      'game:intent',
+      'game:take-control',
+    ]);
+    if (policy.enforcement === 'after_match'
+      && activeRoomCode
+      && activeMatchEvents.has(eventName)
+      && eventRoomCode === activeRoomCode) return next();
+    const blocked = updateRequiredPayload(policy);
+    socket.emit('release-policy:required', blocked);
+    const error = new Error(blocked.error);
+    error.data = blocked;
+    return next(error);
+  });
   socket.emit('availability:update', {
     revision: availabilityStore.revision,
     availability: publicAvailability(availabilityStore, connectedUserId),
@@ -6078,6 +6280,11 @@ setInterval(() => {
     const latestRevision = scheduleResult.changes.at(-1)?.revision || null;
     applyAvailabilityStore(scheduleResult.store, latestRevision);
   }
+  const releaseScheduleResult = processReleasePolicySchedules(releasePolicyStore, { now });
+  if (releaseScheduleResult.changes.length) {
+    const latestRevision = releaseScheduleResult.changes.at(-1)?.revision || null;
+    applyReleasePolicyStore(releaseScheduleResult.store, latestRevision);
+  }
   rankedSeason = normalizeRankedSeason(rankedSeason, now, rankedConfig());
   tryMatchRankedQueue(now);
   if (now - lastDailyPushScanAt >= PUSH_DAILY_SCAN_MS) {
@@ -6129,6 +6336,9 @@ async function initializePersistence() {
     const scheduleResult = processAvailabilitySchedules(availabilityStore, { now: Date.now() });
     availabilityStore = scheduleResult.store;
     if (scheduleResult.changes.length) storeMigrationPending = true;
+    const releaseScheduleResult = processReleasePolicySchedules(releasePolicyStore, { now: Date.now() });
+    releasePolicyStore = releaseScheduleResult.store;
+    if (releaseScheduleResult.changes.length) storeMigrationPending = true;
     reconcileAvailabilityState();
     if (storeMigrationPending) {
       storeMigrationPending = false;

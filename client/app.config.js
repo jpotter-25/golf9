@@ -3,6 +3,8 @@ const googleIosUrlScheme = process.env.EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME || '';
 const facebookAppId = process.env.EXPO_PUBLIC_FACEBOOK_APP_ID || '';
 const facebookClientToken = process.env.EXPO_PUBLIC_FACEBOOK_CLIENT_TOKEN || '';
 const facebookDisplayName = process.env.EXPO_PUBLIC_FACEBOOK_DISPLAY_NAME || 'Golf 9';
+const releaseChannel = process.env.EXPO_PUBLIC_RELEASE_CHANNEL
+  || (process.env.EXPO_PUBLIC_APP_ENV === 'production' ? 'production' : 'playtest');
 
 const plugins = [];
 
@@ -63,7 +65,7 @@ module.exports = {
     },
     android: {
       package: 'us.joinup.golf_9',
-      versionCode: 42,
+      versionCode: 43,
       permissions: [],
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
@@ -76,6 +78,7 @@ module.exports = {
     },
     plugins,
     extra: {
+      releaseChannel,
       eas: {
         projectId: 'b8c31c6b-71b9-497d-984c-d59a4871e84b',
       },

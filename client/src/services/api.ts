@@ -2,9 +2,10 @@
 // Purpose: Typed REST helpers for authentication and room setup.
 
 import { SERVER_URL } from '../config';
-import Constants from 'expo-constants';
 import type { GameState } from '../game/types';
 import { getInstallId } from '../utils/deviceIdentity';
+import { releaseHeaders } from '../utils/releaseInfo';
+import { emitReleaseRequired } from './releasePolicyEvents';
 
 export type UserProfile = {
   userId: string;
@@ -28,6 +29,26 @@ export type AuthResponse = { token: string; user: UserProfile };
 export type AuthProviderKey = 'google' | 'facebook';
 export type AuthProviderStatus = Record<AuthProviderKey, boolean>;
 export type AuthConfig = { environment: string; inviteRequired: boolean; apiUrl: string; adminUrl: string; providers: AuthProviderStatus };
+export type ReleaseStatus = 'current' | 'recommended' | 'required';
+export type ReleaseEnforcement = 'after_match' | 'immediate';
+export type ReleasePolicyResponse = {
+  revision: number;
+  fetchedAt: number;
+  key: string;
+  platform: 'android' | 'ios';
+  channel: 'playtest' | 'production';
+  installedBuild: number;
+  installedVersion: string;
+  latestBuild: number;
+  latestVersion: string;
+  minimumBuild: number;
+  storeUrl: string;
+  storeReady: boolean;
+  enforcement: ReleaseEnforcement;
+  status: ReleaseStatus;
+  title: string;
+  message: string;
+};
 export type AvailabilityState = 'live' | 'coming_soon' | 'maintenance' | 'hidden';
 export type FeatureKey =
   | 'global'
@@ -797,8 +818,9 @@ export class ApiRequestError extends Error {
   state: AvailabilityState | null;
   title: string | null;
   retryAt: number | null;
+  release: ReleasePolicyResponse | null;
 
-  constructor(message: string, status: number, details: Partial<FeatureUnavailableError> = {}) {
+  constructor(message: string, status: number, details: Partial<FeatureUnavailableError> & { release?: ReleasePolicyResponse | null } = {}) {
     super(message);
     this.name = 'ApiRequestError';
     this.status = status;
@@ -807,6 +829,7 @@ export class ApiRequestError extends Error {
     this.state = details.state ?? null;
     this.title = details.title ?? null;
     this.retryAt = details.retryAt ?? null;
+    this.release = details.release ?? null;
   }
 }
 
@@ -821,14 +844,16 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
       headers: {
         'Content-Type': 'application/json',
         'X-Golf9-Device-Id': installId,
-        'X-Golf9-Platform': 'mobile',
-        'X-Golf9-Build': Constants.nativeBuildVersion || '39',
+        ...releaseHeaders(),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options.headers || {}),
       },
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
+      if (body.code === 'APP_UPDATE_REQUIRED' && body.release) {
+        emitReleaseRequired(body.release as ReleasePolicyResponse);
+      }
       throw new ApiRequestError(body.error || `Request failed: ${res.status}`, res.status, {
         code: body.code,
         feature: body.feature,
@@ -836,6 +861,7 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
         title: body.title,
         message: body.message,
         retryAt: body.retryAt,
+        release: body.release,
       });
     }
     return body as T;
@@ -858,6 +884,10 @@ export function authConfig(): Promise<AuthConfig> {
 
 export function appAvailability(token?: string | null): Promise<AvailabilityResponse> {
   return request<AvailabilityResponse>('/app/availability', {}, token);
+}
+
+export function appReleasePolicy(token?: string | null): Promise<ReleasePolicyResponse> {
+  return request<ReleasePolicyResponse>('/app/release-policy', {}, token);
 }
 
 export function signup(displayName: string, password: string, inviteCode = ''): Promise<AuthResponse> {

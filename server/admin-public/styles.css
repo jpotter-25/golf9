@@ -778,6 +778,156 @@ h2 {
   margin-top: 1rem;
 }
 
+.release-ops-heading {
+  margin: 1.7rem 0 0.8rem;
+  padding: 0 0.15rem;
+}
+
+.release-ops-heading h2 {
+  margin: 0.15rem 0 0.3rem;
+}
+
+.release-ops-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(330px, 0.6fr);
+  gap: 1rem;
+  align-items: start;
+  margin-bottom: 1.5rem;
+}
+
+.release-policy-editor {
+  display: grid;
+  gap: 0.9rem;
+  margin: 0;
+  border-color: rgba(255, 209, 102, 0.46);
+}
+
+.release-store-confirmation {
+  align-items: flex-start;
+  border: 1px solid rgba(255, 209, 102, 0.42);
+  border-radius: 12px;
+  padding: 0.8rem;
+  background: rgba(255, 209, 102, 0.07);
+}
+
+.release-store-confirmation input {
+  width: auto;
+  margin-top: 0.18rem;
+}
+
+.release-store-confirmation span {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.release-store-confirmation small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.release-message-grid {
+  align-items: stretch;
+}
+
+.release-message-fields {
+  display: grid;
+  gap: 0.65rem;
+  border-top: 2px solid rgba(85, 168, 255, 0.38);
+  padding-top: 0.75rem;
+}
+
+.release-message-fields:last-child {
+  border-top-color: rgba(255, 101, 117, 0.46);
+}
+
+.release-message-fields h4 {
+  margin: 0;
+}
+
+.release-policy-preview {
+  display: grid;
+  gap: 0.38rem;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--muted);
+  border-radius: 12px;
+  padding: 0.9rem;
+  background: rgba(6, 11, 24, 0.52);
+}
+
+.release-policy-preview span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.release-policy-preview p,
+.release-policy-preview small {
+  margin: 0;
+  color: var(--muted);
+}
+
+.release-policy-preview.release-recommended {
+  border-left-color: var(--blue);
+}
+
+.release-policy-preview.release-required {
+  border-left-color: var(--danger);
+}
+
+.release-safety-note {
+  margin: 0;
+  border-top: 1px solid var(--line);
+  padding-top: 0.8rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.release-safety-note strong {
+  color: var(--gold);
+}
+
+.release-ops-sidebar {
+  display: grid;
+  gap: 1rem;
+}
+
+.release-ops-sidebar .panel {
+  margin: 0;
+}
+
+.release-policy-revisions,
+#releasePolicySchedules {
+  display: grid;
+  gap: 0.65rem;
+  max-height: 430px;
+  overflow-y: auto;
+  margin-top: 0.85rem;
+}
+
+.release-policy-list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.75rem;
+  background: rgba(6, 11, 24, 0.38);
+}
+
+.release-policy-revisions .release-policy-list-item {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.release-policy-list-item p {
+  margin: 0.2rem 0;
+}
+
+.release-policy-list-item small {
+  color: var(--muted);
+}
+
 .live-ops-metric {
   display: grid;
   gap: 0.2rem;
@@ -1041,7 +1191,8 @@ button.live-ops-feature.selected {
 
   .live-ops-workspace,
   .live-ops-lower-grid,
-  .live-ops-revisions {
+  .live-ops-revisions,
+  .release-ops-workspace {
     grid-template-columns: 1fr;
   }
 
@@ -1062,6 +1213,10 @@ button.live-ops-feature.selected {
 
   .live-ops-state {
     justify-self: start;
+  }
+
+  .release-policy-revisions .release-policy-list-item {
+    grid-template-columns: 1fr;
   }
 }
 

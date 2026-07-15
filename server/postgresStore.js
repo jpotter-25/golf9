@@ -17,7 +17,7 @@ const COLLECTION_TABLES = [
   ['bans', 'ban_id'],
   ['invite_codes', 'invite_id'],
 ];
-const META_KEYS = ['rankedSeason', 'competitiveConfig', 'economyConfig', 'notificationConfig', 'availabilityConfig', 'afkConfig'];
+const META_KEYS = ['rankedSeason', 'competitiveConfig', 'economyConfig', 'notificationConfig', 'availabilityConfig', 'afkConfig', 'releasePolicy'];
 
 function json(value) {
   return JSON.stringify(value ?? null);
@@ -88,6 +88,7 @@ export class PostgresStore {
       notificationConfig: null,
       availabilityConfig: null,
       afkConfig: null,
+      releasePolicy: null,
       catalog: { live: [], draft: [], versions: [] },
       clubs: [],
       admins: [],

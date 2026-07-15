@@ -131,6 +131,11 @@ function bindConsoleActions() {
   document.querySelector('#liveOpsEditor').addEventListener('input', renderLiveOpsPreview);
   document.querySelector('#scheduleLiveOps').addEventListener('click', scheduleLiveOps);
   document.querySelector('#liveOpsGlobalSwitch').addEventListener('change', stageGlobalMaintenance);
+  document.querySelector('#releasePolicyEditor').addEventListener('submit', publishReleasePolicy);
+  document.querySelector('#releasePolicyEditor').addEventListener('input', renderReleasePolicyPreview);
+  document.querySelector('#releasePolicyChannel').addEventListener('change', populateReleasePolicyEditor);
+  document.querySelector('#releasePolicyPlatform').addEventListener('change', populateReleasePolicyEditor);
+  document.querySelector('#scheduleReleasePolicy').addEventListener('click', scheduleReleasePolicy);
   document.querySelector('#searchLiveOpsTesters').addEventListener('click', searchLiveOpsTesters);
   document.querySelector('#liveOpsTesterSearch').addEventListener('keydown', event => {
     if (event.key === 'Enter') searchLiveOpsTesters();
@@ -1180,8 +1185,246 @@ function renderLiveOps() {
   renderLiveOpsTesterResults();
   renderLiveOpsSchedules();
   renderLiveOpsRevisions();
+  populateReleasePolicyEditor();
+  renderReleasePolicySchedules();
+  renderReleasePolicyRevisions();
   populateAfkConfigEditor();
   applyLiveOpsPermissions();
+}
+
+function selectedReleasePolicyKey() {
+  const channel = document.querySelector('#releasePolicyChannel')?.value || 'playtest';
+  const platform = document.querySelector('#releasePolicyPlatform')?.value || 'android';
+  return `${channel}.${platform}`;
+}
+
+function selectedReleasePolicyEntry() {
+  const policy = liveOpsData?.releasePolicy;
+  const key = selectedReleasePolicyKey();
+  return policy?.entries?.[key] || {
+    key,
+    platform: document.querySelector('#releasePolicyPlatform')?.value || 'android',
+    channel: document.querySelector('#releasePolicyChannel')?.value || 'playtest',
+    latestBuild: 0,
+    latestVersion: '',
+    minimumBuild: 0,
+    storeUrl: '',
+    storeReady: false,
+    enforcement: 'after_match',
+    recommendedTitle: 'Golf 9 update available',
+    recommendedMessage: 'A newer version of Golf 9 is ready.',
+    requiredTitle: 'Update required',
+    requiredMessage: 'Update Golf 9 before online play can continue.',
+  };
+}
+
+function populateReleasePolicyEditor() {
+  const form = document.querySelector('#releasePolicyEditor');
+  const policy = liveOpsData?.releasePolicy;
+  if (!form || !policy) return;
+  const entry = selectedReleasePolicyEntry();
+  form.elements.latestBuild.value = entry.latestBuild ?? 0;
+  form.elements.latestVersion.value = entry.latestVersion || '';
+  form.elements.minimumBuild.value = entry.minimumBuild ?? 0;
+  form.elements.storeUrl.value = entry.storeUrl || '';
+  form.elements.storeReady.checked = entry.storeReady === true;
+  form.elements.enforcement.value = entry.enforcement || 'after_match';
+  form.elements.recommendedTitle.value = entry.recommendedTitle || '';
+  form.elements.recommendedMessage.value = entry.recommendedMessage || '';
+  form.elements.requiredTitle.value = entry.requiredTitle || '';
+  form.elements.requiredMessage.value = entry.requiredMessage || '';
+  const schedule = (policy.schedules || []).find(item => item.key === selectedReleasePolicyKey());
+  form.elements.activateAt.value = schedule ? localDateTimeInput(schedule.activateAt) : '';
+  form.elements.reason.value = '';
+  const revision = document.querySelector('#releasePolicyRevision');
+  revision.textContent = `Revision ${Number(policy.revision || 0)}`;
+  const statusChip = document.querySelector('#releasePolicyStatus');
+  if (!entry.storeReady) {
+    statusChip.textContent = 'Store not confirmed';
+    statusChip.className = 'chip';
+  } else if (entry.minimumBuild > 0) {
+    statusChip.textContent = `Requires build ${entry.minimumBuild}+`;
+    statusChip.className = 'chip gold';
+  } else if (entry.latestBuild > 0) {
+    statusChip.textContent = `Recommends build ${entry.latestBuild}`;
+    statusChip.className = 'chip blue';
+  } else {
+    statusChip.textContent = 'No build configured';
+    statusChip.className = 'chip';
+  }
+  renderReleasePolicyPreview();
+  applyLiveOpsPermissions();
+}
+
+function releasePolicyEditorPayload() {
+  const form = document.querySelector('#releasePolicyEditor');
+  return {
+    platform: form.elements.platform.value,
+    channel: form.elements.channel.value,
+    entry: {
+      latestBuild: Number(form.elements.latestBuild.value || 0),
+      latestVersion: form.elements.latestVersion.value.trim(),
+      minimumBuild: Number(form.elements.minimumBuild.value || 0),
+      storeUrl: form.elements.storeUrl.value.trim(),
+      storeReady: form.elements.storeReady.checked,
+      enforcement: form.elements.enforcement.value,
+      recommendedTitle: form.elements.recommendedTitle.value.trim(),
+      recommendedMessage: form.elements.recommendedMessage.value.trim(),
+      requiredTitle: form.elements.requiredTitle.value.trim(),
+      requiredMessage: form.elements.requiredMessage.value.trim(),
+    },
+    activateAt: form.elements.activateAt.value ? new Date(form.elements.activateAt.value).getTime() : null,
+    reason: form.elements.reason.value.trim(),
+  };
+}
+
+function validateReleasePolicyPayload(payload, { scheduled = false } = {}) {
+  if (!payload.reason) return 'An administrative reason is required.';
+  if (!Number.isInteger(payload.entry.latestBuild) || payload.entry.latestBuild < 0) return 'Latest build must be a whole number.';
+  if (!Number.isInteger(payload.entry.minimumBuild) || payload.entry.minimumBuild < 0) return 'Minimum build must be a whole number.';
+  if (payload.entry.minimumBuild > payload.entry.latestBuild) return 'Minimum build cannot be higher than the latest build.';
+  if (payload.entry.minimumBuild > 0 && !payload.entry.storeReady) return 'Confirm that the store release is ready before requiring a build.';
+  if ((payload.entry.latestBuild > 0 || payload.entry.minimumBuild > 0) && !payload.entry.storeUrl) return 'A store listing URL is required.';
+  if (scheduled && (!payload.activateAt || payload.activateAt <= Date.now())) return 'Choose a future activation time.';
+  return null;
+}
+
+function renderReleasePolicyPreview() {
+  const preview = document.querySelector('#releasePolicyPreview');
+  if (!preview || !liveOpsData?.releasePolicy) return;
+  const { entry } = releasePolicyEditorPayload();
+  let state = 'inactive';
+  let label = 'No player prompt';
+  let title = 'Store release not confirmed';
+  let message = 'Players remain on their current build until you confirm the selected store release is ready.';
+  if (entry.storeReady && entry.minimumBuild > 0) {
+    state = 'required';
+    label = `Builds below ${entry.minimumBuild} are blocked`;
+    title = entry.requiredTitle || 'Update required';
+    message = entry.requiredMessage || 'Install the latest version to continue online.';
+  } else if (entry.storeReady && entry.latestBuild > 0) {
+    state = 'recommended';
+    label = `Build ${entry.latestBuild} is recommended`;
+    title = entry.recommendedTitle || 'Update available';
+    message = entry.recommendedMessage || 'A newer version is ready.';
+  }
+  preview.className = `release-policy-preview release-${state}`;
+  preview.innerHTML = `
+    <span>${escapeHtml(label)}</span>
+    <strong>${escapeHtml(title)}</strong>
+    <p>${escapeHtml(message)}</p>
+    <small>${entry.enforcement === 'immediate' ? 'Emergency lock, including active matches' : 'Active matches may finish before the update is required'}</small>
+  `;
+}
+
+function confirmReleasePolicyIncrease(payload) {
+  const current = selectedReleasePolicyEntry();
+  if (payload.entry.minimumBuild <= Number(current.minimumBuild || 0)) return true;
+  const emergency = payload.entry.enforcement === 'immediate'
+    ? '\n\nEmergency mode will also interrupt matches already in progress.'
+    : '';
+  return confirm(`Require build ${payload.entry.minimumBuild} or newer? Confirm that build ${payload.entry.latestBuild} is downloadable on the selected store track.${emergency}`);
+}
+
+async function publishReleasePolicy(event) {
+  event.preventDefault();
+  if (!liveOpsCanWrite) return;
+  const payload = releasePolicyEditorPayload();
+  const error = validateReleasePolicyPayload(payload);
+  if (error) return alert(error);
+  if (!confirmReleasePolicyIncrease(payload)) return;
+  const result = await api('/live-ops/releases/publish', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  liveOpsData.releasePolicy = result.releasePolicy;
+  status(`${payload.channel} ${payload.platform} release policy published.`, 'ok');
+  renderLiveOps();
+}
+
+async function scheduleReleasePolicy() {
+  if (!liveOpsCanWrite) return;
+  const payload = releasePolicyEditorPayload();
+  const error = validateReleasePolicyPayload(payload, { scheduled: true });
+  if (error) return alert(error);
+  if (!confirmReleasePolicyIncrease(payload)) return;
+  const key = `${payload.channel}.${payload.platform}`;
+  const existing = (liveOpsData.releasePolicy?.schedules || []).find(schedule => schedule.key === key);
+  const replace = !!existing && confirm('This release channel already has a pending schedule. Replace it?');
+  if (existing && !replace) return;
+  const result = await api('/live-ops/releases/schedule', {
+    method: 'POST',
+    body: JSON.stringify({ ...payload, replace }),
+  });
+  liveOpsData.releasePolicy = result.releasePolicy;
+  status(`${payload.channel} ${payload.platform} release policy scheduled.`, 'ok');
+  renderLiveOps();
+}
+
+function renderReleasePolicySchedules() {
+  const output = document.querySelector('#releasePolicySchedules');
+  const schedules = [...(liveOpsData?.releasePolicy?.schedules || [])].sort((a, b) => a.activateAt - b.activateAt);
+  document.querySelector('#releasePolicyScheduleCount').textContent = `${schedules.length} scheduled`;
+  output.innerHTML = schedules.map(schedule => `
+    <div class="release-policy-list-item">
+      <div>
+        <strong>${escapeHtml(schedule.key)}</strong>
+        <p>Build ${Number(schedule.entry.latestBuild)}; minimum ${Number(schedule.entry.minimumBuild)}</p>
+        <small>${escapeHtml(new Date(schedule.activateAt).toLocaleString())} - ${escapeHtml(schedule.reason)}</small>
+      </div>
+      <button type="button" class="ghost" data-cancel-release-policy="${escapeHtml(schedule.key)}" ${liveOpsCanWrite ? '' : 'disabled'}>Cancel</button>
+    </div>
+  `).join('') || '<p class="muted">No scheduled app release changes.</p>';
+  output.querySelectorAll('[data-cancel-release-policy]').forEach(button => {
+    button.addEventListener('click', () => cancelReleasePolicySchedule(button.dataset.cancelReleasePolicy));
+  });
+}
+
+async function cancelReleasePolicySchedule(key) {
+  if (!liveOpsCanWrite) return;
+  const reason = prompt('Administrative reason for cancelling this release schedule:');
+  if (!reason?.trim()) return;
+  if (!confirm(`Cancel the pending ${key} release change?`)) return;
+  const result = await api(`/live-ops/releases/schedules/${encodeURIComponent(key)}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: reason.trim() }),
+  });
+  liveOpsData.releasePolicy = result.releasePolicy;
+  status('Release schedule cancelled.', 'ok');
+  renderLiveOps();
+}
+
+function renderReleasePolicyRevisions() {
+  const output = document.querySelector('#releasePolicyRevisions');
+  const revisions = [...(liveOpsData?.releasePolicy?.revisions || [])].sort((a, b) => b.revision - a.revision);
+  output.innerHTML = revisions.map(revision => `
+    <div class="release-policy-list-item">
+      <span class="chip blue">r${Number(revision.revision)}</span>
+      <div>
+        <strong>${escapeHtml(revision.action)}${revision.key ? ` - ${escapeHtml(revision.key)}` : ''}</strong>
+        <p>${escapeHtml(revision.reason)}</p>
+        <small>${escapeHtml(revision.actor || 'system')} - ${escapeHtml(new Date(revision.createdAt).toLocaleString())}</small>
+      </div>
+      <button type="button" class="ghost" data-restore-release-policy="${escapeHtml(revision.revisionId)}" ${liveOpsCanWrite ? '' : 'disabled'}>Restore</button>
+    </div>
+  `).join('') || '<p class="muted">No app release changes yet.</p>';
+  output.querySelectorAll('[data-restore-release-policy]').forEach(button => {
+    button.addEventListener('click', () => restoreReleasePolicyRevision(button.dataset.restoreReleasePolicy));
+  });
+}
+
+async function restoreReleasePolicyRevision(revisionId) {
+  if (!liveOpsCanWrite) return;
+  const reason = prompt('Administrative reason for restoring this app release policy:');
+  if (!reason?.trim()) return;
+  if (!confirm('Restore this complete release-policy snapshot? Pending app release schedules will be cleared.')) return;
+  const result = await api(`/live-ops/releases/revisions/${encodeURIComponent(revisionId)}/restore`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: reason.trim() }),
+  });
+  liveOpsData.releasePolicy = result.releasePolicy;
+  status('App release policy restored.', 'ok');
+  renderLiveOps();
 }
 
 function populateAfkConfigEditor() {
@@ -1497,6 +1740,12 @@ function applyLiveOpsPermissions() {
   document.querySelector('#afkConfigEditor').querySelectorAll('input, button').forEach(control => {
     control.disabled = !liveOpsCanWrite;
   });
+  const releaseEditor = document.querySelector('#releasePolicyEditor');
+  releaseEditor.querySelectorAll('input, textarea, button').forEach(control => {
+    control.disabled = !liveOpsCanWrite;
+  });
+  releaseEditor.elements.enforcement.disabled = !liveOpsCanWrite;
+  document.querySelector('#releasePolicyReadOnly').classList.toggle('hidden', liveOpsCanWrite);
   document.querySelector('#liveOpsReadOnly').classList.toggle('hidden', liveOpsCanWrite);
 }
 

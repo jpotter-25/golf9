@@ -4,12 +4,16 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "env": { "EXPO_PUBLIC_APP_ENV": "development" }
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "development",
+        "EXPO_PUBLIC_RELEASE_CHANNEL": "playtest"
+      }
     },
     "staging": {
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_APP_ENV": "staging",
+        "EXPO_PUBLIC_RELEASE_CHANNEL": "playtest",
         "EXPO_PUBLIC_STAGING_SERVER_URL": "https://games.joinup.us"
       },
       "ios": { "simulator": false },
@@ -19,6 +23,7 @@
       "environment": "preview",
       "env": {
         "EXPO_PUBLIC_APP_ENV": "staging",
+        "EXPO_PUBLIC_RELEASE_CHANNEL": "playtest",
         "EXPO_PUBLIC_STAGING_SERVER_URL": "https://games.joinup.us"
       },
       "ios": { "simulator": false },
@@ -28,6 +33,7 @@
       "environment": "production",
       "env": {
         "EXPO_PUBLIC_APP_ENV": "production",
+        "EXPO_PUBLIC_RELEASE_CHANNEL": "production",
         "EXPO_PUBLIC_PROD_SERVER_URL": "https://games.joinup.us"
       },
       "android": { "buildType": "app-bundle" }

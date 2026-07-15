@@ -1790,6 +1790,66 @@ test('Live Ops drains waiting lobbies, blocks old clients, and preserves active 
   }, { ROOM_COUNTDOWN_MS: '50' });
 });
 
+test('release policy blocks obsolete builds while preserving update and recovery routes', async () => {
+  await withServer(async (baseUrl) => {
+    const player = await signup(baseUrl, 'ReleaseGate');
+    const admin = await adminLogin(baseUrl);
+    const oldBuildHeaders = {
+      ...authHeaders(player.token),
+      'X-Golf9-Platform': 'android',
+      'X-Golf9-Channel': 'playtest',
+      'X-Golf9-Build': '42',
+      'X-Golf9-Version': '0.1.0',
+    };
+
+    const published = await json(await fetch(`${baseUrl}/admin/api/live-ops/releases/publish`, {
+      method: 'POST',
+      headers: adminHeaders(admin),
+      body: JSON.stringify({
+        platform: 'android',
+        channel: 'playtest',
+        entry: {
+          latestBuild: 43,
+          latestVersion: '0.1.0',
+          minimumBuild: 43,
+          storeUrl: 'https://play.google.com/store/apps/details?id=us.joinup.golf_9',
+          storeReady: true,
+          enforcement: 'after_match',
+          requiredTitle: 'Testing update required',
+          requiredMessage: 'Install Build 43 to continue online testing.',
+        },
+        reason: 'Verify mandatory update enforcement in integration tests.',
+      }),
+    }));
+    assert.equal(published.releasePolicy.entries['playtest.android'].minimumBuild, 43);
+
+    const policy = await json(await fetch(`${baseUrl}/app/release-policy`, {
+      headers: oldBuildHeaders,
+    }));
+    assert.equal(policy.status, 'required');
+    assert.equal(policy.minimumBuild, 43);
+
+    const blockedProfile = await fetch(`${baseUrl}/profile/me`, {
+      headers: oldBuildHeaders,
+    });
+    const blockedBody = await blockedProfile.json();
+    assert.equal(blockedProfile.status, 426);
+    assert.equal(blockedBody.code, 'APP_UPDATE_REQUIRED');
+    assert.equal(blockedBody.release.minimumBuild, 43);
+    assert.equal(blockedBody.release.title, 'Testing update required');
+
+    const inbox = await fetch(`${baseUrl}/mail`, { headers: oldBuildHeaders });
+    assert.equal(inbox.status, 200);
+    const activeRoom = await fetch(`${baseUrl}/rooms/active`, { headers: oldBuildHeaders });
+    assert.equal(activeRoom.status, 200);
+
+    const currentBuildProfile = await fetch(`${baseUrl}/profile/me`, {
+      headers: { ...oldBuildHeaders, 'X-Golf9-Build': '43' },
+    });
+    assert.equal(currentBuildProfile.status, 200);
+  });
+});
+
 test('full lobby countdown stops when a player leaves and restarts when filled again', async () => {
   await withServer(async (baseUrl) => {
     const one = await signup(baseUrl, `CountdownOne${Date.now()}`);
@@ -1898,21 +1958,19 @@ test('ranked queue creates a human-only ranked room and starts automatically', a
   }, { ROOM_COUNTDOWN_MS: '50' });
 });
 
-test('ranked endpoints reject pre-39 clients without exposing competitive data', async () => {
+test('ranked endpoints do not retain the obsolete ranked-only build lock', async () => {
   await withServer(async (baseUrl) => {
     const account = await signup(baseUrl, `OldRank${Date.now()}`);
     const response = await fetch(`${baseUrl}/ranked/me`, {
       headers: {
         Authorization: `Bearer ${account.token}`,
         'X-Golf9-Build': '38',
+        'X-Golf9-Platform': 'android',
+        'X-Golf9-Channel': 'playtest',
       },
     });
-    const body = await response.json();
-
-    assert.equal(response.status, 426);
-    assert.equal(body.code, 'RANKED_UPDATE_REQUIRED');
-    assert.equal(body.minimumBuild, 39);
-    assert.equal(Object.hasOwn(body, 'competitive'), false);
+    await response.json();
+    assert.equal(response.status, 200);
   });
 });
 
