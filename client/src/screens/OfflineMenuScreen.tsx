@@ -1,7 +1,7 @@
 // src/screens/OfflineMenuScreen.tsx
 // Purpose: Local Solo AI and Pass & Play setup that remains usable without a connection.
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Bot, ChevronLeft, Gamepad2, Play, Users, Wifi, WifiOff } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
@@ -11,6 +11,8 @@ import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui 
 import { useAuth } from '../context/AuthContext';
 import { useConnectivity } from '../context/ConnectivityContext';
 import { useOfflineSync } from '../context/OfflineSyncContext';
+import { useAvailability } from '../context/AvailabilityContext';
+import type { FeatureKey } from '../services/api';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'OfflineMenu'>;
 type LocalMode = 'passplay' | 'solo';
@@ -34,13 +36,22 @@ export default function OfflineMenuScreen({ navigation }: Props) {
   const { user } = useAuth();
   const { isOnline } = useConnectivity();
   const { pendingResults, syncing } = useOfflineSync();
+  const { entry, isAvailable, isVisible, showUnavailable } = useAvailability();
   const [selectedMode, setSelectedMode] = useState<LocalMode | null>(null);
   const [players, setPlayers] = useState<2 | 3 | 4>(2);
   const [rounds, setRounds] = useState<5 | 9>(5);
   const [aiDifficulty, setAiDifficulty] = useState<'easy' | 'hard'>('easy');
   const [passPlayerNames, setPassPlayerNames] = useState<string[]>(['', '', '', '']);
 
+  useEffect(() => {
+    if (selectedMode && !isAvailable(localFeature(selectedMode))) setSelectedMode(null);
+  }, [isAvailable, selectedMode]);
+
   const startSelectedMode = () => {
+    if (selectedMode && !isAvailable(localFeature(selectedMode))) {
+      showUnavailable(localFeature(selectedMode));
+      return;
+    }
     if (selectedMode === 'passplay') {
       const localPlayerNames = Array.from({ length: players }, (_, index) => (
         index === 0
@@ -76,8 +87,14 @@ export default function OfflineMenuScreen({ navigation }: Props) {
           </Text>
         </View>
 
-        {(Object.keys(MODE_META) as LocalMode[]).map(mode => (
-          <LocalModeCard key={mode} {...MODE_META[mode]} onPress={() => setSelectedMode(mode)} />
+        {(Object.keys(MODE_META) as LocalMode[]).filter(mode => isVisible(localFeature(mode))).map(mode => (
+          <LocalModeCard
+            key={mode}
+            {...MODE_META[mode]}
+            locked={!isAvailable(localFeature(mode))}
+            status={entry(localFeature(mode)).testerPreview ? 'Tester Preview' : entry(localFeature(mode)).state === 'live' ? '' : entry(localFeature(mode)).title}
+            onPress={() => isAvailable(localFeature(mode)) ? setSelectedMode(mode) : showUnavailable(localFeature(mode))}
+          />
         ))}
 
         <PremiumPanel style={styles.offlineNote}>
@@ -162,20 +179,25 @@ export default function OfflineMenuScreen({ navigation }: Props) {
   );
 }
 
-function LocalModeCard({ title, subtitle, Icon, color, onPress }: { title: string; subtitle: string; Icon: LucideIcon; color: string; onPress: () => void }) {
+function LocalModeCard({ title, subtitle, Icon, color, locked, status, onPress }: { title: string; subtitle: string; Icon: LucideIcon; color: string; locked: boolean; status: string; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={title}>
-      <PremiumPanel tone="felt" style={[styles.modeCard, { borderColor: color }]}>
+      <PremiumPanel tone="felt" style={[styles.modeCard, { borderColor: color }, locked && styles.modeLocked]}>
         <View style={[styles.modeAccent, { backgroundColor: color }]} />
         <View style={[styles.modeIcon, { borderColor: color }]}><Icon size={27} color={color} strokeWidth={2.6} /></View>
         <View style={styles.modeCopy}>
           <Text style={styles.modeTitle}>{title}</Text>
           <Text style={styles.modeSubtitle}>{subtitle}</Text>
+          {status ? <Text style={styles.modeStatus}>{status}</Text> : null}
         </View>
         <Play size={20} color={ui.palette.gold} fill={ui.palette.gold} />
       </PremiumPanel>
     </Pressable>
   );
+}
+
+function localFeature(mode: LocalMode): FeatureKey {
+  return mode === 'solo' ? 'offline.solo_ai' : 'offline.pass_play';
 }
 
 function PickerLabel({ label, value }: { label: string; value: string }) {
@@ -219,8 +241,10 @@ const styles = StyleSheet.create({
   modeAccent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4 },
   modeIcon: { width: 54, height: 54, borderRadius: 8, borderWidth: 1, backgroundColor: 'rgba(7, 10, 24, 0.38)', alignItems: 'center', justifyContent: 'center' },
   modeCopy: { flex: 1, minWidth: 0 },
+  modeLocked: { opacity: 0.58 },
   modeTitle: { color: ui.text.primary, fontSize: 19, fontWeight: '900' },
   modeSubtitle: { color: ui.text.secondary, fontSize: 13, fontWeight: '700', lineHeight: 18, marginTop: 4 },
+  modeStatus: { color: ui.palette.gold, fontSize: 11, fontWeight: '900', marginTop: 5 },
   offlineNote: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   offlineNoteText: { flex: 1, color: ui.text.secondary, fontSize: 12, fontWeight: '800', lineHeight: 18 },
   pickerLabel: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },

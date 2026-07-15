@@ -8,6 +8,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
 import { useConnectivity } from '../context/ConnectivityContext';
+import { useAvailability } from '../context/AvailabilityContext';
 import * as api from '../services/api';
 import { CoinClaimBurst, type CoinClaimBurstState } from '../components/CoinClaimBurst';
 import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
@@ -26,6 +27,7 @@ const WAGER_SNAP_INTERVAL = WAGER_STEP_WIDTH + WAGER_STEP_GAP;
 export default function OnlineMenuScreen({ navigation }: Props) {
   const { token, user, refreshProfile } = useAuth();
   const { isOnline } = useConnectivity();
+  const { entry, isAvailable, isVisible, showUnavailable } = useAvailability();
   const [joinCode, setJoinCode] = useState('');
   const [autoOpen, setAutoOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
@@ -60,12 +62,22 @@ export default function OnlineMenuScreen({ navigation }: Props) {
   const loadTables = useCallback(async () => {
     if (!token || !isOnline) return;
     const [free, wager] = await Promise.all([
-      api.openRooms(token, { matchType: 'casual' }),
-      api.openRooms(token, { matchType: 'wager' }),
+      isAvailable('casual.auto_match') || isAvailable('casual.join_room') || isAvailable('casual.create_room')
+        ? api.openRooms(token, { matchType: 'casual' })
+        : Promise.resolve({ rooms: [] }),
+      isAvailable('casual.wagers')
+        ? api.openRooms(token, { matchType: 'wager' })
+        : Promise.resolve({ rooms: [] }),
     ]);
     setFreeRooms(free.rooms);
     setWagerRooms(wager.rooms);
-  }, [isOnline, token]);
+  }, [isAvailable, isOnline, token]);
+
+  useEffect(() => {
+    if (!isAvailable('casual.auto_match')) setAutoOpen(false);
+    if (!isAvailable('casual.join_room')) setJoinOpen(false);
+    if (!isAvailable('casual.create_room')) setCreateOpen(false);
+  }, [isAvailable]);
 
   useEffect(() => {
     if (!token || !isOnline) return;
@@ -162,14 +174,14 @@ export default function OnlineMenuScreen({ navigation }: Props) {
           <Users size={26} color={ui.palette.emerald} strokeWidth={2.6} />
         </View>
         <View style={styles.casualActions}>
-          <ActionButton label="Auto-Match" Icon={Sparkles} onPress={() => setAutoOpen(true)} />
-          <ActionButton label="Join Room" Icon={Search} tone="secondary" onPress={() => setJoinOpen(true)} />
-          <ActionButton label="Create Room" Icon={DoorOpen} tone="ghost" onPress={() => setCreateOpen(true)} />
+          {isVisible('casual.auto_match') ? <ActionButton label={featureLabel('casual.auto_match', 'Auto-Match')} Icon={Sparkles} tone={isAvailable('casual.auto_match') ? 'primary' : 'ghost'} onPress={() => openFeature('casual.auto_match', () => setAutoOpen(true))} /> : null}
+          {isVisible('casual.join_room') ? <ActionButton label={featureLabel('casual.join_room', 'Join Room')} Icon={Search} tone={isAvailable('casual.join_room') ? 'secondary' : 'ghost'} onPress={() => openFeature('casual.join_room', () => setJoinOpen(true))} /> : null}
+          {isVisible('casual.create_room') ? <ActionButton label={featureLabel('casual.create_room', 'Create Room')} Icon={DoorOpen} tone="ghost" onPress={() => openFeature('casual.create_room', () => setCreateOpen(true))} /> : null}
         </View>
-        <RoomList rooms={freeRooms} emptyText="No public free tables are waiting right now." busyRoomCode={busyRoomCode} onJoin={joinOpenRoom} />
+        {isAvailable('casual.join_room') ? <RoomList rooms={freeRooms} emptyText="No public free tables are waiting right now." busyRoomCode={busyRoomCode} onJoin={joinOpenRoom} /> : null}
       </PremiumPanel>
 
-      <PremiumPanel>
+      {isVisible('casual.wagers') ? <PremiumPanel style={!isAvailable('casual.wagers') ? styles.policyLockedPanel : undefined}>
         <View style={styles.cardHeader}>
           <View style={styles.cardCopy}>
             <Text style={styles.cardTitle}>Wager Tables</Text>
@@ -177,7 +189,13 @@ export default function OnlineMenuScreen({ navigation }: Props) {
           </View>
           <Coins size={26} color={ui.palette.gold} strokeWidth={2.6} />
         </View>
-        <WagerSlider tables={wagerTables} selectedIndex={wagerIndex} onSelect={setWagerIndex} balance={balance} waitingByBuyIn={openWagerByTier} />
+        {isAvailable('casual.wagers') ? <WagerSlider tables={wagerTables} selectedIndex={wagerIndex} onSelect={setWagerIndex} balance={balance} waitingByBuyIn={openWagerByTier} /> : (
+          <View style={styles.policyMessage}>
+            <Text style={styles.policyTitle}>{entry('casual.wagers').title}</Text>
+            <Text style={styles.policyCopy}>{entry('casual.wagers').message}</Text>
+          </View>
+        )}
+        {isAvailable('casual.wagers') ? <>
         <Text style={styles.modalLabel}>Players</Text>
         <Segmented values={PLAYER_OPTIONS} selected={wagerPlayers} onSelect={setWagerPlayers} suffix="P" />
         <Text style={styles.modalLabel}>Rounds</Text>
@@ -196,7 +214,8 @@ export default function OnlineMenuScreen({ navigation }: Props) {
           busyRoomCode={busyRoomCode}
           onJoin={joinOpenRoom}
         />
-      </PremiumPanel>
+        </> : <ActionButton label="View Details" tone="ghost" onPress={() => showUnavailable('casual.wagers')} />}
+      </PremiumPanel> : null}
 
       <ActionButton label="Earn Coins & Challenges" Icon={Gift} tone="ghost" onPress={() => setEarnOpen(true)} />
 
@@ -255,6 +274,17 @@ export default function OnlineMenuScreen({ navigation }: Props) {
       />
     </ScreenShell>
   );
+
+  function openFeature(featureKey: api.FeatureKey, action: () => void) {
+    if (isAvailable(featureKey)) action();
+    else showUnavailable(featureKey);
+  }
+
+  function featureLabel(featureKey: api.FeatureKey, liveLabel: string) {
+    const feature = entry(featureKey);
+    if (feature.testerPreview) return `${liveLabel} - Preview`;
+    return feature.state === 'live' ? liveLabel : feature.title || liveLabel;
+  }
 }
 
 function WagerSlider({
@@ -552,6 +582,10 @@ function EarnCoinsModal({
 }
 
 const styles = StyleSheet.create({
+  policyLockedPanel: { opacity: 0.78 },
+  policyMessage: { borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.base, padding: 14, marginTop: 12, marginBottom: 10 },
+  policyTitle: { color: ui.palette.gold, fontSize: 17, fontWeight: '900' },
+  policyCopy: { color: ui.text.secondary, fontSize: 13, fontWeight: '700', lineHeight: 18, marginTop: 5 },
   cardHeader: {
     minHeight: 44,
     flexDirection: 'row',

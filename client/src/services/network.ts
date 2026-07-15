@@ -5,7 +5,7 @@ import { io, Socket } from 'socket.io-client';
 import { SOCKET_URL } from '../config';
 import { getInstallIdSync } from '../utils/deviceIdentity';
 import type { GameState } from '../game/types';
-import type { ClubAnnouncement, ClubChatMessage, ClubProfile, MailSummary, RoomSummary, SocialSummary } from './api';
+import type { AvailabilityResponse, ClubAnnouncement, ClubChatMessage, ClubProfile, MailSummary, RoomSummary, SocialSummary } from './api';
 
 export type ChatMessage = {
   id: string;
@@ -128,6 +128,11 @@ export function onSocialUpdate(cb: (social: SocialSummary) => void) {
 export function onMailUpdate(cb: (summary: MailSummary) => void) {
   socket?.on('mail:update', cb);
   return () => { socket?.off('mail:update', cb); };
+}
+
+export function onAvailabilityUpdate(cb: (update: { revision: number; availability?: AvailabilityResponse }) => void) {
+  socket?.on('availability:update', cb);
+  return () => { socket?.off('availability:update', cb); };
 }
 
 export function joinClubSocket(token: string, clubId: string): Promise<{ club: ClubProfile; chat: ClubChatMessage[] }> {

@@ -36,6 +36,7 @@ import type { LucideIcon } from 'lucide-react-native';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
 import { useClubRealtime } from '../context/ClubRealtimeContext';
+import { useAvailability } from '../context/AvailabilityContext';
 import { ClubEmblem } from '../components/ClubEmblem';
 import * as api from '../services/api';
 import { ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
@@ -68,6 +69,7 @@ const BRAND_COLORS: Record<string, { accent: string; background: string; soft: s
 
 export default function ClubScreen({ navigation }: Props) {
   const { token, user, refreshProfile } = useAuth();
+  const availability = useAvailability();
   const realtime = useClubRealtime();
   const { club, applications, invitations, recommended } = realtime;
   const [economy, setEconomy] = useState<api.EconomyCatalog | null>(null);
@@ -131,6 +133,19 @@ export default function ClubScreen({ navigation }: Props) {
   }, [activeSection, realtime.setClubChatVisible]);
 
   useEffect(() => {
+    const featureKey = activeSection === 'chat'
+      ? 'clubs.chat'
+      : activeSection === 'treasury'
+        ? 'clubs.treasury'
+        : activeSection === 'manage'
+          ? 'clubs.management'
+          : null;
+    if (!featureKey || availability.isAvailable(featureKey)) return;
+    setActiveSection(null);
+    if (availability.isVisible(featureKey)) availability.showUnavailable(featureKey);
+  }, [activeSection, availability]);
+
+  useEffect(() => {
     if (club || searchQuery.trim().length < 2 || !token) {
       setSearchResults([]);
       return undefined;
@@ -186,17 +201,29 @@ export default function ClubScreen({ navigation }: Props) {
   });
 
   const donate = (amount: number) => runAction(`donate:${amount}`, async () => {
+    if (!availability.isAvailable('clubs.treasury')) {
+      availability.showUnavailable('clubs.treasury');
+      return;
+    }
     if (!club) return;
     setClubFrom(await api.donateToClub(token!, club.clubId, amount));
     await refreshProfile();
   });
 
   const buyPrestige = () => runAction('prestige', async () => {
+    if (!availability.isAvailable('clubs.treasury')) {
+      availability.showUnavailable('clubs.treasury');
+      return;
+    }
     if (!club) return;
     setClubFrom(await api.purchaseClubPrestige(token!, club.clubId));
   });
 
   const saveGoal = () => runAction('goal:save', async () => {
+    if (!availability.isAvailable('clubs.treasury')) {
+      availability.showUnavailable('clubs.treasury');
+      return;
+    }
     if (!club) return;
     setClubFrom(await api.updateClubTreasuryGoal(token!, club.clubId, {
       title: goalTitle,
@@ -206,42 +233,74 @@ export default function ClubScreen({ navigation }: Props) {
   });
 
   const clearGoal = () => runAction('goal:clear', async () => {
+    if (!availability.isAvailable('clubs.treasury')) {
+      availability.showUnavailable('clubs.treasury');
+      return;
+    }
     if (!club) return;
     setClubFrom(await api.clearClubTreasuryGoal(token!, club.clubId));
   });
 
   const postAnnouncement = () => runAction('announcement', async () => {
+    if (!availability.isAvailable('clubs.management')) {
+      availability.showUnavailable('clubs.management');
+      return;
+    }
     if (!club || !announcementText.trim()) return;
     setClubFrom(await api.postClubAnnouncement(token!, club.clubId, announcementText));
     setAnnouncementText('');
   });
 
   const sendChat = () => runAction('chat', async () => {
+    if (!availability.isAvailable('clubs.chat')) {
+      availability.showUnavailable('clubs.chat');
+      return;
+    }
     await realtime.sendClubMessage(chatInput);
     setChatInput('');
   });
 
   const acceptRequest = (request: api.ClubJoinRequest) => runAction(`accept:${request.id}`, async () => {
+    if (!availability.isAvailable('clubs.management')) {
+      availability.showUnavailable('clubs.management');
+      return;
+    }
     if (!club) return;
     setClubFrom(await api.acceptClubRequest(token!, club.clubId, request.id));
   });
 
   const rejectRequest = (request: api.ClubJoinRequest) => runAction(`reject:${request.id}`, async () => {
+    if (!availability.isAvailable('clubs.management')) {
+      availability.showUnavailable('clubs.management');
+      return;
+    }
     if (!club) return;
     setClubFrom(await api.rejectClubRequest(token!, club.clubId, request.id));
   });
 
   const updateRole = (member: api.ClubMember, role: api.ClubRole) => runAction(`role:${member.userId}:${role}`, async () => {
+    if (!availability.isAvailable('clubs.management')) {
+      availability.showUnavailable('clubs.management');
+      return;
+    }
     if (!club) return;
     setClubFrom(await api.updateClubMember(token!, club.clubId, member.userId, role));
   });
 
   const removeMember = (member: api.ClubMember) => runAction(`remove:${member.userId}`, async () => {
+    if (!availability.isAvailable('clubs.management')) {
+      availability.showUnavailable('clubs.management');
+      return;
+    }
     if (!club) return;
     setClubFrom(await api.removeClubMember(token!, club.clubId, member.userId));
   });
 
   const updateIdentity = () => runAction('identity', async () => {
+    if (!availability.isAvailable('clubs.management')) {
+      availability.showUnavailable('clubs.management');
+      return;
+    }
     if (!club) return;
     setClubFrom(await api.updateClub(token!, club.clubId, {
       name: editName,
@@ -396,9 +455,20 @@ function JoinedClub(props: {
   leave: () => void;
 }) {
   const { club, activeColors } = props;
+  const availability = useAvailability();
   const canManage = club.permissions.canManageRequests || club.permissions.canEdit;
   const latestAnnouncement = club.announcements[0];
   const nextReward = club.rewards.find(reward => !reward.claimed);
+  const openFeatureSection = (section: Exclude<ClubSection, null>, featureKey?: 'clubs.chat' | 'clubs.treasury' | 'clubs.management') => {
+    if (featureKey && !availability.isAvailable(featureKey)) {
+      availability.showUnavailable(featureKey);
+      return;
+    }
+    props.setActiveSection(section);
+  };
+  const chatEntry = availability.entry('clubs.chat');
+  const treasuryEntry = availability.entry('clubs.treasury');
+  const managementEntry = availability.entry('clubs.management');
   return (
     <>
       <View style={[styles.clubHero, { backgroundColor: activeColors.background, borderColor: activeColors.accent }]}>
@@ -418,12 +488,12 @@ function JoinedClub(props: {
       </View>
 
       <View style={styles.actionGrid}>
-        <HubAction title="Chat" detail="Live club conversation" Icon={MessageCircle} accent={activeColors.accent} badge={props.unread} onPress={() => props.setActiveSection('chat')} />
+        {availability.isVisible('clubs.chat') ? <HubAction title="Chat" detail={chatEntry.state === 'live' ? 'Live club conversation' : (chatEntry.title || 'Unavailable')} Icon={MessageCircle} accent={activeColors.accent} badge={props.unread} locked={chatEntry.state !== 'live'} testerPreview={chatEntry.testerPreview} onPress={() => openFeatureSection('chat', 'clubs.chat')} /> : null}
         <HubAction title="Progress" detail={nextReward ? `Next: ${nextReward.name}` : 'All rewards earned'} Icon={Target} accent="#4DA3FF" onPress={() => props.setActiveSection('progress')} />
-        <HubAction title="Treasury" detail={`${formatCoins(club.treasury.balance)} available`} Icon={Landmark} accent={ui.palette.gold} onPress={() => props.setActiveSection('treasury')} />
+        {availability.isVisible('clubs.treasury') ? <HubAction title="Treasury" detail={treasuryEntry.state === 'live' ? `${formatCoins(club.treasury.balance)} available` : (treasuryEntry.title || 'Unavailable')} Icon={Landmark} accent={ui.palette.gold} locked={treasuryEntry.state !== 'live'} testerPreview={treasuryEntry.testerPreview} onPress={() => openFeatureSection('treasury', 'clubs.treasury')} /> : null}
         <HubAction title="Members" detail={`${club.onlineMemberCount} online now`} Icon={Users} accent="#B99CFF" onPress={() => props.setActiveSection('members')} />
         <HubAction title="News" detail={latestAnnouncement?.text || club.event.title} Icon={Megaphone} accent="#FF8D8D" onPress={() => props.setActiveSection('news')} />
-        {canManage ? <HubAction title="Manage" detail={`${club.joinRequests.length} join request${club.joinRequests.length === 1 ? '' : 's'}`} Icon={Settings2} accent="#E8ECF1" badge={club.joinRequests.length} onPress={() => props.setActiveSection('manage')} /> : null}
+        {canManage && availability.isVisible('clubs.management') ? <HubAction title="Manage" detail={managementEntry.state === 'live' ? `${club.joinRequests.length} join request${club.joinRequests.length === 1 ? '' : 's'}` : (managementEntry.title || 'Unavailable')} Icon={Settings2} accent="#E8ECF1" badge={club.joinRequests.length} locked={managementEntry.state !== 'live'} testerPreview={managementEntry.testerPreview} onPress={() => openFeatureSection('manage', 'clubs.management')} /> : null}
       </View>
 
       <View style={styles.hubBand}>
@@ -840,14 +910,15 @@ function ClubSheet({ title, subtitle, visible, onClose, children }: { title: str
   );
 }
 
-function HubAction({ title, detail, Icon, accent, badge = 0, onPress }: { title: string; detail: string; Icon: LucideIcon; accent: string; badge?: number; onPress: () => void }) {
+function HubAction({ title, detail, Icon, accent, badge = 0, locked = false, testerPreview = false, onPress }: { title: string; detail: string; Icon: LucideIcon; accent: string; badge?: number; locked?: boolean; testerPreview?: boolean; onPress: () => void }) {
   return (
-    <Pressable style={styles.hubAction} onPress={onPress}>
-      <View style={[styles.hubActionIcon, { borderColor: accent }]}><Icon size={24} color={accent} strokeWidth={2.5} /></View>
+    <Pressable style={[styles.hubAction, locked && styles.hubActionLocked]} onPress={onPress}>
+      <View style={[styles.hubActionIcon, { borderColor: accent }]}>{locked ? <Lock size={22} color={ui.text.muted} strokeWidth={2.5} /> : <Icon size={24} color={accent} strokeWidth={2.5} />}</View>
       <View style={styles.flex}>
         <Text style={styles.hubActionTitle}>{title}</Text>
         <Text style={styles.hubActionDetail} numberOfLines={2}>{detail}</Text>
       </View>
+      {testerPreview ? <View style={styles.testerPreviewBadge}><Text style={styles.testerPreviewText}>Preview</Text></View> : null}
       {badge > 0 ? <View style={styles.notificationBadge}><Text style={styles.notificationBadgeText}>{Math.min(99, badge)}</Text></View> : null}
     </Pressable>
   );
@@ -1023,11 +1094,14 @@ const styles = StyleSheet.create({
   heroProgress: { color: ui.text.muted, fontSize: 11, fontWeight: '800', marginTop: 5 },
   actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
   hubAction: { width: '48.5%', minHeight: 104, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.panel, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  hubActionLocked: { opacity: 0.62 },
   hubActionIcon: { width: 42, height: 42, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: ui.surface.raised },
   hubActionTitle: { color: ui.text.primary, fontWeight: '900', fontSize: 16 },
   hubActionDetail: { color: ui.text.muted, fontWeight: '700', fontSize: 11, marginTop: 3 },
   notificationBadge: { position: 'absolute', right: 7, top: 7, minWidth: 22, height: 22, paddingHorizontal: 5, borderRadius: 11, backgroundColor: ui.palette.coral, alignItems: 'center', justifyContent: 'center' },
   notificationBadgeText: { color: '#08111F', fontSize: 11, fontWeight: '900' },
+  testerPreviewBadge: { position: 'absolute', left: 7, top: 7, borderRadius: 5, backgroundColor: '#26325A', paddingHorizontal: 5, paddingVertical: 2 },
+  testerPreviewText: { color: '#BDEBFF', fontSize: 8, fontWeight: '900', textTransform: 'uppercase' },
   hubBand: { borderTopWidth: 1, borderBottomWidth: 1, borderColor: ui.border.soft, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
   hubBandIcon: { width: 44, height: 44, borderRadius: 8, backgroundColor: ui.surface.raised, alignItems: 'center', justifyContent: 'center' },
   sheetBackdrop: { flex: 1, backgroundColor: 'rgba(3, 7, 17, 0.72)', justifyContent: 'flex-end' },

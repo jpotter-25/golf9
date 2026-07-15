@@ -59,6 +59,7 @@
           <button data-tab="mail">Mail</button>
           <button data-tab="economy">Economy</button>
           <button data-tab="notifications">Notifications</button>
+          <button data-tab="liveOps">Live Ops</button>
           <button data-tab="competitive">Competitive</button>
           <button data-tab="catalog">Catalog</button>
           <button data-tab="clubs">Clubs</button>
@@ -399,6 +400,105 @@
             <input name="reason" placeholder="Required audit reason" required />
             <button type="submit">Send Push</button>
           </form>
+        </section>
+        <section id="liveOps" class="tab">
+          <div class="panel live-ops-hero">
+            <div class="split-header">
+              <div>
+                <p class="eyebrow">Release Control</p>
+                <h2>Live Operations</h2>
+                <p class="muted">Stage releases, pause broken features, and protect matches already underway without another app build.</p>
+              </div>
+              <div class="actions-inline">
+                <label class="checkline live-ops-global-toggle"><input id="liveOpsGlobalSwitch" type="checkbox" /> Global maintenance</label>
+                <span id="liveOpsRevision" class="chip blue">Revision 0</span>
+                <button id="loadLiveOps">Refresh</button>
+              </div>
+            </div>
+            <div id="liveOpsImpact" class="live-ops-impact"></div>
+          </div>
+
+          <div class="live-ops-workspace">
+            <div class="panel compact live-ops-tree-panel">
+              <div class="split-header">
+                <div>
+                  <h3>Feature Tree</h3>
+                  <p class="muted">Parent restrictions always override their children.</p>
+                </div>
+                <input id="liveOpsFeatureSearch" class="compact-search" placeholder="Find a feature" />
+              </div>
+              <div id="liveOpsFeatureTree" class="live-ops-tree"></div>
+            </div>
+
+            <form id="liveOpsEditor" class="panel compact live-ops-editor">
+              <div>
+                <p id="liveOpsSelectedGroup" class="eyebrow">System</p>
+                <h3 id="liveOpsSelectedLabel">Global maintenance</h3>
+                <code id="liveOpsSelectedKey">global</code>
+              </div>
+              <label>State
+                <select name="state">
+                  <option value="live">Live</option>
+                  <option value="coming_soon">Coming Soon</option>
+                  <option value="maintenance">Maintenance</option>
+                  <option value="hidden">Hidden</option>
+                </select>
+              </label>
+              <label>Player-facing title <input name="title" maxlength="80" placeholder="Temporarily unavailable" /></label>
+              <label>Player message <textarea name="message" maxlength="280" rows="4" placeholder="Tell players what is happening and what to expect."></textarea></label>
+              <div class="row two">
+                <label>Publish restoration <input name="restoreAt" type="datetime-local" /></label>
+                <label>Scheduled activation <input name="activateAt" type="datetime-local" /></label>
+              </div>
+              <label>Administrative reason <input name="reason" maxlength="240" placeholder="Required for the audit trail" required /></label>
+              <div id="liveOpsPreview" class="live-ops-preview"></div>
+              <div class="actions-inline">
+                <button id="publishLiveOps" type="submit">Publish Now</button>
+                <button id="scheduleLiveOps" type="button" class="ghost">Schedule</button>
+              </div>
+              <p id="liveOpsReadOnly" class="muted hidden">Your admin role has read-only Live Ops access.</p>
+            </form>
+          </div>
+
+          <div class="live-ops-lower-grid">
+            <div class="panel compact">
+              <div class="split-header">
+                <div>
+                  <h3>Tester Preview</h3>
+                  <p class="muted">Allowed testers bypass locked and hidden states, with a visible preview marker in the app.</p>
+                </div>
+                <span id="liveOpsTesterCount" class="chip">0 testers</span>
+              </div>
+              <div class="row">
+                <input id="liveOpsTesterSearch" placeholder="Search player name, tag, or ID" />
+                <button id="searchLiveOpsTesters" type="button" class="ghost">Search</button>
+              </div>
+              <div id="liveOpsTesterResults" class="live-ops-tester-results"></div>
+              <label>Administrative reason <input id="liveOpsTesterReason" maxlength="240" placeholder="Required when saving tester access" /></label>
+              <button id="saveLiveOpsTesters" type="button">Save Tester Access</button>
+            </div>
+
+            <div class="panel compact">
+              <div class="split-header">
+                <div>
+                  <h3>Scheduled Changes</h3>
+                  <p class="muted">One pending schedule is allowed per feature.</p>
+                </div>
+                <span id="liveOpsScheduleCount" class="chip">0 scheduled</span>
+              </div>
+              <div id="liveOpsSchedules" class="list"></div>
+            </div>
+          </div>
+
+          <div class="panel compact">
+            <div class="split-header">
+              <div>
+                <h3>Revision History</h3>
+                <p class="muted">The latest 50 audited revisions are retained. Restoring a revision also clears pending schedules.</p>
+              </div>
+            </div>
+            <div id="liveOpsRevisions" class="live-ops-revisions"></div>
+          </div>
         </section>
         <section id="catalog" class="tab">
           <div class="panel">

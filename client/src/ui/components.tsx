@@ -17,6 +17,7 @@ import type { LucideIcon } from 'lucide-react-native';
 import { useNavigation, useRoute, type NavigationProp, type ParamListBase } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
+import { useAvailability } from '../context/AvailabilityContext';
 import { useClubRealtime } from '../context/ClubRealtimeContext';
 import { getGameplayPreferences, setGameplayPreferences, subscribeGameplayPreferences } from '../services/preferences';
 import { ProgressAvatar } from '../components/AvatarDecorations';
@@ -90,6 +91,7 @@ function GlobalTopBar() {
   const route = useRoute();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const { user, signOut } = useAuth();
+  const { entry: availabilityEntry, isAvailable, isVisible, showUnavailable } = useAvailability();
   const { club, mailSummary, clubChatUnread, clubActionCount } = useClubRealtime();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prefs, setPrefs] = useState(getGameplayPreferences());
@@ -101,7 +103,12 @@ function GlobalTopBar() {
 
   const updatePrefs = (next: Partial<typeof prefs>) => setGameplayPreferences(next);
   const openClub = () => {
-    navigation.navigate('Club');
+    if (isAvailable('clubs')) navigation.navigate('Club');
+    else showUnavailable('clubs');
+  };
+  const openFeature = (featureKey: 'profile' | 'shop' | 'inbox' | 'rules' | 'tutorial', routeName: string) => {
+    if (isAvailable(featureKey)) navigation.navigate(routeName);
+    else showUnavailable(featureKey);
   };
 
   return (
@@ -113,7 +120,7 @@ function GlobalTopBar() {
           </Pressable>
         ) : null}
 
-        <Pressable accessibilityRole="button" accessibilityLabel="Open profile" style={styles.playerChip} onPress={() => navigation.navigate('Profile')}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Open profile" style={[styles.playerChip, !isAvailable('profile') && styles.featureLocked]} onPress={() => openFeature('profile', 'Profile')}>
           <ProgressAvatar
             cosmetics={user?.inventory.equipped}
             fallbackInitial={user?.avatarInitial ?? '?'}
@@ -129,33 +136,39 @@ function GlobalTopBar() {
           </View>
         </Pressable>
 
-        <Pressable accessibilityRole="button" accessibilityLabel="Open shop" style={styles.currencyChip} onPress={() => navigation.navigate('Shop')}>
-          <Coins size={14} color={ui.palette.gold} strokeWidth={2.8} />
-          <Text style={styles.currencyValue} numberOfLines={1}>{user?.currency.coins ?? 0}</Text>
-        </Pressable>
+        {isVisible('shop') ? (
+          <Pressable accessibilityRole="button" accessibilityLabel="Open shop" style={[styles.currencyChip, !isAvailable('shop') && styles.featureLocked]} onPress={() => openFeature('shop', 'Shop')}>
+            <Coins size={14} color={ui.palette.gold} strokeWidth={2.8} />
+            <Text style={styles.currencyValue} numberOfLines={1}>{user?.currency.coins ?? 0}</Text>
+          </Pressable>
+        ) : null}
 
-        <Pressable accessibilityRole="button" accessibilityLabel="Open inbox" style={styles.topIconButton} onPress={() => navigation.navigate('Inbox')}>
-          <Mail size={18} color={ui.text.primary} strokeWidth={2.8} />
-          {(mailSummary?.attention ?? 0) > 0 ? (
-            <View style={styles.topIconBadge}>
-              <Text style={styles.topIconBadgeText}>{Math.min(99, mailSummary?.attention ?? 0)}</Text>
-            </View>
-          ) : null}
-        </Pressable>
+        {isVisible('inbox') ? (
+          <Pressable accessibilityRole="button" accessibilityLabel="Open inbox" style={[styles.topIconButton, !isAvailable('inbox') && styles.featureLocked]} onPress={() => openFeature('inbox', 'Inbox')}>
+            <Mail size={18} color={ui.text.primary} strokeWidth={2.8} />
+            {(mailSummary?.attention ?? 0) > 0 ? (
+              <View style={styles.topIconBadge}>
+                <Text style={styles.topIconBadgeText}>{Math.min(99, mailSummary?.attention ?? 0)}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+        ) : null}
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Open club${clubActionCount ? `, ${clubActionCount} pending club action${clubActionCount === 1 ? '' : 's'}` : ''}${clubChatUnread ? `, ${clubChatUnread} new club chat message${clubChatUnread === 1 ? '' : 's'}` : ''}`}
-          style={styles.topIconButton}
-          onPress={openClub}
-        >
-          {club ? <ClubEmblem branding={club.branding} tag={club.tag} size={29} /> : <Users size={18} color={ui.text.primary} strokeWidth={2.8} />}
-          {clubAttentionCount > 0 ? (
-            <View style={styles.topIconBadge}>
-              <Text style={styles.topIconBadgeText}>{clubAttentionCount}</Text>
-            </View>
-          ) : null}
-        </Pressable>
+        {isVisible('clubs') ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Open club${clubActionCount ? `, ${clubActionCount} pending club action${clubActionCount === 1 ? '' : 's'}` : ''}${clubChatUnread ? `, ${clubChatUnread} new club chat message${clubChatUnread === 1 ? '' : 's'}` : ''}`}
+            style={[styles.topIconButton, !isAvailable('clubs') && styles.featureLocked]}
+            onPress={openClub}
+          >
+            {club ? <ClubEmblem branding={club.branding} tag={club.tag} size={29} /> : <Users size={18} color={ui.text.primary} strokeWidth={2.8} />}
+            {clubAttentionCount > 0 ? (
+              <View style={styles.topIconBadge}>
+                <Text style={styles.topIconBadgeText}>{clubAttentionCount}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+        ) : null}
 
         <Pressable accessibilityRole="button" accessibilityLabel="Open settings" style={styles.topIconButton} onPress={() => setSettingsOpen(true)}>
           <Settings size={18} color={ui.text.primary} strokeWidth={2.8} />
@@ -182,8 +195,8 @@ function GlobalTopBar() {
               <SettingsToggle Icon={Zap} label="Vibration" value={prefs.vibrate} onValueChange={value => updatePrefs({ vibrate: value })} />
               <View style={styles.settingsDivider} />
               <Text style={styles.settingsSectionLabel}>Game help</Text>
-              <SettingsAction Icon={BookOpen} label="Rules" onPress={() => { setSettingsOpen(false); navigation.navigate('Rules'); }} />
-              <SettingsAction Icon={GraduationCap} label="Play Tutorial" onPress={() => { setSettingsOpen(false); navigation.navigate('Tutorial'); }} />
+              {isVisible('rules') ? <SettingsAction Icon={BookOpen} label={availabilityEntry('rules').state === 'live' ? 'Rules' : availabilityEntry('rules').title || 'Rules'} onPress={() => { setSettingsOpen(false); openFeature('rules', 'Rules'); }} /> : null}
+              {isVisible('tutorial') ? <SettingsAction Icon={GraduationCap} label={availabilityEntry('tutorial').state === 'live' ? 'Play Tutorial' : availabilityEntry('tutorial').title || 'Play Tutorial'} onPress={() => { setSettingsOpen(false); openFeature('tutorial', 'Tutorial'); }} /> : null}
               <View style={styles.settingsDivider} />
               <SettingsAction Icon={LogOut} label="Log Out" danger onPress={() => { setSettingsOpen(false); signOut(); }} />
             </View>
@@ -351,6 +364,7 @@ export function SectionTitle({ title, action }: { title: string; action?: React.
 }
 
 const styles = StyleSheet.create({
+  featureLocked: { opacity: 0.55 },
   fill: { flex: 1 },
   shell: { flex: 1 },
   shellContent: { flexGrow: 1, paddingHorizontal: 18 },

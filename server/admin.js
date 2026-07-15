@@ -34,12 +34,14 @@ const ROLE_PERMISSIONS = {
     'notifications:write',
     'mail:read',
     'mail:write',
+    'availability:read',
+    'availability:write',
     'metrics:read',
   ],
-  support: ['users:read', 'invites:read', 'support:read', 'support:write', 'catalog:read', 'mail:read', 'mail:write', 'metrics:read'],
-  moderator: ['users:read', 'support:read', 'moderation:write', 'audit:read', 'catalog:read', 'metrics:read'],
-  economy: ['users:read', 'economy:write', 'cosmetics:write', 'catalog:read', 'catalog:write', 'competitive:read', 'mail:read', 'mail:write', 'metrics:read'],
-  readOnly: ['users:read', 'support:read', 'audit:read', 'catalog:read', 'competitive:read', 'mail:read', 'metrics:read'],
+  support: ['users:read', 'invites:read', 'support:read', 'support:write', 'catalog:read', 'mail:read', 'mail:write', 'availability:read', 'metrics:read'],
+  moderator: ['users:read', 'support:read', 'moderation:write', 'audit:read', 'catalog:read', 'availability:read', 'metrics:read'],
+  economy: ['users:read', 'economy:write', 'cosmetics:write', 'catalog:read', 'catalog:write', 'competitive:read', 'mail:read', 'mail:write', 'availability:read', 'metrics:read'],
+  readOnly: ['users:read', 'support:read', 'audit:read', 'catalog:read', 'competitive:read', 'mail:read', 'availability:read', 'metrics:read'],
 };
 
 const VALID_ROLES = Object.keys(ROLE_PERMISSIONS);

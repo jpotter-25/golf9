@@ -7,7 +7,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as NavigationBar from 'expo-navigation-bar';
-import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   LoginScreen,
@@ -31,6 +31,7 @@ import {
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ClubRealtimeProvider } from './context/ClubRealtimeContext';
 import { ConnectivityProvider, useConnectivity } from './context/ConnectivityContext';
+import { AvailabilityProvider, useAvailability } from './context/AvailabilityContext';
 import { OfflineSyncProvider } from './context/OfflineSyncContext';
 import * as api from './services/api';
 import { getGameplayPreferences, subscribeGameplayPreferences, type GameplayPreferences } from './services/preferences';
@@ -251,6 +252,133 @@ function ActiveMatchGate({ navigationTick }: { navigationTick: number }) {
   );
 }
 
+function LockedFeature({ featureKey }: { featureKey: api.FeatureKey }) {
+  const { entry, refresh, refreshing } = useAvailability();
+  const { signOut } = useAuth();
+  const feature = entry(featureKey);
+  const isGlobal = feature.inheritedFrom === 'global' || feature.featureKey === 'global';
+  const retryLabel = feature.retryAt
+    ? new Date(feature.retryAt).toLocaleString()
+    : null;
+
+  return (
+    <View style={styles.availabilityScreen}>
+      <View style={styles.availabilityCard}>
+        <Text style={styles.availabilityEyebrow}>{isGlobal ? 'Golf 9 Live Operations' : feature.label || 'Golf 9'}</Text>
+        <Text style={styles.availabilityTitle}>
+          {feature.title || (feature.state === 'coming_soon' ? 'Coming Soon' : 'Temporarily Unavailable')}
+        </Text>
+        <Text style={styles.availabilityCopy}>
+          {feature.message || 'This area is not available right now. Please check again soon.'}
+        </Text>
+        {retryLabel ? <Text style={styles.availabilityRetry}>Expected update: {retryLabel}</Text> : null}
+        <Pressable style={styles.availabilityPrimaryButton} onPress={() => void refresh()} disabled={refreshing}>
+          <Text style={styles.availabilityPrimaryButtonText}>{refreshing ? 'Checking...' : 'Check Again'}</Text>
+        </Pressable>
+        {isGlobal ? (
+          <>
+            <View style={styles.availabilityEssentialRow}>
+              <Pressable style={styles.availabilitySecondaryButton} onPress={() => navigationRef.navigate('Inbox')}>
+                <Text style={styles.availabilitySecondaryButtonText}>Inbox & Support</Text>
+              </Pressable>
+              <Pressable style={styles.availabilitySecondaryButton} onPress={() => navigationRef.navigate('Settings')}>
+                <Text style={styles.availabilitySecondaryButtonText}>Settings</Text>
+              </Pressable>
+            </View>
+            <View style={styles.availabilityLegalRow}>
+              <Text style={styles.availabilityLink} onPress={() => void Linking.openURL('https://games.joinup.us/privacy')}>Privacy</Text>
+              <Text style={styles.availabilityLink} onPress={() => void Linking.openURL('https://games.joinup.us/terms')}>Terms</Text>
+              <Text style={styles.availabilityLink} onPress={() => void signOut()}>Log Out</Text>
+            </View>
+          </>
+        ) : (
+          <Pressable style={styles.availabilitySecondaryButton} onPress={() => navigationRef.goBack()}>
+            <Text style={styles.availabilitySecondaryButtonText}>Go Back</Text>
+          </Pressable>
+        )}
+      </View>
+    </View>
+  );
+}
+
+function AvailabilityRoute({ featureKey, children }: { featureKey: api.FeatureKey; children: React.ReactNode }) {
+  const { entry, loading } = useAvailability();
+  if (loading) {
+    return (
+      <View style={styles.availabilityScreen}>
+        <ActivityIndicator color="#52E5A7" />
+        <Text style={styles.availabilityLoadingText}>Checking availability...</Text>
+      </View>
+    );
+  }
+  if (entry(featureKey).state !== 'live') return <LockedFeature featureKey={featureKey} />;
+  return <>{children}</>;
+}
+
+function LobbyRoute(props: React.ComponentProps<typeof LobbyScreen>) {
+  return <AvailabilityRoute featureKey="global"><LobbyScreen {...props} /></AvailabilityRoute>;
+}
+
+function CasualMenuRoute(props: React.ComponentProps<typeof OnlineMenuScreen>) {
+  return <AvailabilityRoute featureKey="casual"><OnlineMenuScreen {...props} /></AvailabilityRoute>;
+}
+
+function RankedMenuRoute(props: React.ComponentProps<typeof RankedMenuScreen>) {
+  return <AvailabilityRoute featureKey="ranked"><RankedMenuScreen {...props} /></AvailabilityRoute>;
+}
+
+function OfflineMenuRoute(props: React.ComponentProps<typeof OfflineMenuScreen>) {
+  return <AvailabilityRoute featureKey="offline"><OfflineMenuScreen {...props} /></AvailabilityRoute>;
+}
+
+function OnlineRoomRoute(props: React.ComponentProps<typeof OnlineRoomScreen>) {
+  const params = props.route.params;
+  let featureKey: api.FeatureKey = 'casual';
+  if (params.ranked) featureKey = `ranked.${params.players}p` as api.FeatureKey;
+  else if (params.wagerBuyIn) featureKey = 'casual.wagers';
+  else if (params.quickPlay) featureKey = 'casual.auto_match';
+  else if (params.joinCode) featureKey = 'casual.join_room';
+  else if (params.create) featureKey = 'casual.create_room';
+  return <AvailabilityRoute featureKey={featureKey}><OnlineRoomScreen {...props} /></AvailabilityRoute>;
+}
+
+function RankedQueueRoute(props: React.ComponentProps<typeof RankedQueueScreen>) {
+  const featureKey = `ranked.${props.route.params.players}p` as api.FeatureKey;
+  return <AvailabilityRoute featureKey={featureKey}><RankedQueueScreen {...props} /></AvailabilityRoute>;
+}
+
+function RulesRoute(props: React.ComponentProps<typeof RulesScreen>) {
+  return <AvailabilityRoute featureKey="rules"><RulesScreen {...props} /></AvailabilityRoute>;
+}
+
+function TutorialRoute(props: React.ComponentProps<typeof TutorialScreen>) {
+  return <AvailabilityRoute featureKey="tutorial"><TutorialScreen {...props} /></AvailabilityRoute>;
+}
+
+function ProfileRoute(props: React.ComponentProps<typeof ProfileScreen>) {
+  return <AvailabilityRoute featureKey="profile"><ProfileScreen {...props} /></AvailabilityRoute>;
+}
+
+function ShopRoute(props: React.ComponentProps<typeof ShopScreen>) {
+  return <AvailabilityRoute featureKey="shop"><ShopScreen {...props} /></AvailabilityRoute>;
+}
+
+function InboxRoute(props: React.ComponentProps<typeof InboxScreen>) {
+  return <AvailabilityRoute featureKey="inbox"><InboxScreen {...props} /></AvailabilityRoute>;
+}
+
+function SocialRoute(props: React.ComponentProps<typeof SocialScreen>) {
+  return <AvailabilityRoute featureKey="social"><SocialScreen {...props} /></AvailabilityRoute>;
+}
+
+function ClubRoute(props: React.ComponentProps<typeof ClubScreen>) {
+  return <AvailabilityRoute featureKey="clubs"><ClubScreen {...props} /></AvailabilityRoute>;
+}
+
+function PlayerProfileRoute(props: React.ComponentProps<typeof PlayerProfileScreen>) {
+  return <AvailabilityRoute featureKey="profile"><PlayerProfileScreen {...props} /></AvailabilityRoute>;
+}
+
 function AppNavigator() {
   const { token, loading } = useAuth();
   const [navigationTick, setNavigationTick] = useState(0);
@@ -279,21 +407,21 @@ function AppNavigator() {
           </>
         ) : (
           <>
-            <Stack.Screen name="Lobby" component={LobbyScreen} />
-            <Stack.Screen name="CasualMenu" component={OnlineMenuScreen} />
-            <Stack.Screen name="RankedMenu" component={RankedMenuScreen} />
-            <Stack.Screen name="OfflineMenu" component={OfflineMenuScreen} />
-            <Stack.Screen name="OnlineRoom" component={OnlineRoomScreen} />
-            <Stack.Screen name="RankedQueue" component={RankedQueueScreen} />
+            <Stack.Screen name="Lobby" component={LobbyRoute} />
+            <Stack.Screen name="CasualMenu" component={CasualMenuRoute} />
+            <Stack.Screen name="RankedMenu" component={RankedMenuRoute} />
+            <Stack.Screen name="OfflineMenu" component={OfflineMenuRoute} />
+            <Stack.Screen name="OnlineRoom" component={OnlineRoomRoute} />
+            <Stack.Screen name="RankedQueue" component={RankedQueueRoute} />
             <Stack.Screen name="Game" component={GameScreen} />
-            <Stack.Screen name="Rules" component={RulesScreen} />
-            <Stack.Screen name="Tutorial" component={TutorialScreen} />
-            <Stack.Screen name="Profile" component={ProfileScreen} />
-            <Stack.Screen name="Shop" component={ShopScreen} />
-            <Stack.Screen name="Inbox" component={InboxScreen} />
-            <Stack.Screen name="Social" component={SocialScreen} />
-            <Stack.Screen name="Club" component={ClubScreen} />
-            <Stack.Screen name="PlayerProfile" component={PlayerProfileScreen} />
+            <Stack.Screen name="Rules" component={RulesRoute} />
+            <Stack.Screen name="Tutorial" component={TutorialRoute} />
+            <Stack.Screen name="Profile" component={ProfileRoute} />
+            <Stack.Screen name="Shop" component={ShopRoute} />
+            <Stack.Screen name="Inbox" component={InboxRoute} />
+            <Stack.Screen name="Social" component={SocialRoute} />
+            <Stack.Screen name="Club" component={ClubRoute} />
+            <Stack.Screen name="PlayerProfile" component={PlayerProfileRoute} />
             <Stack.Screen name="Settings" component={SettingsScreen} />
           </>
         )}
@@ -335,12 +463,14 @@ export default function App() {
       <StatusBar hidden />
       <ConnectivityProvider>
         <AuthProvider>
-          <OfflineSyncProvider>
-            <ClubRealtimeProvider>
-              <PushNotificationRegistration />
-              <AppNavigator />
-            </ClubRealtimeProvider>
-          </OfflineSyncProvider>
+          <AvailabilityProvider>
+            <OfflineSyncProvider>
+              <ClubRealtimeProvider>
+                <PushNotificationRegistration />
+                <AppNavigator />
+              </ClubRealtimeProvider>
+            </OfflineSyncProvider>
+          </AvailabilityProvider>
         </AuthProvider>
       </ConnectivityProvider>
     </SafeAreaProvider>
@@ -348,6 +478,100 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  availabilityScreen: {
+    flex: 1,
+    backgroundColor: '#080C1C',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  availabilityCard: {
+    width: '100%',
+    maxWidth: 440,
+    borderWidth: 1,
+    borderColor: '#394574',
+    borderRadius: 8,
+    backgroundColor: '#121737',
+    padding: 24,
+  },
+  availabilityEyebrow: {
+    color: '#FFCC66',
+    fontSize: 13,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  availabilityTitle: {
+    color: '#F4F7FF',
+    fontSize: 30,
+    fontWeight: '900',
+    marginTop: 10,
+  },
+  availabilityCopy: {
+    color: '#C9D1EA',
+    fontSize: 16,
+    lineHeight: 23,
+    fontWeight: '700',
+    marginTop: 12,
+  },
+  availabilityRetry: {
+    color: '#52E5A7',
+    fontSize: 14,
+    fontWeight: '800',
+    marginTop: 14,
+  },
+  availabilityPrimaryButton: {
+    minHeight: 54,
+    borderRadius: 8,
+    backgroundColor: '#52E5A7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 22,
+  },
+  availabilityPrimaryButtonText: {
+    color: '#0B1023',
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  availabilityEssentialRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 10,
+  },
+  availabilitySecondaryButton: {
+    flex: 1,
+    minHeight: 50,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#3C4676',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+    paddingHorizontal: 12,
+  },
+  availabilitySecondaryButtonText: {
+    color: '#F4F7FF',
+    fontSize: 15,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  availabilityLegalRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 20,
+    marginTop: 22,
+  },
+  availabilityLink: {
+    color: '#8FBFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    textDecorationLine: 'underline',
+  },
+  availabilityLoadingText: {
+    color: '#C9D1EA',
+    fontSize: 15,
+    fontWeight: '800',
+    marginTop: 14,
+  },
   activeGateOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 999,

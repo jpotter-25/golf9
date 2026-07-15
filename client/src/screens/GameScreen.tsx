@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as NavigationBar from 'expo-navigation-bar';
 import { Audio } from 'expo-av';
-import { Bell, Gem, MessageCircle, Settings, ShoppingBag, Trophy, UserPlus, Users, X } from 'lucide-react-native';
+import { Bell, Gem, LockKeyhole, MessageCircle, Settings, ShoppingBag, Trophy, UserPlus, Users, X } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import type { GameState, Card, Grid, PlayerIdentity } from '../game/types';
@@ -26,6 +26,7 @@ import { AvatarCluster, rankEmblemForLeague } from '../components/AvatarDecorati
 import { PlayerAvatar } from '../components/PlayerAvatar';
 import { useBoardMetrics } from '../utils/scaling';
 import { useAuth } from '../context/AuthContext';
+import { useAvailability } from '../context/AvailabilityContext';
 import { useClubRealtime } from '../context/ClubRealtimeContext';
 import { useOfflineSync, type LocalResultSyncOutcome } from '../context/OfflineSyncContext';
 import * as api from '../services/api';
@@ -190,6 +191,7 @@ export default function GameScreen({ route, navigation }: Props) {
   const { players, mode, rounds, roomCode, aiDifficulty = 'easy', localPlayerNames } = route.params;
   const TOTAL_ROUNDS: number = rounds;
   const { token, user, refreshProfile } = useAuth();
+  const availability = useAvailability();
   const { submitLocalResult } = useOfflineSync();
   const {
     club: clubProfile,
@@ -357,6 +359,10 @@ export default function GameScreen({ route, navigation }: Props) {
 
   const openAvatarHub = useCallback((userId?: string) => {
     if (!userId) return;
+    if (!availability.isAvailable('profile')) {
+      availability.showUnavailable('profile');
+      return;
+    }
     const isSelf = userId === user?.userId;
     if (!isOnline && !isSelf) return;
     setAvatarHubUserId(userId);
@@ -371,7 +377,7 @@ export default function GameScreen({ route, navigation }: Props) {
       .then(response => setAvatarHubProfile(response.profile))
       .catch(() => setAvatarHubProfile(null))
       .finally(() => setAvatarHubLoading(false));
-  }, [isOnline, token, user?.userId]);
+  }, [availability, isOnline, token, user?.userId]);
 
   useEffect(() => {
     if (!token || !avatarHubUserId || avatarHubUserId !== user?.userId) return;
@@ -426,6 +432,24 @@ export default function GameScreen({ route, navigation }: Props) {
     setClubChatVisible(clubChatOpen && isFocused);
     return () => setClubChatVisible(false);
   }, [clubChatOpen, isFocused, setClubChatVisible]);
+
+  useEffect(() => {
+    const unavailableFeature = chatOpen && !availability.isAvailable('social')
+      ? 'social'
+      : clubChatOpen && !availability.isAvailable('clubs.chat')
+        ? 'clubs.chat'
+        : shopOpen && !availability.isAvailable('shop')
+          ? 'shop'
+          : avatarHubUserId && !availability.isAvailable('profile')
+            ? 'profile'
+            : null;
+    if (!unavailableFeature) return;
+    setChatOpen(false);
+    setClubChatOpen(false);
+    setShopOpen(false);
+    setAvatarHubUserId(null);
+    if (availability.isVisible(unavailableFeature)) availability.showUnavailable(unavailableFeature);
+  }, [availability, avatarHubUserId, chatOpen, clubChatOpen, shopOpen]);
 
   const applyOnlineGameState = useCallback((next: GameState) => {
     setState(next);
@@ -1535,6 +1559,10 @@ export default function GameScreen({ route, navigation }: Props) {
   };
 
   const onSendChat = async (type: ChatMessageType, text: string) => {
+    if (!availability.isAvailable('social')) {
+      availability.showUnavailable('social');
+      return;
+    }
     if (!isOnline || !token || !roomCode || chatSending) return;
     const clean = text.trim();
     if (!clean) return;
@@ -1550,6 +1578,10 @@ export default function GameScreen({ route, navigation }: Props) {
   };
 
   const onSendClubChat = async (text: string) => {
+    if (!availability.isAvailable('clubs.chat')) {
+      availability.showUnavailable('clubs.chat');
+      return;
+    }
     if (!token || !user?.club?.clubId || clubChatSending) return;
     const clean = text.trim();
     if (!clean) return;
@@ -1578,6 +1610,10 @@ export default function GameScreen({ route, navigation }: Props) {
   }, [token, user?.userId]);
 
   const sendGiftToPlayer = useCallback(async (targetUserId: string, giftId: string) => {
+    if (!availability.isAvailable('social')) {
+      availability.showUnavailable('social');
+      return;
+    }
     if (!isOnline || !token || !roomCode || avatarHubBusy) return;
     setAvatarHubBusy(giftId);
     try {
@@ -1588,7 +1624,7 @@ export default function GameScreen({ route, navigation }: Props) {
     } finally {
       setAvatarHubBusy(null);
     }
-  }, [avatarHubBusy, isOnline, refreshProfile, roomCode, token]);
+  }, [availability, avatarHubBusy, isOnline, refreshProfile, roomCode, token]);
 
   const equipAvatarHubCosmetic = useCallback(async (item: api.CosmeticItem) => {
     if (!token || avatarHubBusy || !item.owned || item.equipped) return;
@@ -1605,6 +1641,10 @@ export default function GameScreen({ route, navigation }: Props) {
   }, [avatarHubBusy, refreshProfile, token]);
 
   const runAvatarHubFriendAction = useCallback(async () => {
+    if (!availability.isAvailable('social')) {
+      availability.showUnavailable('social');
+      return;
+    }
     if (!token || !avatarHubProfile || avatarHubBusy) return;
     setAvatarHubBusy('friend');
     try {
@@ -1624,9 +1664,13 @@ export default function GameScreen({ route, navigation }: Props) {
     } finally {
       setAvatarHubBusy(null);
     }
-  }, [avatarHubBusy, avatarHubProfile, reloadAvatarHubProfile, token]);
+  }, [availability, avatarHubBusy, avatarHubProfile, reloadAvatarHubProfile, token]);
 
   const inviteAvatarHubPlayer = useCallback(async () => {
+    if (!availability.isAvailable('social')) {
+      availability.showUnavailable('social');
+      return;
+    }
     if (!token || !roomCode || !avatarHubProfile || avatarHubBusy) return;
     setAvatarHubBusy('invite');
     try {
@@ -1637,7 +1681,7 @@ export default function GameScreen({ route, navigation }: Props) {
     } finally {
       setAvatarHubBusy(null);
     }
-  }, [avatarHubBusy, avatarHubProfile, roomCode, token]);
+  }, [availability, avatarHubBusy, avatarHubProfile, roomCode, token]);
 
   // ===== Render =====
   const bottomRoomPlayer = roomPlayersById.get(bottomPlayer.userId);
@@ -1755,15 +1799,19 @@ export default function GameScreen({ route, navigation }: Props) {
           <Text style={styles.heading}>{hudTitle}</Text>
           <Text style={styles.turnInstruction}>{hudInstruction}</Text>
         </View>
-        {isOnline ? (
+        {isOnline && availability.isVisible('social') ? (
           <Pressable
-            style={[styles.chatButton, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }]}
+            style={[styles.chatButton, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }, !availability.isAvailable('social') && styles.featureButtonLocked]}
             onPress={() => {
+              if (!availability.isAvailable('social')) {
+                availability.showUnavailable('social');
+                return;
+              }
               setChatOpen(true);
               setChatUnread(0);
             }}
           >
-            <MessageCircle size={22} color={ui.text.primary} strokeWidth={2.5} />
+            {availability.isAvailable('social') ? <MessageCircle size={22} color={ui.text.primary} strokeWidth={2.5} /> : <LockKeyhole size={21} color={ui.text.muted} strokeWidth={2.5} />}
             {gameLayerState.social.unreadCount > 0 ? (
               <View style={styles.chatBadge}>
                 <Text style={styles.chatBadgeText}>{gameLayerState.social.unreadCount > 9 ? '9+' : gameLayerState.social.unreadCount}</Text>
@@ -1771,12 +1819,12 @@ export default function GameScreen({ route, navigation }: Props) {
             ) : null}
           </Pressable>
         ) : null}
-        {user?.club?.clubId ? (
+        {user?.club?.clubId && availability.isVisible('clubs.chat') ? (
           <Pressable
-            style={[styles.chatButton, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }]}
-            onPress={() => setClubChatOpen(true)}
+            style={[styles.chatButton, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }, !availability.isAvailable('clubs.chat') && styles.featureButtonLocked]}
+            onPress={() => availability.isAvailable('clubs.chat') ? setClubChatOpen(true) : availability.showUnavailable('clubs.chat')}
           >
-            <Users size={22} color={ui.palette.emerald} strokeWidth={2.5} />
+            {availability.isAvailable('clubs.chat') ? <Users size={22} color={ui.palette.emerald} strokeWidth={2.5} /> : <LockKeyhole size={21} color={ui.text.muted} strokeWidth={2.5} />}
             {clubChatUnread > 0 ? (
               <View style={styles.chatBadge}>
                 <Text style={styles.chatBadgeText}>{clubChatUnread > 9 ? '9+' : clubChatUnread}</Text>
@@ -1784,12 +1832,12 @@ export default function GameScreen({ route, navigation }: Props) {
             ) : null}
           </Pressable>
         ) : null}
-        <Pressable
-          style={[styles.chatButton, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }]}
-          onPress={() => setShopOpen(true)}
+        {availability.isVisible('shop') ? <Pressable
+          style={[styles.chatButton, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }, !availability.isAvailable('shop') && styles.featureButtonLocked]}
+          onPress={() => availability.isAvailable('shop') ? setShopOpen(true) : availability.showUnavailable('shop')}
         >
-          <ShoppingBag size={22} color={ui.palette.gold} strokeWidth={2.5} />
-        </Pressable>
+          {availability.isAvailable('shop') ? <ShoppingBag size={22} color={ui.palette.gold} strokeWidth={2.5} /> : <LockKeyhole size={21} color={ui.text.muted} strokeWidth={2.5} />}
+        </Pressable> : null}
         <Pressable
           style={[styles.chatButton, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }]}
           onPress={() => setAlertSettingsOpen(true)}
@@ -2054,16 +2102,20 @@ export default function GameScreen({ route, navigation }: Props) {
                     <Gem size={20} color="#BDEBFF" strokeWidth={2.8} />
                     <Text style={styles.avatarHubActionText}>Cosmetics</Text>
                   </Pressable>
-                  <Pressable
+                  {availability.isVisible('shop') ? <Pressable
                     style={styles.avatarHubAction}
                     onPress={() => {
+                      if (!availability.isAvailable('shop')) {
+                        availability.showUnavailable('shop');
+                        return;
+                      }
                       setAvatarHubUserId(null);
                       setShopOpen(true);
                     }}
                   >
-                    <ShoppingBag size={20} color="#FFCC66" strokeWidth={2.8} />
-                    <Text style={styles.avatarHubActionText}>Shop</Text>
-                  </Pressable>
+                    {availability.isAvailable('shop') ? <ShoppingBag size={20} color="#FFCC66" strokeWidth={2.8} /> : <LockKeyhole size={20} color={ui.text.muted} strokeWidth={2.8} />}
+                    <Text style={styles.avatarHubActionText}>{availability.isAvailable('shop') ? 'Shop' : 'Unavailable'}</Text>
+                  </Pressable> : null}
                   <Pressable
                     style={styles.avatarHubAction}
                     onPress={() => {
@@ -2126,25 +2178,34 @@ export default function GameScreen({ route, navigation }: Props) {
                     <Trophy size={20} color="#52E5A7" strokeWidth={2.8} />
                     <Text style={styles.avatarHubActionText}>Full Profile</Text>
                   </Pressable>
-                  <Pressable
-                    style={[styles.avatarHubAction, (!avatarHubProfile || avatarHubProfile.relationship === 'outgoing') && styles.avatarHubActionDisabled]}
-                    disabled={!avatarHubProfile || avatarHubProfile.relationship === 'outgoing' || avatarHubBusy === 'friend'}
-                    onPress={runAvatarHubFriendAction}
+                  {availability.isVisible('social') ? <Pressable
+                    style={[
+                      styles.avatarHubAction,
+                      ((!avatarHubProfile || avatarHubProfile.relationship === 'outgoing') && availability.isAvailable('social')) && styles.avatarHubActionDisabled,
+                      !availability.isAvailable('social') && styles.featureButtonLocked,
+                    ]}
+                    disabled={availability.isAvailable('social') && (!avatarHubProfile || avatarHubProfile.relationship === 'outgoing' || avatarHubBusy === 'friend')}
+                    onPress={() => availability.isAvailable('social') ? void runAvatarHubFriendAction() : availability.showUnavailable('social')}
                   >
-                    <UserPlus size={20} color="#BDEBFF" strokeWidth={2.8} />
-                    <Text style={styles.avatarHubActionText}>{friendActionLabel(avatarHubProfile?.relationship)}</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.avatarHubAction, avatarHubProfile?.relationship !== 'friend' && styles.avatarHubActionDisabled]}
-                    disabled={avatarHubProfile?.relationship !== 'friend' || avatarHubBusy === 'invite'}
-                    onPress={inviteAvatarHubPlayer}
+                    {availability.isAvailable('social') ? <UserPlus size={20} color="#BDEBFF" strokeWidth={2.8} /> : <LockKeyhole size={20} color={ui.text.muted} strokeWidth={2.8} />}
+                    <Text style={styles.avatarHubActionText}>{availability.isAvailable('social') ? friendActionLabel(avatarHubProfile?.relationship) : 'Unavailable'}</Text>
+                  </Pressable> : null}
+                  {availability.isVisible('social') ? <Pressable
+                    style={[
+                      styles.avatarHubAction,
+                      (avatarHubProfile?.relationship !== 'friend' && availability.isAvailable('social')) && styles.avatarHubActionDisabled,
+                      !availability.isAvailable('social') && styles.featureButtonLocked,
+                    ]}
+                    disabled={availability.isAvailable('social') && (avatarHubProfile?.relationship !== 'friend' || avatarHubBusy === 'invite')}
+                    onPress={() => availability.isAvailable('social') ? void inviteAvatarHubPlayer() : availability.showUnavailable('social')}
                   >
-                    <MessageCircle size={20} color="#FFCC66" strokeWidth={2.8} />
-                    <Text style={styles.avatarHubActionText}>Invite</Text>
-                  </Pressable>
+                    {availability.isAvailable('social') ? <MessageCircle size={20} color="#FFCC66" strokeWidth={2.8} /> : <LockKeyhole size={20} color={ui.text.muted} strokeWidth={2.8} />}
+                    <Text style={styles.avatarHubActionText}>{availability.isAvailable('social') ? 'Invite' : 'Unavailable'}</Text>
+                  </Pressable> : null}
                 </View>
-                <Text style={styles.avatarHubSectionTitle}>Send Gift</Text>
-                <View style={styles.giftGrid}>
+                {availability.isVisible('social') ? <>
+                <Text style={styles.avatarHubSectionTitle}>{availability.isAvailable('social') ? 'Send Gift' : 'Gifts Unavailable'}</Text>
+                {availability.isAvailable('social') ? <View style={styles.giftGrid}>
                   {TABLE_GIFTS.map(gift => (
                     <Pressable
                       key={gift.id}
@@ -2163,7 +2224,8 @@ export default function GameScreen({ route, navigation }: Props) {
                       </View>
                     </Pressable>
                   ))}
-                </View>
+                </View> : null}
+                </> : null}
               </View>
             )}
             </ScrollView>
@@ -2734,6 +2796,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  featureButtonLocked: { opacity: 0.55 },
   chatButtonText: { fontSize: 18 },
   chatBadge: {
     position: 'absolute',

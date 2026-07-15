@@ -28,6 +28,60 @@ export type AuthResponse = { token: string; user: UserProfile };
 export type AuthProviderKey = 'google' | 'facebook';
 export type AuthProviderStatus = Record<AuthProviderKey, boolean>;
 export type AuthConfig = { environment: string; inviteRequired: boolean; apiUrl: string; adminUrl: string; providers: AuthProviderStatus };
+export type AvailabilityState = 'live' | 'coming_soon' | 'maintenance' | 'hidden';
+export type FeatureKey =
+  | 'global'
+  | 'casual'
+  | 'casual.auto_match'
+  | 'casual.join_room'
+  | 'casual.create_room'
+  | 'casual.wagers'
+  | 'ranked'
+  | 'ranked.2p'
+  | 'ranked.3p'
+  | 'ranked.4p'
+  | 'offline'
+  | 'offline.solo_ai'
+  | 'offline.pass_play'
+  | 'clubs'
+  | 'clubs.chat'
+  | 'clubs.treasury'
+  | 'clubs.management'
+  | 'shop'
+  | 'social'
+  | 'inbox'
+  | 'profile'
+  | 'rules'
+  | 'tutorial';
+export type AvailabilityEntry = {
+  featureKey: FeatureKey;
+  state: AvailabilityState;
+  configuredState: AvailabilityState;
+  inheritedFrom: FeatureKey | null;
+  title: string;
+  message: string;
+  retryAt: number | null;
+  testerPreview: boolean;
+  previewState: AvailabilityState | null;
+  previewTitle: string;
+  previewMessage: string;
+  label: string;
+  parent: FeatureKey | null;
+};
+export type AvailabilityResponse = {
+  revision: number;
+  fetchedAt: number;
+  testerPreview: boolean;
+  features: Record<FeatureKey, AvailabilityEntry>;
+};
+export type FeatureUnavailableError = {
+  code: 'FEATURE_UNAVAILABLE';
+  feature: FeatureKey;
+  state: Exclude<AvailabilityState, 'live'>;
+  title: string;
+  message: string;
+  retryAt: number | null;
+};
 export type PushTokenPayload = {
   expoPushToken?: string;
   deviceId?: string;
@@ -74,6 +128,7 @@ export type RoomSummary = {
   economy: MatchEconomy;
   ranked?: { seasonId: string; league?: string; playerCount: number; buyIn: number } | null;
   players: RoomPlayer[];
+  availabilityFeature?: FeatureKey;
 };
 
 export type ActiveRoomResponse = {
@@ -719,11 +774,21 @@ const REQUEST_TIMEOUT_MS = 8000;
 
 export class ApiRequestError extends Error {
   status: number;
+  code: string | null;
+  feature: FeatureKey | null;
+  state: AvailabilityState | null;
+  title: string | null;
+  retryAt: number | null;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, details: Partial<FeatureUnavailableError> = {}) {
     super(message);
     this.name = 'ApiRequestError';
     this.status = status;
+    this.code = details.code ?? null;
+    this.feature = details.feature ?? null;
+    this.state = details.state ?? null;
+    this.title = details.title ?? null;
+    this.retryAt = details.retryAt ?? null;
   }
 }
 
@@ -745,7 +810,16 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
       },
     });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new ApiRequestError(body.error || `Request failed: ${res.status}`, res.status);
+    if (!res.ok) {
+      throw new ApiRequestError(body.error || `Request failed: ${res.status}`, res.status, {
+        code: body.code,
+        feature: body.feature,
+        state: body.state,
+        title: body.title,
+        message: body.message,
+        retryAt: body.retryAt,
+      });
+    }
     return body as T;
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
@@ -762,6 +836,10 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 
 export function authConfig(): Promise<AuthConfig> {
   return request<AuthConfig>('/auth/config');
+}
+
+export function appAvailability(token?: string | null): Promise<AvailabilityResponse> {
+  return request<AvailabilityResponse>('/app/availability', {}, token);
 }
 
 export function signup(displayName: string, password: string, inviteCode = ''): Promise<AuthResponse> {

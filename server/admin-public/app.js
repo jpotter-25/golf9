@@ -20,6 +20,11 @@ let adminRolesCache = [];
 let mailHistory = [];
 let mailCosmetics = [];
 let catalogAssetRequirements = {};
+let liveOpsData = null;
+let liveOpsSelectedFeature = 'global';
+let liveOpsTesterIds = new Set();
+let liveOpsTesterMatches = [];
+let liveOpsCanWrite = false;
 
 const NOTIFICATION_LABELS = {
   turn: 'Your Turn',
@@ -90,6 +95,7 @@ function bindTabs() {
       if (button.dataset.tab === 'mail') loadMail();
       if (button.dataset.tab === 'economy') loadEconomy();
       if (button.dataset.tab === 'notifications') loadNotifications();
+      if (button.dataset.tab === 'liveOps') loadLiveOps();
       if (button.dataset.tab === 'competitive') loadCompetitive();
       if (button.dataset.tab === 'admins') loadAdmins();
     });
@@ -119,6 +125,17 @@ function bindConsoleActions() {
   document.querySelector('#loadNotifications').addEventListener('click', loadNotifications);
   document.querySelector('#notificationConfigEditor').addEventListener('submit', saveNotificationConfig);
   document.querySelector('#customNotificationForm').addEventListener('submit', sendCustomNotification);
+  document.querySelector('#loadLiveOps').addEventListener('click', loadLiveOps);
+  document.querySelector('#liveOpsFeatureSearch').addEventListener('input', renderLiveOpsTree);
+  document.querySelector('#liveOpsEditor').addEventListener('submit', publishLiveOps);
+  document.querySelector('#liveOpsEditor').addEventListener('input', renderLiveOpsPreview);
+  document.querySelector('#scheduleLiveOps').addEventListener('click', scheduleLiveOps);
+  document.querySelector('#liveOpsGlobalSwitch').addEventListener('change', stageGlobalMaintenance);
+  document.querySelector('#searchLiveOpsTesters').addEventListener('click', searchLiveOpsTesters);
+  document.querySelector('#liveOpsTesterSearch').addEventListener('keydown', event => {
+    if (event.key === 'Enter') searchLiveOpsTesters();
+  });
+  document.querySelector('#saveLiveOpsTesters').addEventListener('click', saveLiveOpsTesters);
   document.querySelector('#loadCompetitive').addEventListener('click', loadCompetitive);
   document.querySelector('#publishCompetitive').addEventListener('click', publishCompetitive);
   document.querySelector('#rollbackCompetitive').addEventListener('click', rollbackCompetitive);
@@ -1098,6 +1115,351 @@ async function sendCustomNotification(event) {
   form.reason.value = '';
   status(`Push queued for ${result.queued}/${result.targetedUsers} registered players.`, 'ok');
   await loadNotifications();
+}
+
+const LIVE_OPS_STATE_LABELS = {
+  live: 'Live',
+  coming_soon: 'Coming Soon',
+  maintenance: 'Maintenance',
+  hidden: 'Hidden',
+};
+
+async function loadLiveOps() {
+  try {
+    const [data, session] = await Promise.all([
+      api('/live-ops'),
+      api('/auth/me'),
+    ]);
+    liveOpsData = data;
+    liveOpsCanWrite = ['owner', 'admin'].includes(session.admin?.role);
+    liveOpsTesterIds = new Set(data.testerUserIds || []);
+    liveOpsTesterMatches = data.testers || [];
+    if (!(data.registry || []).some(feature => feature.key === liveOpsSelectedFeature)) liveOpsSelectedFeature = 'global';
+    renderLiveOps();
+  } catch (error) {
+    status(error.message, 'error');
+  }
+}
+
+function liveOpsEntry(featureKey) {
+  return liveOpsData?.entries?.[featureKey] || {
+    featureKey,
+    state: 'live',
+    title: '',
+    message: '',
+    retryAt: null,
+  };
+}
+
+function liveOpsFeature(featureKey) {
+  return (liveOpsData?.registry || []).find(feature => feature.key === featureKey) || null;
+}
+
+function effectiveLiveOpsEntry(featureKey) {
+  const own = liveOpsEntry(featureKey);
+  if (featureKey !== 'global' && featureKey !== 'inbox') {
+    const globalEntry = liveOpsEntry('global');
+    if (globalEntry.state !== 'live') return { ...globalEntry, featureKey, inheritedFrom: 'global', configuredState: own.state };
+  }
+  const feature = liveOpsFeature(featureKey);
+  if (feature?.parent && feature.parent !== 'global') {
+    const parent = effectiveLiveOpsEntry(feature.parent);
+    if (parent.state !== 'live') return { ...parent, featureKey, inheritedFrom: parent.inheritedFrom || feature.parent, configuredState: own.state };
+  }
+  return { ...own, configuredState: own.state, inheritedFrom: null };
+}
+
+function renderLiveOps() {
+  if (!liveOpsData) return;
+  document.querySelector('#liveOpsRevision').textContent = `Revision ${liveOpsData.revision || 0}`;
+  document.querySelector('#liveOpsGlobalSwitch').checked = liveOpsEntry('global').state !== 'live';
+  renderLiveOpsImpact();
+  renderLiveOpsTree();
+  populateLiveOpsEditor();
+  renderLiveOpsTesterResults();
+  renderLiveOpsSchedules();
+  renderLiveOpsRevisions();
+  applyLiveOpsPermissions();
+}
+
+function renderLiveOpsImpact() {
+  const impact = liveOpsData?.impact || {};
+  document.querySelector('#liveOpsImpact').innerHTML = [
+    ['Queued players', impact.queuedPlayers || 0],
+    ['Waiting rooms', impact.waitingRooms || 0],
+    ['Waiting players', impact.waitingPlayers || 0],
+    ['Protected active matches', impact.activeMatchesProtected || 0],
+    ['Protected active players', impact.activePlayersProtected || 0],
+  ].map(([label, value]) => `
+    <div class="live-ops-metric"><strong>${Number(value).toLocaleString()}</strong><span>${escapeHtml(label)}</span></div>
+  `).join('');
+}
+
+function renderLiveOpsTree() {
+  const output = document.querySelector('#liveOpsFeatureTree');
+  if (!output || !liveOpsData) return;
+  const query = document.querySelector('#liveOpsFeatureSearch')?.value.trim().toLowerCase() || '';
+  const visible = (liveOpsData.registry || []).filter(feature => !query
+    || feature.label.toLowerCase().includes(query)
+    || feature.key.toLowerCase().includes(query)
+    || feature.group.toLowerCase().includes(query));
+  const groups = [...new Set(visible.map(feature => feature.group))];
+  output.innerHTML = groups.map(group => {
+    const items = visible.filter(feature => feature.group === group);
+    return `
+      <details class="live-ops-group" open>
+        <summary>${escapeHtml(group)} <span>${items.length}</span></summary>
+        <div class="live-ops-group-items">
+          ${items.map(feature => {
+            const configured = liveOpsEntry(feature.key);
+            const effective = effectiveLiveOpsEntry(feature.key);
+            const inherited = effective.inheritedFrom
+              ? `<span class="live-ops-inherited">via ${escapeHtml(liveOpsFeature(effective.inheritedFrom)?.label || effective.inheritedFrom)}</span>`
+              : '';
+            return `
+              <button type="button" class="live-ops-feature ${feature.key === liveOpsSelectedFeature ? 'selected' : ''}" data-live-ops-feature="${escapeHtml(feature.key)}" style="--feature-depth:${feature.parent && feature.parent !== 'global' ? 1 : 0}">
+                <span><strong>${escapeHtml(feature.label)}</strong><small>${escapeHtml(feature.impact)}</small></span>
+                <span class="live-ops-state state-${escapeHtml(effective.state)}">${escapeHtml(LIVE_OPS_STATE_LABELS[effective.state] || effective.state)}${inherited}</span>
+                ${configured.state !== effective.state ? `<small class="configured-note">Configured ${escapeHtml(LIVE_OPS_STATE_LABELS[configured.state] || configured.state)}</small>` : ''}
+              </button>
+            `;
+          }).join('')}
+        </div>
+      </details>
+    `;
+  }).join('') || '<p class="muted">No matching features.</p>';
+  output.querySelectorAll('[data-live-ops-feature]').forEach(button => {
+    button.addEventListener('click', () => {
+      liveOpsSelectedFeature = button.dataset.liveOpsFeature;
+      renderLiveOpsTree();
+      populateLiveOpsEditor();
+    });
+  });
+}
+
+function populateLiveOpsEditor() {
+  const form = document.querySelector('#liveOpsEditor');
+  const feature = liveOpsFeature(liveOpsSelectedFeature);
+  const entry = liveOpsEntry(liveOpsSelectedFeature);
+  if (!form || !feature) return;
+  document.querySelector('#liveOpsSelectedGroup').textContent = feature.group;
+  document.querySelector('#liveOpsSelectedLabel').textContent = feature.label;
+  document.querySelector('#liveOpsSelectedKey').textContent = feature.key;
+  form.state.value = entry.state;
+  form.title.value = entry.title || '';
+  form.message.value = entry.message || '';
+  form.restoreAt.value = entry.retryAt && entry.retryAt > Date.now() ? localDateTimeInput(entry.retryAt) : '';
+  const pending = (liveOpsData.schedules || []).find(schedule => schedule.featureKey === feature.key && !schedule.activatedAt);
+  form.activateAt.value = pending ? localDateTimeInput(pending.activateAt) : '';
+  renderLiveOpsPreview();
+}
+
+function localDateTimeInput(value) {
+  const date = new Date(value);
+  const local = new Date(date.getTime() - (date.getTimezoneOffset() * 60000));
+  return local.toISOString().slice(0, 16);
+}
+
+function liveOpsEditorPayload() {
+  const form = document.querySelector('#liveOpsEditor');
+  return {
+    featureKey: liveOpsSelectedFeature,
+    entry: {
+      state: form.state.value,
+      title: form.title.value.trim(),
+      message: form.message.value.trim(),
+    },
+    restoreAt: form.restoreAt.value ? new Date(form.restoreAt.value).getTime() : null,
+    activateAt: form.activateAt.value ? new Date(form.activateAt.value).getTime() : null,
+    reason: form.reason.value.trim(),
+  };
+}
+
+function renderLiveOpsPreview() {
+  const preview = document.querySelector('#liveOpsPreview');
+  if (!preview || !liveOpsData) return;
+  const payload = liveOpsEditorPayload();
+  const feature = liveOpsFeature(payload.featureKey);
+  const state = payload.entry.state;
+  const fallbackTitle = state === 'coming_soon' ? 'Coming Soon' : state === 'maintenance' ? 'Temporarily Unavailable' : state === 'hidden' ? 'Hidden from Players' : 'Available Now';
+  const fallbackMessage = state === 'live'
+    ? `${feature?.label || 'This feature'} is available to everyone.`
+    : 'This feature is not available right now. Please check back soon.';
+  preview.className = `live-ops-preview state-${state}`;
+  preview.innerHTML = `
+    <div class="live-ops-preview-label">Player Preview</div>
+    <strong>${escapeHtml(payload.entry.title || fallbackTitle)}</strong>
+    <p>${escapeHtml(payload.entry.message || fallbackMessage)}</p>
+    ${payload.restoreAt ? `<small>Expected back ${escapeHtml(new Date(payload.restoreAt).toLocaleString())}</small>` : ''}
+  `;
+}
+
+function stageGlobalMaintenance(event) {
+  liveOpsSelectedFeature = 'global';
+  renderLiveOpsTree();
+  populateLiveOpsEditor();
+  const form = document.querySelector('#liveOpsEditor');
+  form.state.value = event.currentTarget.checked ? 'maintenance' : 'live';
+  if (event.currentTarget.checked && !form.title.value) form.title.value = 'Scheduled Maintenance';
+  renderLiveOpsPreview();
+  form.reason.focus();
+}
+
+async function publishLiveOps(event) {
+  event.preventDefault();
+  if (!liveOpsCanWrite) return;
+  const payload = liveOpsEditorPayload();
+  if (!payload.reason) return alert('An administrative reason is required.');
+  if (payload.restoreAt && payload.restoreAt <= Date.now()) return alert('The restoration time must be in the future.');
+  await api('/live-ops/publish', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  status(`${liveOpsFeature(payload.featureKey)?.label || payload.featureKey} published.`, 'ok');
+  await loadLiveOps();
+}
+
+async function scheduleLiveOps() {
+  if (!liveOpsCanWrite) return;
+  const payload = liveOpsEditorPayload();
+  if (!payload.reason) return alert('An administrative reason is required.');
+  if (!payload.activateAt || payload.activateAt <= Date.now()) return alert('Choose a future activation time.');
+  if (payload.restoreAt && payload.restoreAt <= payload.activateAt) return alert('Restoration must occur after activation.');
+  const existing = (liveOpsData.schedules || []).find(schedule => schedule.featureKey === payload.featureKey);
+  const replace = !!existing && confirm('This feature already has a pending schedule. Replace it?');
+  if (existing && !replace) return;
+  await api('/live-ops/schedule', {
+    method: 'POST',
+    body: JSON.stringify({ ...payload, replace }),
+  });
+  status(`${liveOpsFeature(payload.featureKey)?.label || payload.featureKey} scheduled.`, 'ok');
+  await loadLiveOps();
+}
+
+async function searchLiveOpsTesters() {
+  const query = document.querySelector('#liveOpsTesterSearch').value.trim();
+  try {
+    const data = await api(`/live-ops/testers?q=${encodeURIComponent(query)}`);
+    liveOpsTesterMatches = data.users || [];
+    renderLiveOpsTesterResults();
+  } catch (error) {
+    status(error.message, 'error');
+  }
+}
+
+function renderLiveOpsTesterResults() {
+  const output = document.querySelector('#liveOpsTesterResults');
+  if (!output) return;
+  document.querySelector('#liveOpsTesterCount').textContent = `${liveOpsTesterIds.size} tester${liveOpsTesterIds.size === 1 ? '' : 's'}`;
+  const selectedRecords = (liveOpsData?.testers || []).filter(user => liveOpsTesterIds.has(user.userId));
+  const records = [...selectedRecords, ...liveOpsTesterMatches]
+    .filter((user, index, list) => list.findIndex(item => item.userId === user.userId) === index);
+  output.innerHTML = records.map(user => `
+    <label class="live-ops-tester ${liveOpsTesterIds.has(user.userId) ? 'selected' : ''}">
+      <input type="checkbox" data-live-ops-tester="${escapeHtml(user.userId)}" ${liveOpsTesterIds.has(user.userId) ? 'checked' : ''} ${liveOpsCanWrite ? '' : 'disabled'} />
+      <span><strong>${escapeHtml(user.displayName)}</strong><small>${escapeHtml(user.playerTag || user.userId)} - Level ${Number(user.level || 1)}</small></span>
+    </label>
+  `).join('') || '<p class="muted">Search for players to grant preview access.</p>';
+  output.querySelectorAll('[data-live-ops-tester]').forEach(input => {
+    input.addEventListener('change', () => {
+      if (input.checked) liveOpsTesterIds.add(input.dataset.liveOpsTester);
+      else liveOpsTesterIds.delete(input.dataset.liveOpsTester);
+      renderLiveOpsTesterResults();
+    });
+  });
+}
+
+async function saveLiveOpsTesters() {
+  if (!liveOpsCanWrite) return;
+  const reasonInput = document.querySelector('#liveOpsTesterReason');
+  const reason = reasonInput.value.trim();
+  if (!reason) return alert('An administrative reason is required.');
+  await api('/live-ops/testers', {
+    method: 'POST',
+    body: JSON.stringify({ testerUserIds: [...liveOpsTesterIds], reason }),
+  });
+  reasonInput.value = '';
+  status('Tester preview access updated.', 'ok');
+  await loadLiveOps();
+}
+
+function renderLiveOpsSchedules() {
+  const output = document.querySelector('#liveOpsSchedules');
+  const schedules = [...(liveOpsData?.schedules || [])].sort((a, b) => a.activateAt - b.activateAt);
+  document.querySelector('#liveOpsScheduleCount').textContent = `${schedules.length} scheduled`;
+  output.innerHTML = schedules.map(schedule => {
+    const feature = liveOpsFeature(schedule.featureKey);
+    const active = !!schedule.activatedAt;
+    return `
+      <div class="live-ops-schedule">
+        <div>
+          <strong>${escapeHtml(feature?.label || schedule.featureKey)}</strong>
+          <p>${escapeHtml(LIVE_OPS_STATE_LABELS[schedule.entry.state] || schedule.entry.state)} ${active ? 'active' : `starts ${new Date(schedule.activateAt).toLocaleString()}`}</p>
+          <small>${schedule.restoreAt ? `Restores ${escapeHtml(new Date(schedule.restoreAt).toLocaleString())}` : 'No automatic restoration'} - ${escapeHtml(schedule.reason)}</small>
+        </div>
+        <button type="button" class="ghost" data-cancel-live-ops="${escapeHtml(schedule.featureKey)}" ${liveOpsCanWrite ? '' : 'disabled'}>Cancel</button>
+      </div>
+    `;
+  }).join('') || '<p class="muted">No scheduled changes.</p>';
+  output.querySelectorAll('[data-cancel-live-ops]').forEach(button => {
+    button.addEventListener('click', () => cancelLiveOpsSchedule(button.dataset.cancelLiveOps));
+  });
+}
+
+async function cancelLiveOpsSchedule(featureKey) {
+  if (!liveOpsCanWrite) return;
+  const reason = prompt('Administrative reason for cancelling this schedule:');
+  if (!reason?.trim()) return;
+  if (!confirm('Cancel this schedule? An active timed window will be restored immediately.')) return;
+  await api(`/live-ops/schedules/${encodeURIComponent(featureKey)}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: reason.trim() }),
+  });
+  status('Scheduled change cancelled.', 'ok');
+  await loadLiveOps();
+}
+
+function renderLiveOpsRevisions() {
+  const output = document.querySelector('#liveOpsRevisions');
+  const revisions = [...(liveOpsData?.revisions || [])].sort((a, b) => b.revision - a.revision);
+  output.innerHTML = revisions.map(revision => `
+    <div class="live-ops-revision">
+      <span class="chip blue">r${Number(revision.revision)}</span>
+      <div>
+        <strong>${escapeHtml(revision.action)}${revision.featureKey ? ` - ${escapeHtml(liveOpsFeature(revision.featureKey)?.label || revision.featureKey)}` : ''}</strong>
+        <p>${escapeHtml(revision.reason)}</p>
+        <small>${escapeHtml(revision.actor || 'system')} - ${escapeHtml(new Date(revision.createdAt).toLocaleString())}</small>
+      </div>
+      <button type="button" class="ghost" data-restore-live-ops="${escapeHtml(revision.revisionId)}" ${liveOpsCanWrite ? '' : 'disabled'}>Restore</button>
+    </div>
+  `).join('') || '<p class="muted">No Live Ops revisions yet.</p>';
+  output.querySelectorAll('[data-restore-live-ops]').forEach(button => {
+    button.addEventListener('click', () => restoreLiveOpsRevision(button.dataset.restoreLiveOps));
+  });
+}
+
+async function restoreLiveOpsRevision(revisionId) {
+  if (!liveOpsCanWrite) return;
+  const reason = prompt('Administrative reason for restoring this revision:');
+  if (!reason?.trim()) return;
+  if (!confirm('Restore this policy snapshot? Pending schedules will be cleared.')) return;
+  await api(`/live-ops/revisions/${encodeURIComponent(revisionId)}/restore`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: reason.trim() }),
+  });
+  status('Live Ops revision restored.', 'ok');
+  await loadLiveOps();
+}
+
+function applyLiveOpsPermissions() {
+  const editor = document.querySelector('#liveOpsEditor');
+  editor.querySelectorAll('input, select, textarea, button').forEach(control => {
+    control.disabled = !liveOpsCanWrite;
+  });
+  document.querySelector('#liveOpsGlobalSwitch').disabled = !liveOpsCanWrite;
+  document.querySelector('#saveLiveOpsTesters').disabled = !liveOpsCanWrite;
+  document.querySelector('#liveOpsTesterReason').disabled = !liveOpsCanWrite;
+  document.querySelector('#liveOpsReadOnly').classList.toggle('hidden', liveOpsCanWrite);
 }
 
 async function loadCompetitive() {

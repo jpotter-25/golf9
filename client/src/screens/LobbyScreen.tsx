@@ -3,7 +3,7 @@
 
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { BookOpen, ChevronRight, Gamepad2, Search, Trophy, Users, Wifi, WifiOff } from 'lucide-react-native';
+import { BookOpen, ChevronRight, Gamepad2, LockKeyhole, Search, Trophy, Users, Wifi, WifiOff } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
@@ -12,6 +12,8 @@ import { ClubEmblem } from '../components/ClubEmblem';
 import { useAuth } from '../context/AuthContext';
 import { useClubRealtime } from '../context/ClubRealtimeContext';
 import { useConnectivity } from '../context/ConnectivityContext';
+import { useAvailability } from '../context/AvailabilityContext';
+import type { FeatureKey } from '../services/api';
 import type { ClubProfile, ClubSummary } from '../services/api';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Lobby'>;
@@ -20,6 +22,7 @@ export default function LobbyScreen({ navigation }: Props) {
   const { user } = useAuth();
   const { club: realtimeClub, clubActionCount, clubChatUnread } = useClubRealtime();
   const { isOnline, isConnectionKnown } = useConnectivity();
+  const { entry, isAvailable, isVisible, showUnavailable } = useAvailability();
   const club = realtimeClub ?? user?.club ?? null;
   const clubAttention = clubActionCount + clubChatUnread;
 
@@ -37,53 +40,61 @@ export default function LobbyScreen({ navigation }: Props) {
       />
 
       <View style={styles.playStack}>
-        <DestinationCard
+        {isVisible('casual') ? <DestinationCard
           title="Play Casual"
           subtitle="Auto-match, room codes, custom tables, and coin wagers."
           Icon={Users}
           color={ui.palette.emerald}
           disabled={!isOnline}
-          status={!isOnline ? 'Internet needed' : 'Online multiplayer'}
-          onPress={() => navigation.navigate('CasualMenu')}
-        />
-        <DestinationCard
+          locked={!isAvailable('casual')}
+          testerPreview={entry('casual').testerPreview}
+          status={!isOnline ? 'Internet needed' : entry('casual').testerPreview ? 'Tester Preview' : !isAvailable('casual') ? entry('casual').title : 'Online multiplayer'}
+          onPress={() => openFeature('casual', () => navigation.navigate('CasualMenu'))}
+        /> : null}
+        {isVisible('ranked') ? <DestinationCard
           title="Play Ranked"
           subtitle="Nine-round competitive matches with separate 2P, 3P, and 4P ladders."
           Icon={Trophy}
           color={ui.palette.gold}
           disabled={!isOnline}
-          status={!isOnline ? 'Internet needed' : user?.competitive?.league.name ?? 'Iron III'}
-          onPress={() => navigation.navigate('RankedMenu')}
-        />
-        <DestinationCard
+          locked={!isAvailable('ranked')}
+          testerPreview={entry('ranked').testerPreview}
+          status={!isOnline ? 'Internet needed' : entry('ranked').testerPreview ? 'Tester Preview' : !isAvailable('ranked') ? entry('ranked').title : user?.competitive?.league.name ?? 'Iron III'}
+          onPress={() => openFeature('ranked', () => navigation.navigate('RankedMenu'))}
+        /> : null}
+        {isVisible('offline') ? <DestinationCard
           title="Play Offline"
           subtitle="Solo AI and Pass & Play work anywhere, with or without service."
           Icon={Gamepad2}
           color={ui.palette.sky}
-          status={isOnline ? 'Local play' : 'Ready now'}
-          onPress={() => navigation.navigate('OfflineMenu')}
-        />
+          locked={!isAvailable('offline')}
+          testerPreview={entry('offline').testerPreview}
+          status={entry('offline').testerPreview ? 'Tester Preview' : !isAvailable('offline') ? entry('offline').title : isOnline ? 'Local play' : 'Ready now'}
+          onPress={() => openFeature('offline', () => navigation.navigate('OfflineMenu'))}
+        /> : null}
       </View>
 
-      <View style={styles.sectionHeading}>
+      {isVisible('clubs') ? <View style={styles.sectionHeading}>
         <Text style={styles.sectionEyebrow}>Club</Text>
         <Text style={styles.sectionHint}>{club ? 'Your community' : 'Find your community'}</Text>
-      </View>
+      </View> : null}
 
-      {club ? (
+      {isVisible('clubs') && club ? (
         <ClubDestinationCard
           club={club}
           attention={clubAttention}
           disabled={!isOnline}
-          onPress={() => navigation.navigate('Club')}
+          locked={!isAvailable('clubs')}
+          testerPreview={entry('clubs').testerPreview}
+          onPress={() => openFeature('clubs', () => navigation.navigate('Club'))}
         />
-      ) : (
+      ) : isVisible('clubs') ? (
         <Pressable
-          onPress={() => navigation.navigate('Club')}
+          onPress={() => openFeature('clubs', () => navigation.navigate('Club'))}
           disabled={!isOnline}
           accessibilityRole="button"
           accessibilityLabel="Find a club"
-          style={({ pressed }) => [(!isOnline || pressed) && styles.destinationDisabled]}
+          style={({ pressed }) => [(!isOnline || !isAvailable('clubs') || pressed) && styles.destinationDisabled]}
         >
           <PremiumPanel style={styles.findClubCard}>
             <View style={styles.findClubIcon}><Search size={25} color={ui.palette.violet} strokeWidth={2.7} /></View>
@@ -91,27 +102,32 @@ export default function LobbyScreen({ navigation }: Props) {
               <Text style={styles.findClubTitle}>Find a Club</Text>
               <Text style={styles.findClubText}>{isOnline ? 'Meet players, share live chat, and build club progress.' : 'Reconnect to browse and join clubs.'}</Text>
             </View>
-            {isOnline ? <ChevronRight size={21} color={ui.text.muted} strokeWidth={2.7} /> : <WifiOff size={20} color={ui.text.muted} strokeWidth={2.5} />}
+            {!isOnline ? <WifiOff size={20} color={ui.text.muted} strokeWidth={2.5} /> : !isAvailable('clubs') ? <LockKeyhole size={20} color={ui.text.muted} strokeWidth={2.5} /> : <ChevronRight size={21} color={ui.text.muted} strokeWidth={2.7} />}
           </PremiumPanel>
         </Pressable>
-      )}
+      ) : null}
 
-      <Pressable style={styles.howToPlay} onPress={() => navigation.navigate('Rules')} accessibilityRole="link">
+      {isVisible('rules') ? <Pressable style={[styles.howToPlay, !isAvailable('rules') && styles.destinationDisabled]} onPress={() => openFeature('rules', () => navigation.navigate('Rules'))} accessibilityRole="link">
         <BookOpen size={17} color={ui.palette.sky} strokeWidth={2.5} />
-        <Text style={styles.howToPlayText}>How to play?</Text>
-      </Pressable>
+        <Text style={styles.howToPlayText}>{isAvailable('rules') ? 'How to play?' : entry('rules').title}</Text>
+      </Pressable> : null}
     </ScreenShell>
   );
+
+  function openFeature(featureKey: FeatureKey, action: () => void) {
+    if (isAvailable(featureKey)) action();
+    else showUnavailable(featureKey);
+  }
 }
 
-function DestinationCard({ title, subtitle, Icon, color, status, disabled = false, onPress }: { title: string; subtitle: string; Icon: LucideIcon; color: string; status: string; disabled?: boolean; onPress: () => void }) {
+function DestinationCard({ title, subtitle, Icon, color, status, disabled = false, locked = false, testerPreview = false, onPress }: { title: string; subtitle: string; Icon: LucideIcon; color: string; status: string; disabled?: boolean; locked?: boolean; testerPreview?: boolean; onPress: () => void }) {
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
       accessibilityRole="button"
       accessibilityLabel={`${title}. ${status}`}
-      style={({ pressed }) => [(disabled || pressed) && styles.destinationDisabled]}
+      style={({ pressed }) => [(disabled || locked || pressed) && styles.destinationDisabled]}
     >
       <PremiumPanel tone="felt" style={[styles.destinationCard, { borderColor: disabled ? ui.border.soft : color }]}>
         <View style={[styles.destinationAccent, { backgroundColor: color }]} />
@@ -123,13 +139,13 @@ function DestinationCard({ title, subtitle, Icon, color, status, disabled = fals
           </View>
           <Text style={styles.destinationSubtitle}>{subtitle}</Text>
         </View>
-        {disabled ? <WifiOff size={20} color={ui.text.muted} strokeWidth={2.5} /> : <ChevronRight size={21} color={color} strokeWidth={2.7} />}
+        {disabled ? <WifiOff size={20} color={ui.text.muted} strokeWidth={2.5} /> : locked ? <LockKeyhole size={20} color={ui.text.muted} strokeWidth={2.5} /> : <ChevronRight size={21} color={testerPreview ? ui.palette.violet : color} strokeWidth={2.7} />}
       </PremiumPanel>
     </Pressable>
   );
 }
 
-function ClubDestinationCard({ club, attention, disabled, onPress }: { club: ClubSummary | ClubProfile; attention: number; disabled: boolean; onPress: () => void }) {
+function ClubDestinationCard({ club, attention, disabled, locked, testerPreview, onPress }: { club: ClubSummary | ClubProfile; attention: number; disabled: boolean; locked: boolean; testerPreview: boolean; onPress: () => void }) {
   const progression = 'progression' in club ? club.progression : null;
   return (
     <Pressable
@@ -137,7 +153,7 @@ function ClubDestinationCard({ club, attention, disabled, onPress }: { club: Clu
       disabled={disabled}
       accessibilityRole="button"
       accessibilityLabel={`Open ${club.name}${attention ? `, ${attention} new club item${attention === 1 ? '' : 's'}` : ''}`}
-      style={({ pressed }) => [(disabled || pressed) && styles.destinationDisabled]}
+      style={({ pressed }) => [(disabled || locked || pressed) && styles.destinationDisabled]}
     >
       <PremiumPanel style={styles.clubCard}>
         <View style={styles.clubEmblemWrap}>
@@ -157,7 +173,7 @@ function ClubDestinationCard({ club, attention, disabled, onPress }: { club: Clu
           </View>
           <ProgressBar value={progression?.levelProgress ?? 0} color={ui.palette.violet} />
         </View>
-        {disabled ? <WifiOff size={20} color={ui.text.muted} strokeWidth={2.5} /> : <ChevronRight size={21} color={ui.palette.violet} strokeWidth={2.7} />}
+        {disabled ? <WifiOff size={20} color={ui.text.muted} strokeWidth={2.5} /> : locked ? <LockKeyhole size={20} color={ui.text.muted} strokeWidth={2.5} /> : <ChevronRight size={21} color={testerPreview ? ui.palette.gold : ui.palette.violet} strokeWidth={2.7} />}
       </PremiumPanel>
     </Pressable>
   );

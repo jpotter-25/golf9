@@ -1,7 +1,7 @@
 // src/screens/RankedMenuScreen.tsx
 // Purpose: Focused ranked entry with per-table ladders, season context, and matchmaking.
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { CalendarDays, ChevronRight, Medal, ShieldCheck, Trophy, Users, WifiOff } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -10,6 +10,8 @@ import { ActionButton, PremiumPanel, ProgressBar, ScreenHeader, ScreenShell, Sta
 import { RankEmblem } from '../components/AvatarDecorations';
 import { useAuth } from '../context/AuthContext';
 import { useConnectivity } from '../context/ConnectivityContext';
+import { useAvailability } from '../context/AvailabilityContext';
+import type { FeatureKey } from '../services/api';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'RankedMenu'>;
 type PlayerCount = 2 | 3 | 4;
@@ -19,7 +21,9 @@ const PLAYER_OPTIONS: PlayerCount[] = [2, 3, 4];
 export default function RankedMenuScreen({ navigation }: Props) {
   const { user } = useAuth();
   const { isOnline } = useConnectivity();
+  const { entry, isAvailable, isVisible, showUnavailable } = useAvailability();
   const [players, setPlayers] = useState<PlayerCount>(2);
+  const visiblePlayerOptions = PLAYER_OPTIONS.filter(option => isVisible(rankedFeature(option)));
   const ladder = user?.competitiveByPlayers?.[String(players) as '2' | '3' | '4'] ?? user?.competitive;
   const seasonDaysLeft = ladder?.season?.endsAt
     ? Math.max(0, Math.ceil((ladder.season.endsAt - Date.now()) / (24 * 60 * 60 * 1000)))
@@ -28,6 +32,10 @@ export default function RankedMenuScreen({ navigation }: Props) {
   const placementsPlayed = ladder?.placementsPlayed ?? 0;
   const placementProgress = Math.min(1, placementsPlayed / Math.max(1, placementsRequired));
   const visibleRank = ladder?.placementComplete ? ladder.league.name : 'Unranked';
+
+  useEffect(() => {
+    if (!isVisible(rankedFeature(players)) && visiblePlayerOptions.length > 0) setPlayers(visiblePlayerOptions[0]);
+  }, [isVisible, players, visiblePlayerOptions]);
 
   return (
     <ScreenShell scroll centered>
@@ -41,14 +49,15 @@ export default function RankedMenuScreen({ navigation }: Props) {
       />
 
       <View style={styles.ladderTabs}>
-        {PLAYER_OPTIONS.map(option => {
+        {visiblePlayerOptions.map(option => {
           const active = option === players;
           const optionLadder = user?.competitiveByPlayers?.[String(option) as '2' | '3' | '4'];
+          const feature = entry(rankedFeature(option));
           return (
-            <Pressable key={option} onPress={() => setPlayers(option)} style={[styles.ladderTab, active && styles.ladderTabActive]}>
+            <Pressable key={option} onPress={() => isAvailable(rankedFeature(option)) ? setPlayers(option) : showUnavailable(rankedFeature(option))} style={[styles.ladderTab, active && styles.ladderTabActive, !isAvailable(rankedFeature(option)) && styles.ladderTabLocked]}>
               <Text style={[styles.ladderTabCount, active && styles.ladderTabCountActive]}>{option}P</Text>
               <Text style={[styles.ladderTabLeague, active && styles.ladderTabLeagueActive]} numberOfLines={1}>
-                {optionLadder?.placementComplete ? optionLadder.league.name : 'Unranked'}
+                {feature.testerPreview ? 'Tester Preview' : feature.state !== 'live' ? feature.title : optionLadder?.placementComplete ? optionLadder.league.name : 'Unranked'}
               </Text>
             </Pressable>
           );
@@ -101,14 +110,18 @@ export default function RankedMenuScreen({ navigation }: Props) {
         </PremiumPanel>
       ) : (
         <ActionButton
-          label={`Find ${players}-Player Ranked Match`}
+          label={entry(rankedFeature(players)).testerPreview ? `Preview ${players}-Player Ranked` : isAvailable(rankedFeature(players)) ? `Find ${players}-Player Ranked Match` : entry(rankedFeature(players)).title}
           Icon={Trophy}
-          tone="gold"
-          onPress={() => navigation.navigate('RankedQueue', { players })}
+          tone={isAvailable(rankedFeature(players)) ? 'gold' : 'ghost'}
+          onPress={() => isAvailable(rankedFeature(players)) ? navigation.navigate('RankedQueue', { players }) : showUnavailable(rankedFeature(players))}
         />
       )}
     </ScreenShell>
   );
+}
+
+function rankedFeature(players: PlayerCount): FeatureKey {
+  return `ranked.${players}p` as FeatureKey;
 }
 
 function RankStat({ Icon, label, value }: { Icon: typeof Trophy; label: string; value: string }) {
@@ -125,6 +138,7 @@ const styles = StyleSheet.create({
   ladderTabs: { flexDirection: 'row', gap: 8 },
   ladderTab: { flex: 1, minHeight: 62, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.base, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
   ladderTabActive: { borderColor: ui.palette.gold, backgroundColor: 'rgba(255, 204, 102, 0.13)' },
+  ladderTabLocked: { opacity: 0.55 },
   ladderTabCount: { color: ui.text.secondary, fontSize: 16, fontWeight: '900' },
   ladderTabCountActive: { color: ui.palette.gold },
   ladderTabLeague: { color: ui.text.muted, fontSize: 10, fontWeight: '800', marginTop: 3, width: '100%', textAlign: 'center' },

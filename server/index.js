@@ -169,6 +169,20 @@ import {
   markMailRead,
   normalizeMailEntries,
 } from './mail.js';
+import {
+  availabilityAdminView,
+  cancelAvailabilitySchedule,
+  featureDefinition,
+  normalizeAvailabilityStore,
+  processAvailabilitySchedules,
+  publicAvailability,
+  publishAvailabilityChange,
+  resolveFeatureAvailability,
+  restoreAvailabilityRevision,
+  scheduleAvailabilityChange,
+  unavailablePayload,
+  updateAvailabilityTesters,
+} from './availability.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DATA_DIR = path.join(__dirname, 'data');
@@ -389,6 +403,7 @@ let rankedSeason = normalizeRankedSeason(null, Date.now(), liveCompetitiveConfig
 const adminStore = normalizeAdminStore({});
 const catalogStore = normalizeCatalogStore({});
 const economyStore = normalizeEconomyConfigStore({});
+let availabilityStore = normalizeAvailabilityStore({});
 const postgresStore = createPostgresStore(DATABASE_URL);
 const googleOAuthClient = new OAuth2Client();
 const MINIMUM_RANKED_BUILD = 39;
@@ -874,6 +889,7 @@ function applyStoreState(parsed = {}) {
   normalizeCatalogStore(Object.assign(catalogStore, parsed.catalog || {}));
   seedCatalogStore(catalogStore);
   Object.assign(economyStore, normalizeEconomyConfigStore(parsed.economyConfig || {}));
+  availabilityStore = normalizeAvailabilityStore(parsed.availabilityConfig || {});
   normalizeAdminStore(Object.assign(adminStore, {
     admins: parsed.admins || [],
     adminSessions: parsed.adminSessions || [],
@@ -927,6 +943,7 @@ function storeSnapshot() {
     rankedSeason,
     competitiveConfig: competitiveStore,
     economyConfig: economyStore,
+    availabilityConfig: availabilityStore,
     catalog: catalogStore,
     clubs: [...clubs.values()],
     admins: adminStore.admins,
@@ -1897,6 +1914,55 @@ function requireAuth(req, res, next) {
   return next();
 }
 
+function optionalPlayerAuth(req) {
+  const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
+  return authenticateToken(token);
+}
+
+function availabilityResolution(featureKey, userId = null) {
+  return resolveFeatureAvailability(availabilityStore, featureKey, userId);
+}
+
+function blockedAvailability(featureKey, userId = null) {
+  const resolution = availabilityResolution(featureKey, userId);
+  return resolution.state === 'live' ? null : resolution;
+}
+
+function requireFeature(featureKeyOrResolver) {
+  return (req, res, next) => {
+    const featureKey = typeof featureKeyOrResolver === 'function'
+      ? featureKeyOrResolver(req)
+      : featureKeyOrResolver;
+    if (!featureDefinition(featureKey)) return res.status(500).json({ error: 'Feature availability is not registered.' });
+    const resolution = blockedAvailability(featureKey, req.auth?.user?.userId || null);
+    if (resolution) return res.status(503).json(unavailablePayload(resolution));
+    return next();
+  };
+}
+
+function rankedFeatureKey(playerCount) {
+  return `ranked.${Math.max(2, Math.min(4, Number(playerCount) || 2))}p`;
+}
+
+function roomAvailabilityFeature(room) {
+  if (room?.availabilityFeature && featureDefinition(room.availabilityFeature)) return room.availabilityFeature;
+  if (room?.matchType === 'ranked') return rankedFeatureKey(room.ranked?.playerCount || room.maxPlayers);
+  if (room?.matchType === 'wager') return 'casual.wagers';
+  return 'casual.create_room';
+}
+
+function socketFeatureUnavailable(featureKey, userId) {
+  const resolution = blockedAvailability(featureKey, userId);
+  return resolution ? unavailablePayload(resolution) : null;
+}
+
+function blockRoomFeature(room, userId, res) {
+  const resolution = blockedAvailability(roomAvailabilityFeature(room), userId);
+  if (!resolution) return false;
+  res.status(503).json(unavailablePayload(resolution));
+  return true;
+}
+
 function requireRankedBuild(req, res, next) {
   const build = Number.parseInt(String(req.headers['x-golf9-build'] || ''), 10);
   if (!Number.isFinite(build) || build < MINIMUM_RANKED_BUILD) {
@@ -1915,6 +1981,7 @@ function roomSummary(room) {
     hostUserId: room.hostUserId,
     status: room.status,
     matchType: room.matchType || 'casual',
+    availabilityFeature: roomAvailabilityFeature(room),
     isPublic: !!room.isPublic,
     maxPlayers: room.maxPlayers,
     rounds: room.rounds,
@@ -1953,7 +2020,7 @@ function roomSummary(room) {
 }
 
 function broadcastRoom(room) {
-  syncRoomCountdown(room);
+  if (!syncRoomCountdown(room)) return;
   io.to(room.code).emit('room:update', roomSummary(room));
   if (room.game) {
     for (const player of room.players) {
@@ -2212,22 +2279,87 @@ function cancelRoomCountdown(room) {
   room.countdownEndsAt = null;
 }
 
+function blockedRoomAvailability(room) {
+  const featureKey = roomAvailabilityFeature(room);
+  for (const player of room.players) {
+    const resolution = blockedAvailability(featureKey, player.userId);
+    if (resolution) return resolution;
+  }
+  return null;
+}
+
+function refundWaitingRoom(room) {
+  const entries = room.economy?.entries || {};
+  if (!room.economy?.chargedAt || room.economy?.payoutRecorded || room.economy?.refundedAt) return false;
+  for (const [userId, rawAmount] of Object.entries(entries)) {
+    const user = users.get(userId);
+    const amount = Math.max(0, Number(rawAmount) || 0);
+    if (!user || !amount) continue;
+    normalizeUserProgression(user, Date.now(), rankedSeason, rankedConfig());
+    user.currency.coins += amount;
+  }
+  room.economy.refundedAt = Date.now();
+  return true;
+}
+
+function cancelUnavailableLobby(room, resolution) {
+  if (!room || room.status !== 'lobby') return false;
+  cancelRoomCountdown(room);
+  refundWaitingRoom(room);
+  const payload = unavailablePayload(resolution || blockedRoomAvailability(room));
+  io.to(room.code).emit('room:cancelled', payload);
+  for (const player of room.players) io.to(`user:${player.userId}`).emit('room:cancelled', { ...payload, roomCode: room.code });
+  rooms.delete(room.code);
+  return true;
+}
+
+function reconcileAvailabilityState() {
+  let changed = false;
+  for (const [userId, entry] of [...rankedQueue.entries()]) {
+    const resolution = blockedAvailability(rankedFeatureKey(entry.maxPlayers), userId);
+    if (!resolution) continue;
+    rankedQueue.delete(userId);
+    io.to(`user:${userId}`).emit('ranked:cancelled', unavailablePayload(resolution));
+    changed = true;
+  }
+  for (const room of [...rooms.values()]) {
+    if (room.status !== 'lobby') continue;
+    const resolution = blockedRoomAvailability(room);
+    if (!resolution) continue;
+    if (cancelUnavailableLobby(room, resolution)) changed = true;
+  }
+  if (changed) saveStore();
+  return changed;
+}
+
 function syncRoomCountdown(room) {
   if (room.status !== 'lobby') {
     cancelRoomCountdown(room);
-    return;
+    return true;
+  }
+
+  const unavailable = blockedRoomAvailability(room);
+  if (unavailable) {
+    cancelUnavailableLobby(room, unavailable);
+    return false;
   }
 
   if (room.players.length !== room.maxPlayers) {
     cancelRoomCountdown(room);
-    return;
+    return true;
   }
 
-  if (room.countdownEndsAt) return;
+  if (room.countdownEndsAt) return true;
   room.countdownEndsAt = Date.now() + ROOM_COUNTDOWN_MS;
   room.countdownTimer = setTimeout(() => {
     const current = rooms.get(room.code);
     if (!current || current.status !== 'lobby' || current.players.length !== current.maxPlayers) return;
+    const currentUnavailable = blockedRoomAvailability(current);
+    if (currentUnavailable) {
+      cancelUnavailableLobby(current, currentUnavailable);
+      saveStore();
+      return;
+    }
     try {
       startRoomGame(current, { requireReady: false });
       broadcastRoom(current);
@@ -2236,6 +2368,7 @@ function syncRoomCountdown(room) {
       broadcastRoom(current);
     }
   }, ROOM_COUNTDOWN_MS);
+  return true;
 }
 
 function addUserToRoom(room, user) {
@@ -2248,7 +2381,15 @@ function addUserToRoom(room, user) {
   room.foreground?.set(player.userId, false);
 }
 
-function makeRoom(hostUser, { maxPlayers = 4, rounds = 9, matchType = 'casual', ranked = null, buyIn = 0, isPublic = false } = {}) {
+function makeRoom(hostUser, {
+  maxPlayers = 4,
+  rounds = 9,
+  matchType = 'casual',
+  ranked = null,
+  buyIn = 0,
+  isPublic = false,
+  availabilityFeature = null,
+} = {}) {
   const options = normalizeRoomOptions({ maxPlayers, rounds, buyIn });
   const code = makeCode();
   const host = safeUser(hostUser);
@@ -2257,6 +2398,13 @@ function makeRoom(hostUser, { maxPlayers = 4, rounds = 9, matchType = 'casual', 
     code,
     hostUserId: host.userId,
     matchType: safeMatchType,
+    availabilityFeature: featureDefinition(availabilityFeature)
+      ? availabilityFeature
+      : safeMatchType === 'ranked'
+        ? rankedFeatureKey(options.maxPlayers)
+        : safeMatchType === 'wager'
+          ? 'casual.wagers'
+          : 'casual.create_room',
     ranked,
     economy: {
       buyIn: safeMatchType === 'wager' ? options.buyIn : 0,
@@ -2367,6 +2515,7 @@ function createRankedRoom(entries) {
     maxPlayers: entries[0].maxPlayers,
     rounds: entries[0].rounds,
     matchType: 'ranked',
+    availabilityFeature: rankedFeatureKey(entries[0].maxPlayers),
     buyIn: 0,
     ranked: {
       seasonId: rankedSeason.id,
@@ -2725,6 +2874,11 @@ app.get('/health/ready', (_req, res) => {
   });
 });
 
+app.get('/app/availability', (req, res) => {
+  const auth = optionalPlayerAuth(req);
+  return res.json(publicAvailability(availabilityStore, auth?.user?.userId || null));
+});
+
 app.get('/privacy', (_req, res) => sendLegalPage(res, 'Privacy Policy', [
   {
     title: 'What Golf 9 Collects',
@@ -2915,6 +3069,171 @@ app.get('/admin/api/auth/me', requireAdmin(adminStore), (req, res) => res.json({
     role: req.admin.admin.role,
   },
 }));
+
+function liveOpsImpactSummary() {
+  const waitingRooms = [...rooms.values()].filter(room => room.status === 'lobby');
+  const playingRooms = [...rooms.values()].filter(room => room.status === 'playing' && !room.game?.completed);
+  return {
+    queuedPlayers: rankedQueue.size,
+    waitingRooms: waitingRooms.length,
+    waitingPlayers: waitingRooms.reduce((total, room) => total + room.players.length, 0),
+    activeMatchesProtected: playingRooms.length,
+    activePlayersProtected: playingRooms.reduce((total, room) => total + room.players.length, 0),
+  };
+}
+
+function applyAvailabilityStore(nextStore, revision = null, { reconcile = true } = {}) {
+  availabilityStore = normalizeAvailabilityStore(nextStore);
+  if (reconcile) reconcileAvailabilityState();
+  saveStore();
+  io.emit('availability:update', {
+    revision: revision?.revision || availabilityStore.revision,
+    changedAt: Date.now(),
+  });
+}
+
+app.get('/admin/api/live-ops', requireAdmin(adminStore, 'availability:read'), (_req, res) => {
+  const view = availabilityAdminView(availabilityStore);
+  return res.json({
+    ...view,
+    testers: view.testerUserIds.map(userId => users.get(userId)).filter(Boolean).map(user => ({
+      userId: user.userId,
+      displayName: user.displayName,
+      playerTag: user.playerTag || null,
+      level: user.progression?.level || 1,
+    })),
+    impact: liveOpsImpactSummary(),
+  });
+});
+
+app.get('/admin/api/live-ops/testers', requireAdmin(adminStore, 'availability:read'), (req, res) => {
+  const query = String(req.query.q || '').trim().toLowerCase();
+  const matches = activePlayerAccounts()
+    .filter(user => !query
+      || user.displayName.toLowerCase().includes(query)
+      || String(user.playerTag || '').toLowerCase().includes(query)
+      || user.userId.toLowerCase().includes(query))
+    .slice(0, 50)
+    .map(user => ({
+      userId: user.userId,
+      displayName: user.displayName,
+      playerTag: user.playerTag || null,
+      level: user.progression?.level || 1,
+      selected: availabilityStore.testerUserIds.includes(user.userId),
+    }));
+  return res.json({ users: matches });
+});
+
+app.post('/admin/api/live-ops/testers', requireAdmin(adminStore, 'availability:write'), (req, res) => {
+  try {
+    const reason = cleanAdminReason(req.body?.reason);
+    const testerUserIds = [...new Set((Array.isArray(req.body?.testerUserIds) ? req.body.testerUserIds : [])
+      .map(value => String(value || '').trim())
+      .filter(userId => users.has(userId) && !isUserArchived(users.get(userId))))];
+    const result = updateAvailabilityTesters(availabilityStore, testerUserIds, {
+      actor: req.admin.admin.displayName,
+      reason,
+    });
+    applyAvailabilityStore(result.store, result.revision, { reconcile: false });
+    writeAudit(adminStore, req, req.admin.admin, 'admin.live_ops.testers.update', { testerCount: testerUserIds.length }, { reason });
+    saveStore();
+    return res.json({ ok: true, liveOps: availabilityAdminView(availabilityStore) });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/admin/api/live-ops/publish', requireAdmin(adminStore, 'availability:write'), (req, res) => {
+  try {
+    const reason = cleanAdminReason(req.body?.reason);
+    const testerUserIds = req.body?.testerUserIds === undefined
+      ? undefined
+      : [...new Set((Array.isArray(req.body.testerUserIds) ? req.body.testerUserIds : [])
+        .map(value => String(value || '').trim())
+        .filter(userId => users.has(userId) && !isUserArchived(users.get(userId))))];
+    const result = publishAvailabilityChange(availabilityStore, {
+      featureKey: req.body?.featureKey,
+      entry: req.body?.entry,
+      testerUserIds,
+      restoreAt: req.body?.restoreAt,
+      actor: req.admin.admin.displayName,
+      reason,
+    });
+    applyAvailabilityStore(result.store, result.revision);
+    writeAudit(adminStore, req, req.admin.admin, 'admin.live_ops.publish', { featureKey: req.body?.featureKey }, {
+      reason,
+      state: result.entry.state,
+      restoreAt: req.body?.restoreAt || null,
+      testerCount: result.store.testerUserIds.length,
+    });
+    saveStore();
+    return res.json({ ok: true, liveOps: availabilityAdminView(availabilityStore), impact: liveOpsImpactSummary() });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/admin/api/live-ops/schedule', requireAdmin(adminStore, 'availability:write'), (req, res) => {
+  try {
+    const reason = cleanAdminReason(req.body?.reason);
+    const result = scheduleAvailabilityChange(availabilityStore, {
+      featureKey: req.body?.featureKey,
+      entry: req.body?.entry,
+      activateAt: req.body?.activateAt,
+      restoreAt: req.body?.restoreAt,
+      replace: req.body?.replace === true,
+      actor: req.admin.admin.displayName,
+      reason,
+    });
+    applyAvailabilityStore(result.store, result.revision, { reconcile: false });
+    writeAudit(adminStore, req, req.admin.admin, 'admin.live_ops.schedule', { featureKey: req.body?.featureKey }, {
+      reason,
+      activateAt: result.schedule.activateAt,
+      restoreAt: result.schedule.restoreAt,
+      replace: req.body?.replace === true,
+    });
+    saveStore();
+    return res.json({ ok: true, liveOps: availabilityAdminView(availabilityStore) });
+  } catch (error) {
+    const status = /already has a pending schedule/i.test(error.message) ? 409 : 400;
+    return res.status(status).json({ error: error.message });
+  }
+});
+
+app.post('/admin/api/live-ops/schedules/:featureKey/cancel', requireAdmin(adminStore, 'availability:write'), (req, res) => {
+  try {
+    const reason = cleanAdminReason(req.body?.reason);
+    const result = cancelAvailabilitySchedule(availabilityStore, req.params.featureKey, {
+      actor: req.admin.admin.displayName,
+      reason,
+    });
+    applyAvailabilityStore(result.store, result.revision);
+    writeAudit(adminStore, req, req.admin.admin, 'admin.live_ops.schedule.cancel', { featureKey: req.params.featureKey }, { reason });
+    saveStore();
+    return res.json({ ok: true, liveOps: availabilityAdminView(availabilityStore) });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/admin/api/live-ops/revisions/:revisionId/restore', requireAdmin(adminStore, 'availability:write'), (req, res) => {
+  try {
+    const reason = cleanAdminReason(req.body?.reason);
+    const result = restoreAvailabilityRevision(availabilityStore, req.params.revisionId, {
+      actor: req.admin.admin.displayName,
+      reason,
+    });
+    applyAvailabilityStore(result.store, result.revision);
+    writeAudit(adminStore, req, req.admin.admin, 'admin.live_ops.revision.restore', { revisionId: req.params.revisionId }, {
+      reason,
+      restoredRevision: result.restoredRevision.revision,
+    });
+    saveStore();
+    return res.json({ ok: true, liveOps: availabilityAdminView(availabilityStore), impact: liveOpsImpactSummary() });
+  } catch (error) {
+    return res.status(/not found/i.test(error.message) ? 404 : 400).json({ error: error.message });
+  }
+});
 
 app.get('/admin/api/admins', requireAdmin(adminStore, 'admin:write'), (_req, res) => {
   res.json({
@@ -4151,27 +4470,27 @@ app.post('/auth/logout', requireAuth, (req, res) => {
 
 app.get('/auth/me', requireAuth, (req, res) => res.json({ user: safeUser(req.auth.user) }));
 
-app.get('/profile/me', requireAuth, (req, res) => res.json({ user: safeUser(req.auth.user) }));
+app.get('/profile/me', requireAuth, requireFeature('profile'), (req, res) => res.json({ user: safeUser(req.auth.user) }));
 
-app.get('/mail/summary', requireAuth, (req, res) => {
+app.get('/mail/summary', requireAuth, requireFeature('inbox'), (req, res) => {
   return res.json({ summary: mailSummaryForUser(mailEntries, req.auth.user.userId) });
 });
 
-app.get('/mail', requireAuth, (req, res) => {
+app.get('/mail', requireAuth, requireFeature('inbox'), (req, res) => {
   return res.json({
     mail: mailEntriesForUser(mailEntries, req.auth.user.userId),
     summary: mailSummaryForUser(mailEntries, req.auth.user.userId),
   });
 });
 
-app.post('/mail/:mailId/read', requireAuth, (req, res) => {
+app.post('/mail/:mailId/read', requireAuth, requireFeature('inbox'), (req, res) => {
   const result = markMailRead(mailEntries, req.auth.user.userId, String(req.params.mailId || ''));
   if (result.error) return res.status(404).json({ error: result.error });
   saveStore();
   return res.json({ ...result, summary: mailSummaryForUser(mailEntries, req.auth.user.userId) });
 });
 
-app.post('/mail/:mailId/claim', requireAuth, (req, res) => {
+app.post('/mail/:mailId/claim', requireAuth, requireFeature('inbox'), (req, res) => {
   const result = claimMailForUser(mailEntries, req.auth.user, liveCatalog(catalogStore), String(req.params.mailId || ''));
   if (result.error) return res.status(result.status || 400).json({ error: result.error });
   saveStore();
@@ -4183,7 +4502,7 @@ app.post('/mail/:mailId/claim', requireAuth, (req, res) => {
   });
 });
 
-app.delete('/mail/:mailId', requireAuth, (req, res) => {
+app.delete('/mail/:mailId', requireAuth, requireFeature('inbox'), (req, res) => {
   const result = deleteMailForUser(mailEntries, req.auth.user.userId, String(req.params.mailId || ''));
   if (result.error) return res.status(404).json({ error: result.error });
   saveStore();
@@ -4214,9 +4533,9 @@ app.post('/push/unregister', requireAuth, (req, res) => {
   return res.json({ ok: true, pushTokenCount: result.pushTokenCount });
 });
 
-app.get('/social/me', requireAuth, (req, res) => res.json({ social: socialSummary(req.auth.user) }));
+app.get('/social/me', requireAuth, requireFeature('social'), (req, res) => res.json({ social: socialSummary(req.auth.user) }));
 
-app.get('/players/search', requireAuth, (req, res) => {
+app.get('/players/search', requireAuth, requireFeature('social'), (req, res) => {
   const query = String(req.query.q || '').trim().toLowerCase();
   if (query.length < 2) return res.json({ players: [] });
   const players = [...users.values()]
@@ -4226,13 +4545,13 @@ app.get('/players/search', requireAuth, (req, res) => {
   return res.json({ players });
 });
 
-app.get('/profiles/:userId', requireAuth, (req, res) => {
+app.get('/profiles/:userId', requireAuth, requireFeature('profile'), (req, res) => {
   const target = users.get(String(req.params.userId || ''));
   if (!visiblePlayer(target)) return res.status(404).json({ error: 'Player not found.' });
   return res.json({ profile: publicViewedProfile(req.auth.user, target) });
 });
 
-app.get('/clubs/me', requireAuth, (req, res) => {
+app.get('/clubs/me', requireAuth, requireFeature('clubs'), (req, res) => {
   const club = req.auth.user.clubId ? clubById(req.auth.user.clubId) : null;
   if (!club) {
     return res.json({
@@ -4253,7 +4572,7 @@ app.get('/clubs/me', requireAuth, (req, res) => {
   });
 });
 
-app.post('/clubs', requireAuth, (req, res) => {
+app.post('/clubs', requireAuth, requireFeature('clubs.management'), (req, res) => {
   if (req.auth.user.clubId && clubs.has(req.auth.user.clubId)) return res.status(409).json({ error: 'You are already in a club.' });
   const access = clubAccessError(req.auth.user, 'create');
   if (access) return res.status(access.status).json(access);
@@ -4285,7 +4604,7 @@ app.post('/clubs', requireAuth, (req, res) => {
   return res.json({ club: publicClubProfile(created.club, users, req.auth.user.userId, rankedSeason), user: safeUser(req.auth.user) });
 });
 
-app.get('/clubs/search', requireAuth, (req, res) => {
+app.get('/clubs/search', requireAuth, requireFeature('clubs'), (req, res) => {
   const query = String(req.query.q || '').trim().toLowerCase();
   const pool = [...clubs.values()].filter(club => {
     if (!query) return true;
@@ -4299,13 +4618,13 @@ app.get('/clubs/search', requireAuth, (req, res) => {
   });
 });
 
-app.get('/clubs/:clubId', requireAuth, (req, res) => {
+app.get('/clubs/:clubId', requireAuth, requireFeature('clubs'), (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   return res.json({ club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason) });
 });
 
-app.patch('/clubs/:clubId', requireAuth, (req, res) => {
+app.patch('/clubs/:clubId', requireAuth, requireFeature('clubs.management'), (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   if (frozenClubResponse(club, res)) return;
@@ -4329,7 +4648,7 @@ app.patch('/clubs/:clubId', requireAuth, (req, res) => {
   return res.json({ club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason) });
 });
 
-app.post('/clubs/:clubId/requests', requireAuth, (req, res) => {
+app.post('/clubs/:clubId/requests', requireAuth, requireFeature('clubs'), (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   if (frozenClubResponse(club, res)) return;
@@ -4352,7 +4671,7 @@ app.post('/clubs/:clubId/requests', requireAuth, (req, res) => {
   return res.json({ request, club: publicClubSummary(club, req.auth.user.userId) });
 });
 
-app.post('/clubs/:clubId/requests/:requestId/accept', requireAuth, (req, res) => {
+app.post('/clubs/:clubId/requests/:requestId/accept', requireAuth, requireFeature('clubs.management'), (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   if (frozenClubResponse(club, res)) return;
@@ -4383,7 +4702,7 @@ app.post('/clubs/:clubId/requests/:requestId/accept', requireAuth, (req, res) =>
   return res.json({ club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason), member: publicPlayerCard(req.auth.user, target) });
 });
 
-app.post('/clubs/:clubId/requests/:requestId/reject', requireAuth, (req, res) => {
+app.post('/clubs/:clubId/requests/:requestId/reject', requireAuth, requireFeature('clubs.management'), (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   if (frozenClubResponse(club, res)) return;
@@ -4398,7 +4717,7 @@ app.post('/clubs/:clubId/requests/:requestId/reject', requireAuth, (req, res) =>
   return res.json({ club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason) });
 });
 
-app.post('/clubs/:clubId/invites', requireAuth, (req, res) => {
+app.post('/clubs/:clubId/invites', requireAuth, requireFeature('clubs.management'), (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   if (frozenClubResponse(club, res)) return;
@@ -4421,7 +4740,7 @@ app.post('/clubs/:clubId/invites', requireAuth, (req, res) => {
   return res.json({ invite, club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason) });
 });
 
-app.post('/clubs/:clubId/invites/:inviteId/accept', requireAuth, (req, res) => {
+app.post('/clubs/:clubId/invites/:inviteId/accept', requireAuth, requireFeature('clubs'), (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club invitation not found.' });
   if (frozenClubResponse(club, res)) return;
@@ -4461,7 +4780,7 @@ app.post('/clubs/:clubId/invites/:inviteId/accept', requireAuth, (req, res) => {
   });
 });
 
-app.delete('/clubs/:clubId/invites/:inviteId', requireAuth, (req, res) => {
+app.delete('/clubs/:clubId/invites/:inviteId', requireAuth, requireFeature('clubs'), (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club invitation not found.' });
   const before = club.invites.length;
@@ -4474,7 +4793,7 @@ app.delete('/clubs/:clubId/invites/:inviteId', requireAuth, (req, res) => {
   return res.json({ ok: true, invitations: userClubInvitations(req.auth.user.userId) });
 });
 
-app.post('/clubs/:clubId/donate', requireAuth, (req, res) => {
+app.post('/clubs/:clubId/donate', requireAuth, requireFeature('clubs.treasury'), (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   if (frozenClubResponse(club, res)) return;
@@ -4489,7 +4808,7 @@ app.post('/clubs/:clubId/donate', requireAuth, (req, res) => {
   });
 });
 
-app.put('/clubs/:clubId/treasury-goal', requireAuth, (req, res) => {
+app.put('/clubs/:clubId/treasury-goal', requireAuth, requireFeature('clubs.treasury'), (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   if (frozenClubResponse(club, res)) return;
@@ -4500,7 +4819,7 @@ app.put('/clubs/:clubId/treasury-goal', requireAuth, (req, res) => {
   return res.json({ ...result, club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason) });
 });
 
-app.delete('/clubs/:clubId/treasury-goal', requireAuth, (req, res) => {
+app.delete('/clubs/:clubId/treasury-goal', requireAuth, requireFeature('clubs.treasury'), (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   if (frozenClubResponse(club, res)) return;
@@ -4511,7 +4830,7 @@ app.delete('/clubs/:clubId/treasury-goal', requireAuth, (req, res) => {
   return res.json({ ...result, club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason) });
 });
 
-app.post('/clubs/:clubId/prestige', requireAuth, (req, res) => {
+app.post('/clubs/:clubId/prestige', requireAuth, requireFeature('clubs.treasury'), (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   if (frozenClubResponse(club, res)) return;
@@ -4525,7 +4844,7 @@ app.post('/clubs/:clubId/prestige', requireAuth, (req, res) => {
   });
 });
 
-app.post('/clubs/:clubId/leave', requireAuth, (req, res) => {
+app.post('/clubs/:clubId/leave', requireAuth, requireFeature('clubs'), (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club || !findClubMember(club, req.auth.user.userId)) return res.status(404).json({ error: 'Club not found.' });
   if (frozenClubResponse(club, res)) return;
@@ -4541,7 +4860,7 @@ app.post('/clubs/:clubId/leave', requireAuth, (req, res) => {
   return res.json({ ok: true, club: null });
 });
 
-app.patch('/clubs/:clubId/members/:userId', requireAuth, (req, res) => {
+app.patch('/clubs/:clubId/members/:userId', requireAuth, requireFeature('clubs.management'), (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   if (frozenClubResponse(club, res)) return;
@@ -4567,7 +4886,7 @@ app.patch('/clubs/:clubId/members/:userId', requireAuth, (req, res) => {
   return res.json({ club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason) });
 });
 
-app.delete('/clubs/:clubId/members/:userId', requireAuth, (req, res) => {
+app.delete('/clubs/:clubId/members/:userId', requireAuth, requireFeature('clubs.management'), (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   if (frozenClubResponse(club, res)) return;
@@ -4583,7 +4902,7 @@ app.delete('/clubs/:clubId/members/:userId', requireAuth, (req, res) => {
   return res.json({ club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason) });
 });
 
-app.post('/clubs/:clubId/announcements', requireAuth, (req, res) => {
+app.post('/clubs/:clubId/announcements', requireAuth, requireFeature('clubs.management'), (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   if (frozenClubResponse(club, res)) return;
@@ -4607,7 +4926,7 @@ app.post('/clubs/:clubId/announcements', requireAuth, (req, res) => {
   return res.json({ announcement, club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason) });
 });
 
-app.delete('/clubs/:clubId/announcements/:announcementId', requireAuth, (req, res) => {
+app.delete('/clubs/:clubId/announcements/:announcementId', requireAuth, requireFeature('clubs.management'), (req, res) => {
   const club = clubById(req.params.clubId);
   if (!club) return res.status(404).json({ error: 'Club not found.' });
   if (frozenClubResponse(club, res)) return;
@@ -4622,7 +4941,7 @@ app.delete('/clubs/:clubId/announcements/:announcementId', requireAuth, (req, re
   return res.json({ club: publicClubProfile(club, users, req.auth.user.userId, rankedSeason) });
 });
 
-app.post('/clubs/rewards/claim', requireAuth, (req, res) => {
+app.post('/clubs/rewards/claim', requireAuth, requireFeature('clubs'), (req, res) => {
   const club = req.auth.user.clubId ? clubById(req.auth.user.clubId) : null;
   if (!club) return res.status(404).json({ error: 'Join a club before claiming club rewards.' });
   if (frozenClubResponse(club, res)) return;
@@ -4638,7 +4957,7 @@ app.post('/clubs/rewards/claim', requireAuth, (req, res) => {
   });
 });
 
-app.post('/friends/requests', requireAuth, (req, res) => {
+app.post('/friends/requests', requireAuth, requireFeature('social'), (req, res) => {
   const target = findUserByIdentifier(req.body?.userId || req.body?.displayName);
   if (!visiblePlayer(target)) return res.status(404).json({ error: 'Player not found.' });
   if (target.userId === req.auth.user.userId) return res.status(400).json({ error: 'You cannot add yourself.' });
@@ -4680,7 +4999,7 @@ app.post('/friends/requests', requireAuth, (req, res) => {
   return res.json({ social: socialSummary(req.auth.user) });
 });
 
-app.post('/friends/requests/:requestId/accept', requireAuth, (req, res) => {
+app.post('/friends/requests/:requestId/accept', requireAuth, requireFeature('social'), (req, res) => {
   normalizeSocial(req.auth.user);
   const request = req.auth.user.social.incomingRequests.find(item => item.id === req.params.requestId);
   const from = request ? users.get(request.userId) : null;
@@ -4692,7 +5011,7 @@ app.post('/friends/requests/:requestId/accept', requireAuth, (req, res) => {
   return res.json({ social: socialSummary(req.auth.user), friend: publicPlayerCard(req.auth.user, from) });
 });
 
-app.post('/friends/requests/:requestId/reject', requireAuth, (req, res) => {
+app.post('/friends/requests/:requestId/reject', requireAuth, requireFeature('social'), (req, res) => {
   normalizeSocial(req.auth.user);
   const request = req.auth.user.social.incomingRequests.find(item => item.id === req.params.requestId);
   const from = request ? users.get(request.userId) : null;
@@ -4704,7 +5023,7 @@ app.post('/friends/requests/:requestId/reject', requireAuth, (req, res) => {
   return res.json({ social: socialSummary(req.auth.user) });
 });
 
-app.delete('/friends/requests/:requestId', requireAuth, (req, res) => {
+app.delete('/friends/requests/:requestId', requireAuth, requireFeature('social'), (req, res) => {
   normalizeSocial(req.auth.user);
   const outgoing = req.auth.user.social.outgoingRequests.find(item => item.id === req.params.requestId);
   const incoming = req.auth.user.social.incomingRequests.find(item => item.id === req.params.requestId);
@@ -4717,7 +5036,7 @@ app.delete('/friends/requests/:requestId', requireAuth, (req, res) => {
   return res.json({ social: socialSummary(req.auth.user) });
 });
 
-app.delete('/friends/:userId', requireAuth, (req, res) => {
+app.delete('/friends/:userId', requireAuth, requireFeature('social'), (req, res) => {
   const target = users.get(String(req.params.userId || ''));
   if (!visiblePlayer(target) || !isFriend(req.auth.user, target.userId)) return res.status(404).json({ error: 'Friend not found.' });
   removeFriendship(req.auth.user, target);
@@ -4765,7 +5084,7 @@ app.patch('/ranked/display-emblem', requireAuth, requireRankedBuild, (req, res) 
   return res.json({ ...result, user: safeUser(req.auth.user), choices: rankedDisplayEmblemChoices(req.auth.user, rankedSeason, rankedConfig()) });
 });
 
-app.post('/ranked/queue', requireAuth, requireRankedBuild, (req, res) => {
+app.post('/ranked/queue', requireAuth, requireRankedBuild, requireFeature(req => rankedFeatureKey(req.body?.maxPlayers)), (req, res) => {
   rankedSeason = normalizeRankedSeason(rankedSeason, Date.now(), rankedConfig());
   if (blockActiveMatch(req, res)) return;
   const activeRoom = activeRankedRoomForUser(req.auth.user.userId);
@@ -4791,7 +5110,10 @@ app.post('/ranked/queue', requireAuth, requireRankedBuild, (req, res) => {
   });
 });
 
-app.get('/ranked/queue', requireAuth, requireRankedBuild, (req, res) => {
+app.get('/ranked/queue', requireAuth, requireRankedBuild, requireFeature(req => {
+  const queue = rankedQueue.get(req.auth.user.userId);
+  return rankedFeatureKey(queue?.maxPlayers || req.query.maxPlayers || 2);
+}), (req, res) => {
   tryMatchRankedQueue();
   const queue = publicRankedQueueStatus(req.auth.user.userId);
   const playerCount = queue.room?.maxPlayers || queue.maxPlayers || 2;
@@ -4814,7 +5136,7 @@ app.post('/ranked/season/rewards/claim', requireAuth, requireRankedBuild, (req, 
   return res.json({ ...result, user: safeUser(req.auth.user), cosmetics: cosmeticsFor(req.auth.user) });
 });
 
-app.get('/cosmetics/catalog', requireAuth, (req, res) => res.json({ cosmetics: cosmeticsFor(req.auth.user) }));
+app.get('/cosmetics/catalog', requireAuth, requireFeature('profile'), (req, res) => res.json({ cosmetics: cosmeticsFor(req.auth.user) }));
 
 app.post('/challenges/claim', requireAuth, (req, res) => {
   const result = claimChallengeReward(req.auth.user, String(req.body?.challengeId || ''));
@@ -4823,14 +5145,14 @@ app.post('/challenges/claim', requireAuth, (req, res) => {
   return res.json({ ...result, user: safeUser(req.auth.user) });
 });
 
-app.post('/cosmetics/purchase', requireAuth, (req, res) => {
+app.post('/cosmetics/purchase', requireAuth, requireFeature('shop'), (req, res) => {
   const result = purchaseCosmetic(req.auth.user, String(req.body?.cosmeticId || ''), rankedSeason, currentCatalog(), rankedConfig());
   if (result.error) return res.status(400).json({ error: result.error });
   saveStore();
   return res.json({ ...result, user: safeUser(req.auth.user), cosmetics: cosmeticsFor(req.auth.user) });
 });
 
-app.post('/cosmetics/equip', requireAuth, (req, res) => {
+app.post('/cosmetics/equip', requireAuth, requireFeature('profile'), (req, res) => {
   const result = equipCosmetic(req.auth.user, String(req.body?.cosmeticId || ''), currentCatalog(), rankedSeason, rankedConfig());
   if (result.error) return res.status(400).json({ error: result.error });
   saveStore();
@@ -4839,7 +5161,7 @@ app.post('/cosmetics/equip', requireAuth, (req, res) => {
 
 app.get('/results/me', requireAuth, (req, res) => res.json({ results: userResults(req.auth.user.userId) }));
 
-app.post('/results/local', requireAuth, (req, res) => {
+app.post('/results/local', requireAuth, requireFeature(req => req.body?.mode === 'solo' ? 'offline.solo_ai' : 'offline.pass_play'), (req, res) => {
   const clientResultId = String(req.body?.clientResultId || '').trim();
   if (clientResultId && !/^[A-Za-z0-9_-]{8,80}$/.test(clientResultId)) {
     return res.status(400).json({ error: 'Invalid local result identifier.' });
@@ -4911,13 +5233,17 @@ app.post('/results/local', requireAuth, (req, res) => {
 
 app.get('/rooms/active', requireAuth, (req, res) => res.json(activeRoomPayloadForUser(req.auth.user.userId)));
 
-app.post('/rooms', requireAuth, (req, res) => {
+app.post('/rooms', requireAuth, requireFeature('casual.create_room'), (req, res) => {
   if (blockActiveMatch(req, res)) return;
-  const room = makeRoom(req.auth.user, { ...(req.body || {}), isPublic: req.body?.isPublic !== false });
+  const room = makeRoom(req.auth.user, {
+    ...(req.body || {}),
+    isPublic: req.body?.isPublic !== false,
+    availabilityFeature: 'casual.create_room',
+  });
   return res.json({ room: roomSummary(room) });
 });
 
-app.get('/rooms/open', requireAuth, (req, res) => {
+app.get('/rooms/open', requireAuth, requireFeature(req => req.query.matchType === 'wager' ? 'casual.wagers' : 'casual'), (req, res) => {
   const matchType = ['casual', 'wager'].includes(String(req.query.matchType || ''))
     ? String(req.query.matchType)
     : null;
@@ -4929,6 +5255,7 @@ app.get('/rooms/open', requireAuth, (req, res) => {
     .filter(room => room.status === 'lobby')
     .filter(room => room.players.length < room.maxPlayers)
     .filter(room => !room.players.some(player => player.userId === req.auth.user.userId))
+    .filter(room => !blockedAvailability(roomAvailabilityFeature(room), req.auth.user.userId))
     .filter(room => !matchType || room.matchType === matchType)
     .filter(room => !maxPlayers || room.maxPlayers === maxPlayers)
     .filter(room => !rounds || room.rounds === rounds)
@@ -4939,7 +5266,7 @@ app.get('/rooms/open', requireAuth, (req, res) => {
   return res.json({ rooms: openRooms });
 });
 
-app.post('/rooms/quick-play', requireAuth, (req, res) => {
+app.post('/rooms/quick-play', requireAuth, requireFeature('casual.auto_match'), (req, res) => {
   if (blockActiveMatch(req, res)) return;
   const options = normalizeRoomOptions(req.body || {});
   const existingForUser = [...rooms.values()].find(room =>
@@ -4960,7 +5287,7 @@ app.post('/rooms/quick-play', requireAuth, (req, res) => {
     && !item.players.some(player => player.userId === req.auth.user.userId)
   );
 
-  if (!room) room = makeRoom(req.auth.user, { ...options, isPublic: true });
+  if (!room) room = makeRoom(req.auth.user, { ...options, isPublic: true, availabilityFeature: 'casual.auto_match' });
   else {
     try {
       addUserToRoom(room, req.auth.user);
@@ -4975,7 +5302,7 @@ app.post('/rooms/quick-play', requireAuth, (req, res) => {
   return res.json({ room: roomSummary(room) });
 });
 
-app.post('/rooms/wager-play', requireAuth, (req, res) => {
+app.post('/rooms/wager-play', requireAuth, requireFeature('casual.wagers'), (req, res) => {
   if (blockActiveMatch(req, res)) return;
   const options = normalizeWagerOptions(req.body || {});
   if (!options.buyIn) return res.status(400).json({ error: 'Choose a wager table buy-in.' });
@@ -5002,7 +5329,13 @@ app.post('/rooms/wager-play', requireAuth, (req, res) => {
     && !item.players.some(player => player.userId === req.auth.user.userId)
   );
 
-  if (!room) room = makeRoom(req.auth.user, { ...options, matchType: 'wager', buyIn: options.buyIn, isPublic: true });
+  if (!room) room = makeRoom(req.auth.user, {
+    ...options,
+    matchType: 'wager',
+    buyIn: options.buyIn,
+    isPublic: true,
+    availabilityFeature: 'casual.wagers',
+  });
   else {
     try {
       addUserToRoom(room, req.auth.user);
@@ -5017,10 +5350,11 @@ app.post('/rooms/wager-play', requireAuth, (req, res) => {
   return res.json({ room: roomSummary(room) });
 });
 
-app.post('/rooms/:code/join', requireAuth, (req, res) => {
+app.post('/rooms/:code/join', requireAuth, requireFeature('casual.join_room'), (req, res) => {
   if (blockActiveMatch(req, res)) return;
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found.' });
+  if (blockRoomFeature(room, req.auth.user.userId, res)) return;
   if (room.status !== 'lobby') return res.status(409).json({ error: 'Game already started.' });
   if (room.economy?.buyIn) {
     const error = buyInError(req.auth.user, room.economy.buyIn);
@@ -5036,10 +5370,11 @@ app.post('/rooms/:code/join', requireAuth, (req, res) => {
   return res.json({ room: roomSummary(room) });
 });
 
-app.post('/rooms/:code/invites', requireAuth, (req, res) => {
+app.post('/rooms/:code/invites', requireAuth, requireFeature('social'), (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   const target = users.get(String(req.body?.userId || ''));
   if (!room) return res.status(404).json({ error: 'Room not found.' });
+  if (blockRoomFeature(room, req.auth.user.userId, res)) return;
   if (!visiblePlayer(target)) return res.status(404).json({ error: 'Friend not found.' });
   if (room.status !== 'lobby') return res.status(409).json({ error: 'Invites are only available before the game starts.' });
   if (!room.players.some(player => player.userId === req.auth.user.userId)) return res.status(403).json({ error: 'Join the room before inviting friends.' });
@@ -5076,7 +5411,7 @@ app.post('/rooms/:code/invites', requireAuth, (req, res) => {
   return res.json({ invite: publicRoomInvite(target, invite), social: socialSummary(req.auth.user) });
 });
 
-app.post('/rooms/invites/:inviteId/accept', requireAuth, (req, res) => {
+app.post('/rooms/invites/:inviteId/accept', requireAuth, requireFeature('casual.join_room'), (req, res) => {
   if (blockActiveMatch(req, res)) return;
   normalizeSocial(req.auth.user);
   const invite = req.auth.user.social.roomInvites.find(item => item.id === req.params.inviteId);
@@ -5093,6 +5428,7 @@ app.post('/rooms/invites/:inviteId/accept', requireAuth, (req, res) => {
     saveStore();
     return res.status(404).json({ error: 'Room is no longer available.' });
   }
+  if (blockRoomFeature(room, req.auth.user.userId, res)) return;
   if (room.economy?.buyIn) {
     const error = buyInError(req.auth.user, room.economy.buyIn);
     if (error) return res.status(402).json({ error, buyIn: room.economy.buyIn, balance: req.auth.user.currency.coins });
@@ -5145,6 +5481,10 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
   const connectedUserId = socket.auth.user.userId;
+  socket.emit('availability:update', {
+    revision: availabilityStore.revision,
+    availability: publicAvailability(availabilityStore, connectedUserId),
+  });
   socket.join(`user:${connectedUserId}`);
   if (!userSockets.has(connectedUserId)) userSockets.set(connectedUserId, new Set());
   userSockets.get(connectedUserId).add(socket.id);
@@ -5161,6 +5501,10 @@ io.on('connection', (socket) => {
     if (!room) return cb({ error: 'Room not found.' });
     const userId = socket.auth.user.userId;
     if (!room.players.some(player => player.userId === userId)) return cb({ error: 'You are not a member of this room.' });
+    if (room.status !== 'playing') {
+      const unavailable = socketFeatureUnavailable(roomAvailabilityFeature(room), userId);
+      if (unavailable) return cb(unavailable);
+    }
     socket.join(room.code);
     socket.join(`${room.code}:${userId}`);
     sockets.set(socket.id, { roomCode: room.code, userId });
@@ -5180,6 +5524,8 @@ io.on('connection', (socket) => {
     const userId = socket.auth.user.userId;
     if (!room || !room.players.some(player => player.userId === userId)) return cb({ error: 'Room not found.' });
     if (room.status !== 'lobby') return cb({ error: 'Game already started.' });
+    const unavailable = socketFeatureUnavailable(roomAvailabilityFeature(room), userId);
+    if (unavailable) return cb(unavailable);
     room.ready.set(userId, true);
     room.updatedAt = Date.now();
     broadcastRoom(room);
@@ -5191,6 +5537,8 @@ io.on('connection', (socket) => {
     const userId = socket.auth.user.userId;
     if (!room) return cb({ error: 'Room not found.' });
     if (room.hostUserId !== userId) return cb({ error: 'Only the host can start.' });
+    const unavailable = socketFeatureUnavailable(roomAvailabilityFeature(room), userId);
+    if (unavailable) return cb(unavailable);
     try {
       startRoomGame(room, { requireReady: false });
       broadcastRoom(room);
@@ -5263,6 +5611,8 @@ io.on('connection', (socket) => {
   socket.on('club:join', ({ clubId }, cb = () => {}) => {
     const club = clubById(clubId || socket.auth.user.clubId);
     const userId = socket.auth.user.userId;
+    const unavailable = socketFeatureUnavailable('clubs', userId);
+    if (unavailable) return cb(unavailable);
     if (!club || !findClubMember(club, userId)) return cb({ error: 'Club not found.' });
     socket.join(clubSocketRoom(club.clubId));
     if (!clubForegroundSockets.has(userId)) clubForegroundSockets.set(userId, new Set());
@@ -5277,6 +5627,8 @@ io.on('connection', (socket) => {
 
   socket.on('club:presence:state', ({ foreground }, cb = () => {}) => {
     const user = socket.auth.user;
+    const unavailable = socketFeatureUnavailable('clubs', user.userId);
+    if (unavailable) return cb(unavailable);
     const club = user.clubId ? clubById(user.clubId) : null;
     if (!club || !findClubMember(club, user.userId)) return cb({ error: 'Club not found.' });
     if (!clubForegroundSockets.has(user.userId)) clubForegroundSockets.set(user.userId, new Set());
@@ -5291,6 +5643,8 @@ io.on('connection', (socket) => {
   socket.on('club:chat:send', ({ clubId, type = 'text', text }, cb = () => {}) => {
     const club = clubById(clubId || socket.auth.user.clubId);
     const user = socket.auth.user;
+    const unavailable = socketFeatureUnavailable('clubs.chat', user.userId);
+    if (unavailable) return cb(unavailable);
     if (!club || !findClubMember(club, user.userId)) return cb({ error: 'Club not found.' });
     if (club.adminStatus?.frozenAt) return cb({ error: 'This club is temporarily frozen by Golf 9 support.' });
     if (activeBansFor(adminStore, user).some(ban => ban.type === 'chat_mute')) return cb({ error: 'Chat is muted for this account.' });
@@ -5441,6 +5795,11 @@ io.on('connection', (socket) => {
 setInterval(() => {
   if (!storeReady) return;
   const now = Date.now();
+  const scheduleResult = processAvailabilitySchedules(availabilityStore, { now });
+  if (scheduleResult.changes.length) {
+    const latestRevision = scheduleResult.changes.at(-1)?.revision || null;
+    applyAvailabilityStore(scheduleResult.store, latestRevision);
+  }
   rankedSeason = normalizeRankedSeason(rankedSeason, now, rankedConfig());
   tryMatchRankedQueue(now);
   if (now - lastDailyPushScanAt >= PUSH_DAILY_SCAN_MS) {
@@ -5487,6 +5846,10 @@ async function initializePersistence() {
     await loadStore();
     seedLocalTestAccounts();
     seedAdminAccounts();
+    const scheduleResult = processAvailabilitySchedules(availabilityStore, { now: Date.now() });
+    availabilityStore = scheduleResult.store;
+    if (scheduleResult.changes.length) storeMigrationPending = true;
+    reconcileAvailabilityState();
     if (storeMigrationPending) {
       storeMigrationPending = false;
       saveStore();

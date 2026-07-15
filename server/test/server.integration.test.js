@@ -50,7 +50,7 @@ function authHeaders(token) {
   return {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${token}`,
-    'X-Golf9-Build': '39',
+    'X-Golf9-Build': '40',
   };
 }
 
@@ -1640,6 +1640,152 @@ test('quick play joins compatible rooms and starts a full-room countdown', async
     } finally {
       socketOne.disconnect();
       socketTwo.disconnect();
+    }
+  }, { ROOM_COUNTDOWN_MS: '50' });
+});
+
+test('Live Ops drains waiting lobbies, blocks old clients, and preserves active match rejoin', async () => {
+  await withServer(async (baseUrl) => {
+    const playingOne = await signup(baseUrl, 'LivePlayOne');
+    const playingTwo = await signup(baseUrl, 'LivePlayTwo');
+    const waitingHost = await signup(baseUrl, 'LiveWaiter');
+    const admin = await adminLogin(baseUrl);
+
+    const playingRoom = await json(await fetch(`${baseUrl}/rooms`, {
+      method: 'POST',
+      headers: authHeaders(playingOne.token),
+      body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
+    }));
+    await json(await fetch(`${baseUrl}/rooms/${playingRoom.room.code}/join`, {
+      method: 'POST',
+      headers: authHeaders(playingTwo.token),
+      body: '{}',
+    }));
+    await new Promise(resolve => setTimeout(resolve, 150));
+
+    const activeBeforeMaintenance = await json(await fetch(`${baseUrl}/rooms/active`, {
+      headers: authHeaders(playingOne.token),
+    }));
+    assert.equal(activeBeforeMaintenance.active, true);
+    assert.equal(activeBeforeMaintenance.mustRejoin, true);
+    assert.equal(activeBeforeMaintenance.room.status, 'playing');
+
+    const waitingRoom = await json(await fetch(`${baseUrl}/rooms`, {
+      method: 'POST',
+      headers: authHeaders(waitingHost.token),
+      body: JSON.stringify({ maxPlayers: 4, rounds: 9 }),
+    }));
+    const waitingSocket = io(baseUrl, { transports: ['websocket'], auth: { token: waitingHost.token }, forceNew: true });
+    await once(waitingSocket, 'connect');
+
+    try {
+      assert.equal((await emitAck(waitingSocket, 'room:join', { code: waitingRoom.room.code })).room.status, 'lobby');
+      const cancelledEvent = once(waitingSocket, 'room:cancelled');
+      const published = await json(await fetch(`${baseUrl}/admin/api/live-ops/publish`, {
+        method: 'POST',
+        headers: adminHeaders(admin),
+        body: JSON.stringify({
+          featureKey: 'casual.create_room',
+          entry: {
+            state: 'maintenance',
+            title: 'Custom tables are under maintenance',
+            message: 'Please use Auto-Match while table tools are updated.',
+          },
+          reason: 'Integration test maintenance window.',
+        }),
+      }));
+      assert.equal(published.liveOps.entries['casual.create_room'].state, 'maintenance');
+
+      const cancellation = (await cancelledEvent)[0];
+      assert.equal(cancellation.code, 'FEATURE_UNAVAILABLE');
+      assert.equal(cancellation.feature, 'casual.create_room');
+      assert.equal(cancellation.state, 'maintenance');
+
+      const blocked = await fetch(`${baseUrl}/rooms`, {
+        method: 'POST',
+        headers: authHeaders(waitingHost.token),
+        body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
+      });
+      const blockedBody = await blocked.json();
+      assert.equal(blocked.status, 503);
+      assert.equal(blockedBody.code, 'FEATURE_UNAVAILABLE');
+      assert.equal(blockedBody.feature, 'casual.create_room');
+      assert.equal(blockedBody.title, 'Custom tables are under maintenance');
+      assert.equal(blockedBody.message, 'Please use Auto-Match while table tools are updated.');
+
+      const openRooms = await json(await fetch(`${baseUrl}/rooms/open?matchType=casual`, {
+        headers: authHeaders(waitingHost.token),
+      }));
+      assert.equal(openRooms.rooms.some(room => room.code === waitingRoom.room.code), false);
+
+      const activeAfterMaintenance = await json(await fetch(`${baseUrl}/rooms/active`, {
+        headers: authHeaders(playingOne.token),
+      }));
+      assert.equal(activeAfterMaintenance.active, true);
+      assert.equal(activeAfterMaintenance.room.code, playingRoom.room.code);
+      assert.equal(activeAfterMaintenance.room.status, 'playing');
+
+      const activeSocket = io(baseUrl, { transports: ['websocket'], auth: { token: playingOne.token }, forceNew: true });
+      await once(activeSocket, 'connect');
+      try {
+        const rejoined = await emitAck(activeSocket, 'room:join', { code: playingRoom.room.code });
+        assert.equal(rejoined.room.status, 'playing');
+        assert.equal(rejoined.game.phase, 'peek');
+      } finally {
+        activeSocket.disconnect();
+      }
+
+      await json(await fetch(`${baseUrl}/admin/api/live-ops/testers`, {
+        method: 'POST',
+        headers: adminHeaders(admin),
+        body: JSON.stringify({
+          testerUserIds: [waitingHost.user.userId],
+          reason: 'Allow the internal tester through maintenance.',
+        }),
+      }));
+      const testerPolicy = await json(await fetch(`${baseUrl}/app/availability`, {
+        headers: authHeaders(waitingHost.token),
+      }));
+      assert.equal(testerPolicy.testerPreview, true);
+      assert.equal(testerPolicy.features['casual.create_room'].state, 'live');
+      assert.equal(testerPolicy.features['casual.create_room'].previewState, 'maintenance');
+
+      const testerRoom = await json(await fetch(`${baseUrl}/rooms`, {
+        method: 'POST',
+        headers: authHeaders(waitingHost.token),
+        body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
+      }));
+      assert.equal(testerRoom.room.status, 'lobby');
+
+      await json(await fetch(`${baseUrl}/admin/api/live-ops/publish`, {
+        method: 'POST',
+        headers: adminHeaders(admin),
+        body: JSON.stringify({
+          featureKey: 'global',
+          entry: {
+            state: 'maintenance',
+            title: 'Golf 9 maintenance',
+            message: 'Online services will return soon.',
+          },
+          reason: 'Verify essential global-maintenance routes.',
+        }),
+      }));
+
+      const profileBlocked = await fetch(`${baseUrl}/profile/me`, {
+        headers: authHeaders(playingTwo.token),
+      });
+      assert.equal(profileBlocked.status, 503);
+      assert.equal((await profileBlocked.json()).feature, 'profile');
+
+      const inbox = await fetch(`${baseUrl}/mail`, { headers: authHeaders(playingTwo.token) });
+      assert.equal(inbox.status, 200);
+      const activeStillAvailable = await json(await fetch(`${baseUrl}/rooms/active`, {
+        headers: authHeaders(playingTwo.token),
+      }));
+      assert.equal(activeStillAvailable.active, true);
+      assert.equal(activeStillAvailable.room.code, playingRoom.room.code);
+    } finally {
+      waitingSocket.disconnect();
     }
   }, { ROOM_COUNTDOWN_MS: '50' });
 });
