@@ -8,6 +8,15 @@ const plugins = [];
 
 plugins.push('expo-secure-store');
 plugins.push('expo-notifications');
+plugins.push([
+  'expo-build-properties',
+  {
+    android: {
+      enableMinifyInReleaseBuilds: true,
+      enableShrinkResourcesInReleaseBuilds: true,
+    },
+  },
+]);
 
 if (googleWebClientId && googleIosUrlScheme) {
   plugins.push([
@@ -54,7 +63,7 @@ module.exports = {
     },
     android: {
       package: 'us.joinup.golf_9',
-      versionCode: 41,
+      versionCode: 42,
       permissions: [],
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',

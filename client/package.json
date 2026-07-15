@@ -20,6 +20,7 @@
     "@react-navigation/native-stack": "^7.0.14",
     "expo": "~54.0.34",
     "expo-av": "~16.0.8",
+    "expo-build-properties": "~1.0.10",
     "expo-constants": "~18.0.13",
     "expo-linear-gradient": "~15.0.8",
     "expo-navigation-bar": "~5.0.9",
