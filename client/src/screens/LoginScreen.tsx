@@ -102,7 +102,7 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
     const cleanName = socialDisplayName.trim();
     const cleanInvite = socialInviteCode.trim();
     if (!cleanName) {
-      Alert.alert('Profile needed', 'Choose your Golf 9 display name.');
+      Alert.alert('Profile needed', 'Choose your Nine Below display name.');
       return;
     }
     const nameError = playerNameError(cleanName);
@@ -134,7 +134,7 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
     <ScreenShell scroll centered>
       <ScreenHeader
         eyebrow="Welcome To"
-        title="Golf 9"
+        title="Nine Below"
         subtitle={isLogin ? 'Step back into your table, clubs, ranked climb, and rewards.' : 'Create your player profile and start building progress.'}
         right={<StatusBadge label="LIVE" tone="gold" />}
       />
@@ -227,7 +227,7 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Finish Profile</Text>
-            <Text style={styles.modalMeta}>Choose the Golf 9 name other players will see.</Text>
+            <Text style={styles.modalMeta}>Choose the Nine Below name other players will see.</Text>
             <TextInput
               style={styles.input}
               placeholder="Display name"

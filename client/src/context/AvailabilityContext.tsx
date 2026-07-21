@@ -150,7 +150,7 @@ export function AvailabilityProvider({ children }: { children: React.ReactNode }
       <Modal visible={!!notice} transparent animationType="fade" onRequestClose={() => setNoticeFeature(null)}>
         <View style={styles.backdrop}>
           <View style={styles.card}>
-            <Text style={styles.eyebrow}>{notice?.label || 'Golf 9'}</Text>
+            <Text style={styles.eyebrow}>{notice?.label || 'Nine Below'}</Text>
             <Text style={styles.title}>
               {notice?.title || (notice?.state === 'coming_soon' ? 'Coming Soon' : 'Temporarily Unavailable')}
             </Text>

@@ -1,12 +1,12 @@
-# Golf 9 Pre-Alpha Hosting Runbook
+# Nine Below Pre-Alpha Hosting Runbook
 
-This is the repeatable path for letting invited testers play Golf 9 from anywhere, without Expo Go and without your home Wi-Fi server.
+This is the repeatable path for letting invited testers play Nine Below from anywhere, without Expo Go and without your home Wi-Fi server.
 
 ## Target Setup
 
-- Pre-alpha API and sockets: `https://games.joinup.us`
-- Pre-alpha admin console: `https://games.joinup.us/admin`
-- Later production can stay on `games.joinup.us` or move to dedicated `api.` and `admin.` subdomains.
+- Pre-alpha API and sockets: `https://ninebelow.potterwell.com`
+- Pre-alpha admin console: `https://ninebelow.potterwell.com/admin`
+- Legacy `games.joinup.us` may remain attached temporarily as a redirect-compatible migration hostname.
 
 The staging mobile build, admin console, Socket.IO server, accounts, coins, clubs, shop, ranked, wagers, and results all need to point at the same hosted backend and the same database.
 
@@ -16,7 +16,7 @@ Railway is the first pre-alpha host.
 
 Create one Railway project with two services:
 
-- `Golf 9 Server`: deployed from the GitHub repository, using `server` as the root directory.
+- `Nine Below Server`: deployed from the GitHub repository, using `server` as the root directory.
 - `Postgres`: Railway managed Postgres.
 
 For the server service:
@@ -37,8 +37,8 @@ PORT=<provided by host>
 DATABASE_URL=<managed postgres url>
 DATABASE_SSL=0
 CLIENT_ORIGINS=*
-PUBLIC_API_URL=https://games.joinup.us
-ADMIN_PUBLIC_URL=https://games.joinup.us/admin
+PUBLIC_API_URL=https://ninebelow.potterwell.com
+ADMIN_PUBLIC_URL=https://ninebelow.potterwell.com/admin
 REQUIRE_INVITE_CODE=1
 SEED_ADMIN_ACCOUNT=0
 SEED_TEST_ACCOUNTS=0
@@ -53,17 +53,16 @@ Do not use local defaults such as `admin`, `admin9`, or `000000` in staging or p
 
 In Railway:
 
-1. Open the `Golf 9 Server` service.
+1. Open the `Nine Below Server` service.
 2. Go to `Settings`.
 3. Open `Networking`.
 4. Generate a Railway domain first and confirm `/health` works.
-5. Add custom domain `games.joinup.us`.
+5. Add custom domain `ninebelow.potterwell.com`.
 6. Railway will show DNS records to add in SiteGround.
 
 In SiteGround DNS:
 
-- Replace the existing `games.joinup.us` A record that points at SiteGround.
-- Add the CNAME Railway gives you for `games.joinup.us`.
+- Add the CNAME Railway gives you for `ninebelow.potterwell.com`.
 - Add the TXT verification record Railway gives you.
 
 The admin console is served by the same backend at `/admin`, but with admin login and permissions.
@@ -78,7 +77,7 @@ REQUIRE_INVITE_CODE=1
 
 Then open the admin console and create invite codes:
 
-1. Go to `https://games.joinup.us/admin`.
+1. Go to `https://ninebelow.potterwell.com/admin`.
 2. Log in with the private admin credentials.
 3. Open `Invites`.
 4. Create one code per tester or a small batch code with limited uses.
@@ -92,7 +91,7 @@ The staging EAS profile is configured to use:
 
 ```bash
 EXPO_PUBLIC_APP_ENV=staging
-EXPO_PUBLIC_STAGING_SERVER_URL=https://games.joinup.us
+EXPO_PUBLIC_STAGING_SERVER_URL=https://ninebelow.potterwell.com
 ```
 
 Build Android internal distribution first:

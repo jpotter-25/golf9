@@ -16,3 +16,4 @@ client/dist/
 .env.local
 server/data/
 server/*.log
+company-site/*.log

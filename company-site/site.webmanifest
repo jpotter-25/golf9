@@ -1,0 +1,17 @@
+{
+  "name": "Potterwell",
+  "short_name": "Potterwell",
+  "description": "A veteran-owned product company building focused digital products.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f8f5",
+  "theme_color": "#123a32",
+  "icons": [
+    {
+      "src": "/assets/brand-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

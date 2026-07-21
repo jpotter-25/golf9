@@ -2,7 +2,7 @@ const googleWebClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '';
 const googleIosUrlScheme = process.env.EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME || '';
 const facebookAppId = process.env.EXPO_PUBLIC_FACEBOOK_APP_ID || '';
 const facebookClientToken = process.env.EXPO_PUBLIC_FACEBOOK_CLIENT_TOKEN || '';
-const facebookDisplayName = process.env.EXPO_PUBLIC_FACEBOOK_DISPLAY_NAME || 'Golf 9';
+const facebookDisplayName = process.env.EXPO_PUBLIC_FACEBOOK_DISPLAY_NAME || 'Nine Below';
 const releaseChannel = process.env.EXPO_PUBLIC_RELEASE_CHANNEL
   || (process.env.EXPO_PUBLIC_APP_ENV === 'production' ? 'production' : 'playtest');
 
@@ -44,7 +44,7 @@ if (facebookAppId && facebookClientToken) {
 
 module.exports = {
   expo: {
-    name: 'Golf 9',
+    name: 'Nine Below',
     slug: 'golf9',
     scheme: 'golf9',
     version: '0.1.0',
@@ -65,7 +65,7 @@ module.exports = {
     },
     android: {
       package: 'us.joinup.golf_9',
-      versionCode: 43,
+      versionCode: 44,
       permissions: [],
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',

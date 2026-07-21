@@ -205,7 +205,7 @@ export default function InboxScreen({ navigation }: Props) {
         <TextInput
           value={feedbackMessage}
           onChangeText={value => setFeedbackMessage(value.slice(0, 1000))}
-          placeholder="Tell us what happened or what would make Golf 9 better."
+          placeholder="Tell us what happened or what would make Nine Below better."
           placeholderTextColor={ui.text.muted}
           style={[styles.input, styles.feedbackInput]}
           multiline

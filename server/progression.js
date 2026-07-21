@@ -11,7 +11,7 @@ const SEASON_REWARD_GRACE_MS = 30 * DAY_MS;
 const STARTER_COSMETICS = ['classic-card-back', 'rookie-avatar-frame', 'classic-avatar-icon', 'no-avatar-accessory', 'rookie-title', 'classic-table-theme'];
 
 export const COSMETIC_CATALOG = [
-  { id: 'classic-card-back', type: 'cardBack', name: 'Classic', description: 'The original Golf 9 card back.', rarity: 'starter', price: 0, shopCategory: 'starter' },
+  { id: 'classic-card-back', type: 'cardBack', name: 'Classic', description: 'The original Nine Below card back.', rarity: 'starter', price: 0, shopCategory: 'starter' },
   { id: 'gold-trim-card-back', type: 'cardBack', name: 'Gold Trim', description: 'A clean gold-edged card back.', rarity: 'rare', price: 350, shopCategory: 'coin' },
   { id: 'emerald-card-back', type: 'cardBack', name: 'Emerald', description: 'A sharp green card back for low-score hunters.', rarity: 'rare', price: 500, shopCategory: 'coin' },
   { id: 'neon-card-back', type: 'cardBack', name: 'Neon Grid', description: 'A bright table-night card back.', rarity: 'epic', price: 800, shopCategory: 'coin' },
@@ -19,7 +19,7 @@ export const COSMETIC_CATALOG = [
   { id: 's1-master-card-back', type: 'cardBack', name: 'Season 1 Master', description: 'Reach Master this season, then buy this ranked card back.', rarity: 'epic', price: 12000, shopCategory: 'ranked', unlockRequirement: 'rank', requiredMmr: 4800, requiredLeague: 'Master', seasonId: 'season-1' },
   { id: 'club-crest-card-back', type: 'cardBack', name: 'Club Crest', description: 'A club card back earned by contributing to your club.', rarity: 'rare', price: 0, shopCategory: 'club', unlockRequirement: 'club' },
   { id: 'club-champion-card-back', type: 'cardBack', name: 'Club Champion', description: 'A premium club card back for major contributors.', rarity: 'epic', price: 0, shopCategory: 'club', unlockRequirement: 'club' },
-  { id: 'classic-table-theme', type: 'tableTheme', name: 'Classic Table', description: 'The original dark Golf 9 table.', rarity: 'starter', price: 0, shopCategory: 'starter' },
+  { id: 'classic-table-theme', type: 'tableTheme', name: 'Classic Table', description: 'The original dark Nine Below table.', rarity: 'starter', price: 0, shopCategory: 'starter' },
   { id: 'emerald-felt-table-theme', type: 'tableTheme', name: 'Emerald Felt', description: 'A richer green felt table surface.', rarity: 'rare', price: 650, shopCategory: 'coin' },
   { id: 'carbon-table-theme', type: 'tableTheme', name: 'Carbon Night', description: 'A clean high-contrast table surface.', rarity: 'epic', price: 1000, shopCategory: 'coin' },
   { id: 's1-platinum-table-theme', type: 'tableTheme', name: 'Season 1 Platinum', description: 'Reach Platinum this season, then buy this ranked table theme.', rarity: 'epic', price: 4000, shopCategory: 'ranked', unlockRequirement: 'rank', requiredMmr: 3200, requiredLeague: 'Platinum', seasonId: 'season-1' },
@@ -30,7 +30,7 @@ export const COSMETIC_CATALOG = [
   { id: 's1-bronze-frame', type: 'avatarFrame', name: 'Season 1 Bronze', description: 'Reach Bronze this season, then buy this ranked frame.', rarity: 'rare', price: 750, shopCategory: 'ranked', unlockRequirement: 'rank', requiredMmr: 800, requiredLeague: 'Bronze', seasonId: 'season-1' },
   { id: 's1-diamond-frame', type: 'avatarFrame', name: 'Season 1 Diamond', description: 'Reach Diamond this season, then buy this ranked frame.', rarity: 'epic', price: 7500, shopCategory: 'ranked', unlockRequirement: 'rank', requiredMmr: 4000, requiredLeague: 'Diamond', seasonId: 'season-1' },
   { id: 'club-emerald-frame', type: 'avatarFrame', name: 'Club Emerald', description: 'An emerald club avatar frame for active clubmates.', rarity: 'rare', price: 0, shopCategory: 'club', unlockRequirement: 'club' },
-  { id: 'classic-avatar-icon', type: 'avatarIcon', name: 'Classic Nine', description: 'The starter Golf 9 avatar icon.', rarity: 'starter', price: 0, shopCategory: 'starter' },
+  { id: 'classic-avatar-icon', type: 'avatarIcon', name: 'Classic Nine', description: 'The starter Nine Below avatar icon.', rarity: 'starter', price: 0, shopCategory: 'starter' },
   { id: 'spark-avatar-icon', type: 'avatarIcon', name: 'Spark', description: 'A bright table-night avatar icon.', rarity: 'rare', price: 500, shopCategory: 'coin' },
   { id: 'shield-avatar-icon', type: 'avatarIcon', name: 'Shield', description: 'A clean competitive avatar icon.', rarity: 'rare', price: 700, shopCategory: 'coin' },
   { id: 'trophy-avatar-icon', type: 'avatarIcon', name: 'Trophy', description: 'A winner-circle avatar icon.', rarity: 'epic', price: 1200, shopCategory: 'coin' },
@@ -40,7 +40,7 @@ export const COSMETIC_CATALOG = [
   { id: 'emerald-gem-accessory', type: 'avatarAccessory', name: 'Emerald Gem', description: 'A polished table gem earned through steady play.', rarity: 'rare', price: 900, shopCategory: 'coin' },
   { id: 'rocket-charm-accessory', type: 'avatarAccessory', name: 'Rocket Charm', description: 'A bold seasonal charm for fast climbers.', rarity: 'epic', price: 2500, shopCategory: 'event', unlockRequirement: 'season' },
   { id: 'legend-crown-accessory', type: 'avatarAccessory', name: 'Legend Crown', description: 'A crown-style accessory for players who reach Legend.', rarity: 'epic', price: 18000, shopCategory: 'ranked', unlockRequirement: 'rank', requiredMmr: 6000, requiredLeague: 'Legend', seasonId: 'season-1' },
-  { id: 'rookie-title', type: 'title', name: 'Rookie', description: 'Your first Golf 9 title.', rarity: 'starter', price: 0, shopCategory: 'starter' },
+  { id: 'rookie-title', type: 'title', name: 'Rookie', description: 'Your first Nine Below title.', rarity: 'starter', price: 0, shopCategory: 'starter' },
   { id: 'column-cleaner-title', type: 'title', name: 'Column Cleaner', description: 'A title for players who love three-of-a-kind clears.', rarity: 'rare', price: 600, shopCategory: 'coin' },
   { id: 'table-shark-title', type: 'title', name: 'Table Shark', description: 'A confident title for the lobby.', rarity: 'epic', price: 1200, shopCategory: 'coin' },
   { id: 's1-silver-title', type: 'title', name: 'Silver Climber', description: 'Reach Silver this season, then buy this ranked title.', rarity: 'rare', price: 1000, shopCategory: 'ranked', unlockRequirement: 'rank', requiredMmr: 1600, requiredLeague: 'Silver', seasonId: 'season-1' },

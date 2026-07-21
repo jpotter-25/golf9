@@ -14,7 +14,7 @@ export default function RulesScreen({ navigation }: Props) {
   return (
     <ScreenShell scroll>
       <ScreenHeader
-        eyebrow="Golf 9"
+        eyebrow="Nine Below"
         title="Quick Rules"
         subtitle="Lowest total wins. Clear columns, manage risk, and know when to push."
         right={<BookOpen size={28} color={ui.palette.gold} strokeWidth={2.5} />}

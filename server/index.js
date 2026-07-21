@@ -1,5 +1,5 @@
 // index.js
-// Purpose: Authoritative Golf 9 API + Socket.IO server for auth, rooms, and online game state.
+// Purpose: Authoritative Nine Below API + Socket.IO server for auth, rooms, and online game state.
 
 import crypto from 'crypto';
 import express from 'express';
@@ -211,11 +211,12 @@ const DEFAULT_DATA_DIR = path.join(__dirname, 'data');
 const DATA_DIR = process.env.DATA_DIR || DEFAULT_DATA_DIR;
 const DATA_FILE = path.join(DATA_DIR, 'auth-store.json');
 const ADMIN_PUBLIC_DIR = path.join(__dirname, 'admin-public');
+const PRODUCT_PUBLIC_DIR = path.join(__dirname, 'product-public');
 const ASSET_UPLOAD_DIR = path.join(DATA_DIR, 'uploads', 'cosmetics');
 const RAW_PUBLIC_ENV = (process.env.APP_ENV || process.env.EXPO_PUBLIC_APP_ENV || process.env.NODE_ENV || '').toLowerCase();
 const IS_PRODUCTION = process.env.NODE_ENV === 'production' || RAW_PUBLIC_ENV === 'production';
 const DATABASE_URL = process.env.DATABASE_URL || '';
-const PUBLIC_API_URL = normalizePublicUrl(process.env.PUBLIC_API_URL || process.env.EXPO_PUBLIC_PROD_SERVER_URL || 'https://games.joinup.us');
+const PUBLIC_API_URL = normalizePublicUrl(process.env.PUBLIC_API_URL || process.env.EXPO_PUBLIC_PROD_SERVER_URL || 'https://ninebelow.potterwell.com');
 const ADMIN_PUBLIC_URL = normalizeAdminPublicUrl(process.env.ADMIN_PUBLIC_URL, PUBLIC_API_URL);
 const PUBLIC_ENV = (process.env.APP_ENV || process.env.EXPO_PUBLIC_APP_ENV || (IS_PRODUCTION ? 'production' : 'development')).toLowerCase();
 const ALLOW_UNSAFE_JSON_IN_PRODUCTION = process.env.ALLOW_JSON_STORE_IN_PRODUCTION === '1' || process.env.ALLOW_JSON_FALLBACK_ON_DB_ERROR === '1';
@@ -302,13 +303,13 @@ const DEFAULT_NOTIFICATION_CONFIG = {
   types: {
     turn: {
       enabled: true,
-      title: 'Your turn in Golf 9',
+      title: 'Your turn in Nine Below',
       body: 'Room {roomCode} is waiting on you.',
     },
     dailyBonus: {
       enabled: true,
       title: 'Daily bonus ready',
-      body: 'Claim {reward} free coins in Golf 9.',
+      body: 'Claim {reward} free coins in Nine Below.',
     },
     roomInvite: {
       enabled: true,
@@ -318,11 +319,11 @@ const DEFAULT_NOTIFICATION_CONFIG = {
     friendRequest: {
       enabled: true,
       title: 'New friend request',
-      body: '{fromDisplayName} wants to connect on Golf 9.',
+      body: '{fromDisplayName} wants to connect on Nine Below.',
     },
     mail: {
       enabled: true,
-      title: 'New Golf 9 mail',
+      title: 'New Nine Below mail',
       body: '{title}',
     },
   },
@@ -332,7 +333,7 @@ const DEFAULT_NOTIFICATION_CONFIG = {
 };
 
 function normalizePublicUrl(value) {
-  const fallback = 'https://games.joinup.us';
+  const fallback = 'https://ninebelow.potterwell.com';
   try {
     const parsed = new URL(String(value || fallback).trim() || fallback);
     parsed.pathname = parsed.pathname.replace(/\/+$/, '');
@@ -664,11 +665,11 @@ function adminRecoveryEmailEnabled() {
 async function sendAdminRecoveryCode({ admin, code, expiresAt }) {
   const message = {
     to: admin.email,
-    subject: 'Golf 9 admin password recovery code',
+    subject: 'Nine Below admin password recovery code',
     text: [
       `Hello ${admin.displayName},`,
       '',
-      `Your Golf 9 admin password recovery code is ${code}.`,
+      `Your Nine Below admin password recovery code is ${code}.`,
       `It expires at ${new Date(expiresAt).toLocaleString()}.`,
       '',
       'If you did not request this code, ignore this message and review admin audit logs.',
@@ -1366,7 +1367,7 @@ function requireClubAdminReason(req, res) {
 
 function frozenClubResponse(club, res) {
   if (!club?.adminStatus?.frozenAt) return false;
-  res.status(423).json({ error: 'This club is temporarily frozen by Golf 9 support.' });
+  res.status(423).json({ error: 'This club is temporarily frozen by Nine Below support.' });
   return true;
 }
 
@@ -2349,7 +2350,7 @@ function recordRoomMissedWindow(room, userId, phase) {
       keyName: 'autoplay',
       dedupeKey: `${room.code}:${key}`,
       title: 'Autoplay is active',
-      body: 'Golf 9 is playing for you. Tap to take back control.',
+      body: 'Nine Below is playing for you. Tap to take back control.',
       data: { type: 'autoplay', roomCode: room.code, roomId: room.game?.id },
     });
   }
@@ -3063,8 +3064,8 @@ function recordCompletedGame(room) {
   saveStore();
 }
 
-const LEGAL_CONTACT_EMAIL = process.env.LEGAL_CONTACT_EMAIL || 'developer@joinup.us';
-const LEGAL_EFFECTIVE_DATE = 'June 27, 2026';
+const LEGAL_CONTACT_EMAIL = process.env.LEGAL_CONTACT_EMAIL || 'app-developer@potterwell.com';
+const LEGAL_EFFECTIVE_DATE = 'July 20, 2026';
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -3081,7 +3082,7 @@ function legalEmailLink(subject = '') {
   return `<a href="mailto:${email}${query}">${email}</a>`;
 }
 
-function legalPage(title, sections) {
+function legalPage(title, sections, canonicalPath) {
   const content = sections.map(section => `
     <section>
       <h2>${escapeHtml(section.title)}</h2>
@@ -3094,7 +3095,10 @@ function legalPage(title, sections) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(title)} | Golf 9</title>
+    <title>${escapeHtml(title)} | Nine Below</title>
+    <meta name="description" content="${escapeHtml(title)} for Nine Below, a Potterwell product." />
+    <meta name="robots" content="index,follow" />
+    <link rel="canonical" href="${escapeHtml(`${PUBLIC_API_URL}${canonicalPath}`)}" />
     <style>
       :root { color-scheme: dark; }
       * { box-sizing: border-box; }
@@ -3147,7 +3151,7 @@ function legalPage(title, sections) {
   <body>
     <main>
       <header>
-        <div class="eyebrow">Golf 9</div>
+        <div class="eyebrow">Nine Below by Potterwell</div>
         <h1>${escapeHtml(title)}</h1>
         <p class="muted">Effective date: ${LEGAL_EFFECTIVE_DATE}</p>
       </header>
@@ -3159,11 +3163,25 @@ function legalPage(title, sections) {
 </html>`;
 }
 
-function sendLegalPage(res, title, sections) {
+function sendLegalPage(res, title, sections, canonicalPath) {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=300');
-  res.send(legalPage(title, sections));
+  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+  res.send(legalPage(title, sections, canonicalPath));
 }
+
+app.use('/brand', express.static(PRODUCT_PUBLIC_DIR, {
+  fallthrough: false,
+  setHeaders: res => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+  },
+}));
+
+app.get('/', (_req, res) => {
+  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+  res.sendFile(path.join(PRODUCT_PUBLIC_DIR, 'index.html'));
+});
 
 app.get('/health', (_req, res) => res.json({ ok: true, ready: storeReady, env: PUBLIC_ENV, storage: storageStatus() }));
 app.get('/health/ready', (_req, res) => {
@@ -3193,37 +3211,37 @@ app.get('/app/release-policy', (req, res) => {
 
 app.get('/privacy', (_req, res) => sendLegalPage(res, 'Privacy Policy', [
   {
-    title: 'What Golf 9 Collects',
+    title: 'What Nine Below Collects',
     body: [
-      'Golf 9 collects the information needed to run the game, protect accounts, and keep online matches working. This can include your display name, generated user ID, password hash for direct sign-in, linked Google or Facebook account identifiers, invite or tester status, friends, clubs, gameplay history, scores, rankings, virtual currency, cosmetics, chat messages, support requests, and moderation records.',
+      'Nine Below collects the information needed to run the game, protect accounts, and keep online matches working. This can include your display name, generated user ID, password hash for direct sign-in, linked Google or Facebook account identifiers, invite or tester status, friends, clubs, gameplay history, scores, rankings, virtual currency, cosmetics, chat messages, support requests, and moderation records.',
       'We may also collect basic technical information such as IP address, device or browser details, server logs, crash details, notification push tokens, notification preferences, and connection events so we can secure the service, send requested game alerts, and troubleshoot bugs.',
     ],
   },
   {
     title: 'How We Use Information',
     body: [
-      'We use this information to create and secure accounts, verify Google and Facebook sign-ins, match players into rooms, run games, save progress, show leaderboards and profiles, operate chat and social features, send enabled push notifications, provide support, prevent abuse, and improve Golf 9.',
-      'Google and Facebook login are used only to verify your identity and link your Golf 9 account. Golf 9 does not receive your Google or Facebook password.',
+      'We use this information to create and secure accounts, verify Google and Facebook sign-ins, match players into rooms, run games, save progress, show leaderboards and profiles, operate chat and social features, send enabled push notifications, provide support, prevent abuse, and improve Nine Below.',
+      'Google and Facebook login are used only to verify your identity and link your Nine Below account. Nine Below does not receive your Google or Facebook password.',
     ],
   },
   {
     title: 'Sharing',
     body: [
-      'We do not sell personal information. We share information only when needed to operate Golf 9, such as with hosting, database, app-store, authentication, and infrastructure providers, or when required by law or necessary to protect the game and its players.',
+      'We do not sell personal information. We share information only when needed to operate Nine Below, such as with hosting, database, app-store, authentication, and infrastructure providers, or when required by law or necessary to protect the game and its players.',
       'Some in-game information, such as display name, avatar initial, match activity, scores, profile stats, club membership, and chat messages, may be visible to other players depending on the feature you use.',
     ],
   },
   {
     title: 'Retention And Deletion',
     body: [
-      `We keep account and gameplay information while your account is active or as needed to operate Golf 9, resolve disputes, prevent abuse, and satisfy legal or store-platform requirements. You can request deletion at ${legalEmailLink()} or by visiting <a href="/account/delete">/account/delete</a>.`,
+      `We keep account and gameplay information while your account is active or as needed to operate Nine Below, resolve disputes, prevent abuse, and satisfy legal or store-platform requirements. You can request deletion at ${legalEmailLink()} or by visiting <a href="/account/delete">/account/delete</a>.`,
       'When an account is deleted, we will delete or anonymize personal account data where reasonably possible. Some records may be kept if needed for security, fraud prevention, legal compliance, or completed transaction/history integrity.',
     ],
   },
   {
     title: 'Children',
     body: [
-      'Golf 9 is not intended for children under 13. If you believe a child provided personal information, contact us and we will review the request.',
+      'Nine Below is not intended for children under 13. If you believe a child provided personal information, contact us and we will review the request.',
     ],
   },
   {
@@ -3232,27 +3250,27 @@ app.get('/privacy', (_req, res) => sendLegalPage(res, 'Privacy Policy', [
       `Questions about this policy can be sent to ${legalEmailLink()}.`,
     ],
   },
-]));
+], '/privacy'));
 
 app.get('/terms', (_req, res) => sendLegalPage(res, 'Terms of Service', [
   {
-    title: 'Using Golf 9',
+    title: 'Using Nine Below',
     body: [
-      'By using Golf 9, you agree to play fairly, follow the rules shown in the app, and use the service only for lawful personal entertainment. You are responsible for activity on your account.',
-      'Do not cheat, exploit bugs, interfere with servers, harass other players, impersonate others, upload malicious content, or use Golf 9 in a way that harms the service or other players.',
+      'By using Nine Below, you agree to play fairly, follow the rules shown in the app, and use the service only for lawful personal entertainment. You are responsible for activity on your account.',
+      'Do not cheat, exploit bugs, interfere with servers, harass other players, impersonate others, upload malicious content, or use Nine Below in a way that harms the service or other players.',
     ],
   },
   {
     title: 'Accounts And Access',
     body: [
-      'We may limit, suspend, or remove access to accounts or features when needed to protect Golf 9, enforce these terms, respond to abuse, or comply with law or platform requirements.',
+      'We may limit, suspend, or remove access to accounts or features when needed to protect Nine Below, enforce these terms, respond to abuse, or comply with law or platform requirements.',
       'Online features may change, pause, or be unavailable from time to time while we test, improve, or maintain the app.',
     ],
   },
   {
     title: 'Virtual Items And Progress',
     body: [
-      'Golf 9 may include virtual currency, rankings, rewards, cosmetics, clubs, and other progression features. These items have no cash value and may be changed, balanced, reset, or removed as the game evolves, especially during testing.',
+      'Nine Below may include virtual currency, rankings, rewards, cosmetics, clubs, and other progression features. These items have no cash value and may be changed, balanced, reset, or removed as the game evolves, especially during testing.',
       'If real-money purchases are added later, additional store terms may apply through Google Play, Apple, or another payment provider.',
     ],
   },
@@ -3266,24 +3284,24 @@ app.get('/terms', (_req, res) => sendLegalPage(res, 'Terms of Service', [
   {
     title: 'Disclaimers',
     body: [
-      'Golf 9 is provided as is and as available. We do our best to keep the game reliable, but we do not guarantee uninterrupted access, error-free gameplay, or permanent availability of any feature.',
+      'Nine Below is provided as is and as available. We do our best to keep the game reliable, but we do not guarantee uninterrupted access, error-free gameplay, or permanent availability of any feature.',
       `For questions, contact ${legalEmailLink()}.`,
     ],
   },
-]));
+], '/terms'));
 
 app.get('/account/delete', (_req, res) => sendLegalPage(res, 'Account Deletion', [
   {
     title: 'How To Request Deletion',
     body: [
-      `To delete your Golf 9 account, email ${legalEmailLink('Golf 9 account deletion request')} with the subject "Golf 9 account deletion request".`,
-      'Include your Golf 9 display name and, if you used Google or Facebook login, tell us which provider you used. Do not send passwords. We may ask for reasonable confirmation that you control the account before deletion.',
+      `To delete your Nine Below account, email ${legalEmailLink('Nine Below account deletion request')} with the subject "Nine Below account deletion request".`,
+      'Include your Nine Below display name and, if you used Google or Facebook login, tell us which provider you used. Do not send passwords. We may ask for reasonable confirmation that you control the account before deletion.',
     ],
   },
   {
     title: 'What Will Be Deleted',
     body: [
-      'After verification, we will delete or anonymize account identifiers and personal profile information associated with your Golf 9 account, including linked social-login identifiers where reasonably possible.',
+      'After verification, we will delete or anonymize account identifiers and personal profile information associated with your Nine Below account, including linked social-login identifiers where reasonably possible.',
       'Some completed match records, moderation records, security logs, or records needed for legal, fraud-prevention, support, or transaction-history reasons may be retained or anonymized instead of fully removed.',
     ],
   },
@@ -3293,7 +3311,7 @@ app.get('/account/delete', (_req, res) => sendLegalPage(res, 'Account Deletion',
       'We aim to complete verified deletion requests within 30 days. If more time is needed because of security, legal, or technical reasons, we will let you know when possible.',
     ],
   },
-]));
+], '/account/delete'));
 
 app.use('/admin', (req, res, next) => {
   const rawUrl = req.originalUrl || req.url || '';
@@ -4191,7 +4209,7 @@ app.post('/admin/api/mail', requireAdmin(adminStore, 'mail:write'), (req, res) =
     if (queueConfiguredPushToUser(user.userId, 'mail', {
       keyName: 'mail',
       dedupeKey: `mail:${result.batchId}:${user.userId}`,
-      templateData: { title: req.body?.title || 'New Golf 9 mail', displayName: user.displayName },
+      templateData: { title: req.body?.title || 'New Nine Below mail', displayName: user.displayName },
       data: { type: 'mail', batchId: result.batchId },
     })) pushed += 1;
     io.to(`user:${user.userId}`).emit('mail:update', mailSummaryForUser(mailEntries, user.userId));
@@ -4413,7 +4431,7 @@ app.delete('/admin/api/competitive/queues/:userId', requireAdmin(adminStore, 'co
   const reason = cleanAdminReason(req.query.reason || req.body?.reason);
   if (!reason) return res.status(400).json({ error: 'Reason is required.' });
   const existed = rankedQueue.delete(req.params.userId);
-  if (existed) io.to(`user:${req.params.userId}`).emit('ranked:queue:cancelled', { reason: 'Queue cancelled by Golf 9 support.' });
+  if (existed) io.to(`user:${req.params.userId}`).emit('ranked:queue:cancelled', { reason: 'Queue cancelled by Nine Below support.' });
   writeAudit(adminStore, req, req.admin.admin, 'admin.competitive.queue.cancel', { userId: req.params.userId }, { reason, existed });
   saveStore();
   return res.json({ ok: true, existed, ...adminRankedQueues() });
@@ -4873,7 +4891,7 @@ app.post('/auth/social/link', requireAuth, async (req, res) => {
 
   const linkedUser = findUserByProvider(provider, profile.providerUserId);
   if (linkedUser && linkedUser.userId !== req.auth.user.userId) {
-    return res.status(409).json({ error: `${providerLabel(provider)} is already linked to another Golf 9 profile.` });
+    return res.status(409).json({ error: `${providerLabel(provider)} is already linked to another Nine Below profile.` });
   }
 
   normalizeAuthProviders(req.auth.user);
@@ -6105,7 +6123,7 @@ io.on('connection', (socket) => {
     const unavailable = socketFeatureUnavailable('clubs.chat', user.userId);
     if (unavailable) return cb(unavailable);
     if (!club || !findClubMember(club, user.userId)) return cb({ error: 'Club not found.' });
-    if (club.adminStatus?.frozenAt) return cb({ error: 'This club is temporarily frozen by Golf 9 support.' });
+    if (club.adminStatus?.frozenAt) return cb({ error: 'This club is temporarily frozen by Nine Below support.' });
     if (activeBansFor(adminStore, user).some(ban => ban.type === 'chat_mute')) return cb({ error: 'Chat is muted for this account.' });
     const now = Date.now();
     const rateKey = `${club.clubId}:${user.userId}`;
@@ -6312,14 +6330,14 @@ setInterval(() => {
 
 function startHttpListeners() {
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Golf9 authoritative server listening on port ${PORT}`);
+    console.log(`Nine Below authoritative server listening on port ${PORT}`);
   });
   for (const extraPort of EXTRA_LISTEN_PORTS) {
     const extraServer = http.createServer(app);
     io.attach(extraServer, { cors: { origin: CLIENT_ORIGINS.includes('*') ? '*' : CLIENT_ORIGINS } });
     listeningServers.push(extraServer);
     extraServer.listen(extraPort, '0.0.0.0', () => {
-      console.log(`Golf9 fallback listener active on port ${extraPort}`);
+      console.log(`Nine Below fallback listener active on port ${extraPort}`);
     });
   }
 }
@@ -6346,11 +6364,11 @@ async function initializePersistence() {
     }
     storeReady = true;
     storeLoadError = null;
-    console.log('Golf9 persistence loaded.');
+    console.log('Nine Below persistence loaded.');
   } catch (error) {
     storeReady = false;
     storeLoadError = error;
-    console.error('Golf9 persistence failed to load:', error);
+    console.error('Nine Below persistence failed to load:', error);
     if (!IS_PRODUCTION || ALLOW_UNSAFE_JSON_IN_PRODUCTION) {
       console.warn('Falling back to local JSON store after persistence failure.');
       loadJsonStore();
@@ -6388,6 +6406,6 @@ process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
 startServer().catch(error => {
-  console.error('Failed to start Golf9 server:', error);
+  console.error('Failed to start Nine Below server:', error);
   process.exit(1);
 });

@@ -25,8 +25,8 @@ function devServerUrl() {
 
 const URLS: Record<string, string> = {
   development: devServerUrl(),
-  staging: process.env.EXPO_PUBLIC_STAGING_SERVER_URL || 'https://games.joinup.us',
-  production: process.env.EXPO_PUBLIC_PROD_SERVER_URL || 'https://games.joinup.us',
+  staging: process.env.EXPO_PUBLIC_STAGING_SERVER_URL || 'https://ninebelow.potterwell.com',
+  production: process.env.EXPO_PUBLIC_PROD_SERVER_URL || 'https://ninebelow.potterwell.com',
 };
 
 export const APP_ENV = ENV;

@@ -144,7 +144,7 @@ export default function OnlineMenuScreen({ navigation }: Props) {
         <ScreenHeader
           eyebrow="Casual Play"
           title="Connection Needed"
-          subtitle="Casual rooms and wagers reconnect to Golf 9 services. Offline play remains available."
+          subtitle="Casual rooms and wagers reconnect to Nine Below services. Offline play remains available."
           right={<WifiOff size={30} color={ui.feedback.danger} strokeWidth={2.5} />}
         />
         <PremiumPanel>
@@ -222,7 +222,7 @@ export default function OnlineMenuScreen({ navigation }: Props) {
       <MatchPreferenceModal
         visible={autoOpen}
         title="Auto-Match"
-        text="Choose your casual table preferences. If no match is waiting, Golf 9 creates one for you."
+        text="Choose your casual table preferences. If no match is waiting, Nine Below creates one for you."
         players={autoPlayers}
         rounds={autoRounds}
         actionLabel="Find Match"

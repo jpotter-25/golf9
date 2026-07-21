@@ -1211,10 +1211,10 @@ function selectedReleasePolicyEntry() {
     storeUrl: '',
     storeReady: false,
     enforcement: 'after_match',
-    recommendedTitle: 'Golf 9 update available',
-    recommendedMessage: 'A newer version of Golf 9 is ready.',
+    recommendedTitle: 'Nine Below update available',
+    recommendedMessage: 'A newer version of Nine Below is ready.',
     requiredTitle: 'Update required',
-    requiredMessage: 'Update Golf 9 before online play can continue.',
+    requiredMessage: 'Update Nine Below before online play can continue.',
   };
 }
 

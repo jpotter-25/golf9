@@ -52,10 +52,10 @@ function defaultEntry(platform, channel) {
     storeUrl: platform === 'android' ? ANDROID_STORE_URL : '',
     storeReady: false,
     enforcement: 'after_match',
-    recommendedTitle: 'Golf 9 update available',
-    recommendedMessage: 'A newer version of Golf 9 is ready. Update now for the latest fixes and features.',
+    recommendedTitle: 'Nine Below update available',
+    recommendedMessage: 'A newer version of Nine Below is ready. Update now for the latest fixes and features.',
     requiredTitle: 'Update required',
-    requiredMessage: 'A newer version of Golf 9 is required before online play can continue.',
+    requiredMessage: 'A newer version of Nine Below is required before online play can continue.',
     updatedAt: null,
     updatedBy: null,
   };
@@ -332,7 +332,7 @@ export function restoreReleasePolicyRevision(storeValue, revisionId, { actor, re
 
 export function updateRequiredPayload(policy) {
   return {
-    error: policy.message || 'Update Golf 9 to continue.',
+    error: policy.message || 'Update Nine Below to continue.',
     code: 'APP_UPDATE_REQUIRED',
     release: policy,
   };

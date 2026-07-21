@@ -27,7 +27,7 @@ function card(rank, extra = {}) {
   return { id: `${rank}-${Math.random()}`, suit: '♠', rank, faceUp: true, ...extra };
 }
 
-test('cardValue and scoreGrid centralize Golf 9 scoring', () => {
+test('cardValue and scoreGrid centralize Nine Below scoring', () => {
   assert.equal(cardValue(card('A')), 1);
   assert.equal(cardValue(card('5')), -5);
   assert.equal(cardValue(card('J')), 10);

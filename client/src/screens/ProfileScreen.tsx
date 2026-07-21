@@ -167,7 +167,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
     try {
       await linkSocialProvider(provider);
       await refreshProfile().catch(() => {});
-      Alert.alert('Account linked', `${provider === 'google' ? 'Google' : 'Facebook'} can now sign in to this Golf 9 profile.`);
+      Alert.alert('Account linked', `${provider === 'google' ? 'Google' : 'Facebook'} can now sign in to this Nine Below profile.`);
     } catch (error) {
       Alert.alert('Link failed', error instanceof Error ? error.message : 'Try again.');
     } finally {

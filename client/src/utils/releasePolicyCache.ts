@@ -21,10 +21,10 @@ export async function loadReleasePolicyCache(): Promise<ReleasePolicyResponse | 
       installedVersion: releaseInfo.version,
       status,
       title: status === 'recommended' && cached.status === 'required'
-        ? 'Golf 9 update available'
+        ? 'Nine Below update available'
         : cached.title,
       message: status === 'recommended' && cached.status === 'required'
-        ? 'A newer version of Golf 9 is ready. Update now for the latest fixes and features.'
+        ? 'A newer version of Nine Below is ready. Update now for the latest fixes and features.'
         : cached.message,
     };
   } catch {

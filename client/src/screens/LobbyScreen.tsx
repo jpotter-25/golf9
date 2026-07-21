@@ -29,7 +29,7 @@ export default function LobbyScreen({ navigation }: Props) {
   return (
     <ScreenShell scroll centered>
       <ScreenHeader
-        eyebrow="Golf 9"
+        eyebrow="Nine Below"
         title="Play"
         subtitle="Choose a table style and get straight to the cards."
         right={isOnline

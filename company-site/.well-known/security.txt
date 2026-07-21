@@ -1,0 +1,5 @@
+Contact: mailto:app-developer@potterwell.com
+Preferred-Languages: en
+Canonical: https://potterwell.com/.well-known/security.txt
+Policy: https://potterwell.com/terms.html
+Expires: 2027-07-20T23:59:59.000Z

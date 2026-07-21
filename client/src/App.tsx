@@ -215,7 +215,7 @@ function ActiveMatchGate({ navigationTick }: { navigationTick: number }) {
   return (
     <View style={styles.activeGateOverlay}>
       <View style={styles.activeGateCard}>
-        <Text style={styles.activeGateEyebrow}>Golf 9</Text>
+        <Text style={styles.activeGateEyebrow}>Nine Below</Text>
         <Text style={styles.activeGateTitle}>
           {room ? 'Match in Progress' : error ? 'Connection Check Needed' : 'Checking Active Match'}
         </Text>
@@ -265,7 +265,7 @@ function LockedFeature({ featureKey }: { featureKey: api.FeatureKey }) {
   return (
     <View style={styles.availabilityScreen}>
       <View style={styles.availabilityCard}>
-        <Text style={styles.availabilityEyebrow}>{isGlobal ? 'Golf 9 Live Operations' : feature.label || 'Golf 9'}</Text>
+        <Text style={styles.availabilityEyebrow}>{isGlobal ? 'Nine Below Live Operations' : feature.label || 'Nine Below'}</Text>
         <Text style={styles.availabilityTitle}>
           {feature.title || (feature.state === 'coming_soon' ? 'Coming Soon' : 'Temporarily Unavailable')}
         </Text>
@@ -287,8 +287,8 @@ function LockedFeature({ featureKey }: { featureKey: api.FeatureKey }) {
               </Pressable>
             </View>
             <View style={styles.availabilityLegalRow}>
-              <Text style={styles.availabilityLink} onPress={() => void Linking.openURL('https://games.joinup.us/privacy')}>Privacy</Text>
-              <Text style={styles.availabilityLink} onPress={() => void Linking.openURL('https://games.joinup.us/terms')}>Terms</Text>
+              <Text style={styles.availabilityLink} onPress={() => void Linking.openURL('https://ninebelow.potterwell.com/privacy')}>Privacy</Text>
+              <Text style={styles.availabilityLink} onPress={() => void Linking.openURL('https://ninebelow.potterwell.com/terms')}>Terms</Text>
               <Text style={styles.availabilityLink} onPress={() => void signOut()}>Log Out</Text>
             </View>
           </>
@@ -474,10 +474,10 @@ function ReleaseUpdateGate({ navigationTick }: { navigationTick: number }) {
       {requiredVisible ? (
         <View style={styles.releaseGateOverlay}>
           <View style={styles.releaseGateCard}>
-            <Text style={styles.releaseGateEyebrow}>Golf 9 Update</Text>
+            <Text style={styles.releaseGateEyebrow}>Nine Below Update</Text>
             <Text style={styles.releaseGateTitle}>{policy.title || 'Update required'}</Text>
             <Text style={styles.releaseGateCopy}>
-              {policy.message || 'Install the latest version of Golf 9 to continue online.'}
+              {policy.message || 'Install the latest version of Nine Below to continue online.'}
             </Text>
             <View style={styles.releaseVersionRow}>
               <View style={styles.releaseVersionCell}>
@@ -519,7 +519,7 @@ function ReleaseUpdateGate({ navigationTick }: { navigationTick: number }) {
                   <Text style={styles.releaseLink}>Settings</Text>
                 </Pressable>
               ) : null}
-              <Pressable style={styles.releaseLinkButton} onPress={() => void Linking.openURL('https://games.joinup.us/privacy')}>
+              <Pressable style={styles.releaseLinkButton} onPress={() => void Linking.openURL('https://ninebelow.potterwell.com/privacy')}>
                 <Text style={styles.releaseLink}>Privacy</Text>
               </Pressable>
               {token ? (
@@ -543,7 +543,7 @@ function ReleaseUpdateGate({ navigationTick }: { navigationTick: number }) {
         <View style={styles.releaseModalBackdrop}>
           <View style={styles.releasePromptCard}>
             <Text style={styles.releaseGateEyebrow}>New Build Available</Text>
-            <Text style={styles.releasePromptTitle}>{policy?.title || 'Golf 9 update available'}</Text>
+            <Text style={styles.releasePromptTitle}>{policy?.title || 'Nine Below update available'}</Text>
             <Text style={styles.releaseGateCopy}>{policy?.message}</Text>
             {error ? <Text style={styles.releaseError}>{error}</Text> : null}
             <Pressable style={styles.releasePrimaryButton} onPress={() => void updateNow()} disabled={updating}>
@@ -566,7 +566,7 @@ function AppNavigator() {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0B1023' }}>
         <ActivityIndicator color="#52E5A7" />
-        <Text style={{ color: '#E8ECF1', marginTop: 16 }}>Loading Golf 9...</Text>
+        <Text style={{ color: '#E8ECF1', marginTop: 16 }}>Loading Nine Below...</Text>
       </View>
     );
   }

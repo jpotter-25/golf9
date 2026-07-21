@@ -14,7 +14,7 @@
       "env": {
         "EXPO_PUBLIC_APP_ENV": "staging",
         "EXPO_PUBLIC_RELEASE_CHANNEL": "playtest",
-        "EXPO_PUBLIC_STAGING_SERVER_URL": "https://games.joinup.us"
+        "EXPO_PUBLIC_STAGING_SERVER_URL": "https://ninebelow.potterwell.com"
       },
       "ios": { "simulator": false },
       "android": { "buildType": "apk" }
@@ -24,7 +24,7 @@
       "env": {
         "EXPO_PUBLIC_APP_ENV": "staging",
         "EXPO_PUBLIC_RELEASE_CHANNEL": "playtest",
-        "EXPO_PUBLIC_STAGING_SERVER_URL": "https://games.joinup.us"
+        "EXPO_PUBLIC_STAGING_SERVER_URL": "https://ninebelow.potterwell.com"
       },
       "ios": { "simulator": false },
       "android": { "buildType": "app-bundle" }
@@ -34,7 +34,7 @@
       "env": {
         "EXPO_PUBLIC_APP_ENV": "production",
         "EXPO_PUBLIC_RELEASE_CHANNEL": "production",
-        "EXPO_PUBLIC_PROD_SERVER_URL": "https://games.joinup.us"
+        "EXPO_PUBLIC_PROD_SERVER_URL": "https://ninebelow.potterwell.com"
       },
       "android": { "buildType": "app-bundle" }
     }

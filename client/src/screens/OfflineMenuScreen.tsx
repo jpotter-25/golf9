@@ -100,7 +100,7 @@ export default function OfflineMenuScreen({ navigation }: Props) {
         <PremiumPanel style={styles.offlineNote}>
           <Gamepad2 size={20} color={ui.palette.gold} strokeWidth={2.6} />
           <Text style={styles.offlineNoteText}>
-            Local games run entirely on this device. Earned progression is confirmed by Golf 9 once you reconnect.
+            Local games run entirely on this device. Earned progression is confirmed by Nine Below once you reconnect.
           </Text>
         </PremiumPanel>
       </ScreenShell>

@@ -1,4 +1,4 @@
-# Golf 9 Internal Testing Checklist
+# Nine Below Internal Testing Checklist
 
 ## Latest Google Play internal build
 - Release date: `2026-07-12`
@@ -25,6 +25,6 @@
 - iOS, Android, and web smoke tests if web distribution remains enabled.
 
 ## Store metadata requirements
-- App name: Golf 9.
+- App name: Nine Below.
 - Short description: Multiplayer 9-card Golf card game.
 - Privacy policy URL, support URL, screenshots, age rating, and data-safety answers must be completed before public release.

@@ -1,6 +1,6 @@
-# Golf 9 Multiplayer Production Hardening Plan
+# Nine Below Multiplayer Production Hardening Plan
 
-This document tracks the phased effort to move Golf 9 from the merged authenticated multiplayer foundation to a testable production multiplayer app.
+This document tracks the phased effort to move Nine Below from the merged authenticated multiplayer foundation to a testable production multiplayer app.
 
 ## Status legend
 - ✅ Complete in current branch

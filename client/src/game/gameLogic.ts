@@ -1,5 +1,5 @@
 // client/src/game/gameLogic.ts
-// Purpose: Local-play wrappers around the shared authoritative Golf 9 rules.
+// Purpose: Local-play wrappers around the shared authoritative Nine Below rules.
 
 import type { Card, GameState, Grid, PlayerIdentity } from './types';
 import {

@@ -69,6 +69,22 @@ function emitAck(socket, event, payload) {
   return new Promise(resolve => socket.emit(event, payload, resolve));
 }
 
+function waitForSocketEvent(socket, event, predicate, timeoutMs = 2000) {
+  return new Promise((resolve, reject) => {
+    const handler = payload => {
+      if (!predicate(payload)) return;
+      clearTimeout(timeout);
+      socket.off(event, handler);
+      resolve(payload);
+    };
+    const timeout = setTimeout(() => {
+      socket.off(event, handler);
+      reject(new Error(`Timed out waiting for ${event}`));
+    }, timeoutMs);
+    socket.on(event, handler);
+  });
+}
+
 async function signup(baseUrl, displayName, inviteCode = '') {
   const playerName = testDisplayName(displayName);
   return json(await fetch(`${baseUrl}/auth/signup`, {
@@ -196,7 +212,7 @@ test('public policy pages are available for store and social auth review', async
       assert.equal(res.status, 200);
       assert.match(res.headers.get('content-type'), /text\/html/);
       assert.match(html, new RegExp(`<h1>${title}</h1>`));
-      assert.match(html, /developer@joinup\.us/);
+      assert.match(html, /app-developer@potterwell\.com/);
     }
   });
 });
@@ -204,15 +220,15 @@ test('public policy pages are available for store and social auth review', async
 test('admin config is canonical and malformed nested admin URLs redirect', async () => {
   await withServer(async (baseUrl) => {
     const config = await json(await fetch(`${baseUrl}/auth/config`));
-    assert.equal(config.apiUrl, 'https://games.joinup.us');
-    assert.equal(config.adminUrl, 'https://games.joinup.us/admin');
+    assert.equal(config.apiUrl, 'https://ninebelow.potterwell.com');
+    assert.equal(config.adminUrl, 'https://ninebelow.potterwell.com/admin');
 
-    const nested = await fetch(`${baseUrl}/admin/https://games.joinup.us/admin/`, { redirect: 'manual' });
+    const nested = await fetch(`${baseUrl}/admin/https://ninebelow.potterwell.com/admin/`, { redirect: 'manual' });
     assert.equal(nested.status, 302);
     assert.equal(nested.headers.get('location'), '/admin/');
   }, {
-    PUBLIC_API_URL: 'https://games.joinup.us',
-    ADMIN_PUBLIC_URL: 'https://games.joinup.us/admin/https://games.joinup.us/admin/',
+    PUBLIC_API_URL: 'https://ninebelow.potterwell.com',
+    ADMIN_PUBLIC_URL: 'https://ninebelow.potterwell.com/admin/https://ninebelow.potterwell.com/admin/',
   });
 });
 
@@ -320,12 +336,12 @@ test('admin notifications can configure templates and send custom pushes', async
           custom: { enabled: true },
           types: {
             ...overview.config.types,
-            turn: { enabled: true, title: 'Golf 9 turn', body: 'Room {roomCode} needs you.' },
+            turn: { enabled: true, title: 'Nine Below turn', body: 'Room {roomCode} needs you.' },
           },
         },
       }),
     }));
-    assert.equal(saved.config.types.turn.title, 'Golf 9 turn');
+    assert.equal(saved.config.types.turn.title, 'Nine Below turn');
 
     const sent = await json(await fetch(`${baseUrl}/admin/api/notifications/send`, {
       method: 'POST',
@@ -1764,7 +1780,7 @@ test('Live Ops drains waiting lobbies, blocks old clients, and preserves active 
           featureKey: 'global',
           entry: {
             state: 'maintenance',
-            title: 'Golf 9 maintenance',
+            title: 'Nine Below maintenance',
             message: 'Online services will return soon.',
           },
           reason: 'Verify essential global-maintenance routes.',
@@ -2239,10 +2255,14 @@ test('clubs create, search, request, approve, chat, and ignore local matches', a
       assert.equal(ownerJoin.club.onlineMemberCount >= 2, true);
       assert.equal(ownerJoin.club.members.find(item => item.userId === owner.user.userId).isOnline, true);
 
-      const presenceUpdate = once(socketOwner, 'club:presence');
+      const presenceUpdate = waitForSocketEvent(
+        socketOwner,
+        'club:presence',
+        payload => !payload.onlineUserIds.includes(member.user.userId),
+      );
       const backgrounded = await emitAck(socketMember, 'club:presence:state', { foreground: false });
       assert.equal(backgrounded.ok, true);
-      const presence = (await presenceUpdate)[0];
+      const presence = await presenceUpdate;
       assert.equal(presence.onlineUserIds.includes(member.user.userId), false);
       await emitAck(socketMember, 'club:presence:state', { foreground: true });
 

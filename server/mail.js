@@ -51,7 +51,7 @@ export function normalizeMailEntries(entries = []) {
         batchId: cleanText(entry.batchId || mailId, 80),
         recipientUserId,
         recipientDisplayName: cleanText(entry.recipientDisplayName || '', 48),
-        title: cleanText(entry.title, MAIL_TITLE_MAX_LENGTH) || 'Golf 9 Notice',
+        title: cleanText(entry.title, MAIL_TITLE_MAX_LENGTH) || 'Nine Below Notice',
         body: cleanBody(entry.body),
         attachments: (Array.isArray(entry.attachments) ? entry.attachments : [])
           .map(normalizeAttachment)

@@ -25,7 +25,7 @@ test('system mail delivers notices and summarizes unread claimable rewards', () 
   const timestamp = Date.UTC(2026, 0, 1, 12);
   const result = createSystemMail(entries, [player()], { adminId: 'a1', displayName: 'Admin' }, {
     title: 'Welcome gift',
-    message: 'Thanks for helping test Golf 9.',
+    message: 'Thanks for helping test Nine Below.',
     coins: 125,
   }, [], timestamp);
 

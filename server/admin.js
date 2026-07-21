@@ -753,10 +753,10 @@ export function activeBansFor(store, user, deviceHash = null) {
 }
 
 export function banErrorFor(store, user, deviceHash = null) {
-  if (isUserArchived(user)) return 'This account has been archived by Golf 9 support.';
+  if (isUserArchived(user)) return 'This account has been archived by Nine Below support.';
   const bans = activeBansFor(store, user, deviceHash);
   const hardBan = bans.find(ban => ban.type === 'account_ban' || ban.type === 'device_ban');
-  if (hardBan) return 'This account or device cannot access Golf 9.';
+  if (hardBan) return 'This account or device cannot access Nine Below.';
   const suspension = bans.find(ban => ban.type === 'suspension');
   if (suspension) return 'This account is temporarily suspended.';
   return null;

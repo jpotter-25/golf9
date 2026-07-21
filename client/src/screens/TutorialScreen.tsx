@@ -1,5 +1,5 @@
 // client/src/screens/TutorialScreen.tsx
-// Purpose: A scripted, reward-free practice table that teaches the Golf 9 core loop.
+// Purpose: A scripted, reward-free practice table that teaches the Nine Below core loop.
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -29,7 +29,7 @@ const LAST_LESSON_STEP = 10;
 
 const LESSONS: TutorialLesson[] = [
   {
-    title: 'Learn Golf 9 by playing',
+    title: 'Learn Nine Below by playing',
     body: 'Practice one scripted round at your own pace. Nothing here changes your coins, XP, statistics, or match history.',
     prompt: 'Start when you are ready.',
   },
