@@ -1,14 +1,14 @@
 # Nine Below Internal Testing Checklist
 
 ## Latest Google Play internal build
-- Release date: `2026-07-12`
+- Release date: `2026-07-21`
 - Package: `us.joinup.golf_9`
 - App version: `0.1.0`
-- Android versionCode: `38`
+- Android versionCode: `44`
 - EAS profile: `playtest`
-- EAS build ID: `a6c6a5e0-8fa8-4780-957c-2951e8d851c4`
-- Source commit: `a4c325aea019eecb3ec40455781755c67039cbba`
-- AAB: `https://expo.dev/artifacts/eas/9_ydfUKa7usFhVzpqhxE2fjV100wQ_30jLjrGfZu1uM.aab`
+- EAS build ID: `331fc5dc-1c4e-4a18-8000-654f6cabe310`
+- Source commit: `616324cf19087aacc708feb3f68267cb1a7c9fed`
+- AAB: `https://expo.dev/artifacts/eas/aQvGk08ZPWJhLF_NISZ9YA5r5xESLumHfYI0uvOh5SU.aab`
 
 ## Build channels
 - iOS TestFlight: `eas build --platform ios --profile staging`
