@@ -19,6 +19,14 @@
 - EAS build ID: `edcff206-d436-4fcb-ae0e-c48f19df8e91`
 - Source commit: `a0513328ef71eba23eea6cf585027d574a14ad76`
 - AAB: `https://expo.dev/artifacts/eas/2MbOQZ2zcADXX2UA4N4-EKJUIghF7lOx612ZM7YHrHI.aab`
+- Play app ID: `4976320176871747708`
+- Internal track ID: `4701595510712306572`
+- Release: `Nine Below internal testing v45`
+- Release status: `Available to internal testers`
+- Tester audience: `Family/Friends` (`9` users)
+- Tester opt-in URL: `https://play.google.com/apps/internaltest/4701595510712306572`
+- Play app-signing SHA-1: `10:3E:57:F5:70:9D:AE:08:E4:B6:8F:B4:BC:9E:25:49:E4:A8:32:7E`
+- Upload certificate SHA-1: `D7:10:CA:08:96:BA:2B:8E:25:5F:D5:DD:4B:ED:74:29:0B:CD:6D:D9`
 - Play Console requirement: publish as a new app because Google Play package names are immutable.
 - Keep the previous `us.joinup.golf_9` listing available as a rollback path; do not upload new-package bundles to it.
 
