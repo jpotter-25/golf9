@@ -6,7 +6,6 @@ This is the repeatable path for letting invited testers play Nine Below from any
 
 - Pre-alpha API and sockets: `https://ninebelow.potterwell.com`
 - Pre-alpha admin console: `https://ninebelow.potterwell.com/admin`
-- Legacy `games.joinup.us` may remain attached temporarily as a redirect-compatible migration hostname.
 
 The staging mobile build, admin console, Socket.IO server, accounts, coins, clubs, shop, ranked, wagers, and results all need to point at the same hosted backend and the same database.
 
