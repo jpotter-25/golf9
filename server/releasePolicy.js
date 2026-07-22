@@ -11,7 +11,7 @@ const MESSAGE_LIMIT = 280;
 const VERSION_LIMIT = 40;
 const URL_LIMIT = 500;
 
-const ANDROID_STORE_URL = 'https://play.google.com/store/apps/details?id=us.joinup.golf_9';
+const ANDROID_STORE_URL = 'https://play.google.com/store/apps/details?id=com.potterwell.ninebelow';
 
 function cleanText(value, maxLength) {
   return String(value || '').trim().replace(/\s+/g, ' ').slice(0, maxLength);
@@ -46,7 +46,7 @@ function defaultEntry(platform, channel) {
     key: releasePolicyKey(platform, channel),
     platform,
     channel,
-    latestBuild: isPlaytestAndroid ? 43 : 0,
+    latestBuild: isPlaytestAndroid ? 45 : 0,
     latestVersion: isPlaytestAndroid ? '0.1.0' : '',
     minimumBuild: 0,
     storeUrl: platform === 'android' ? ANDROID_STORE_URL : '',

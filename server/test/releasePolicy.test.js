@@ -11,7 +11,7 @@ import {
   updateRequiredPayload,
 } from '../releasePolicy.js';
 
-const PLAY_URL = 'https://play.google.com/store/apps/details?id=us.joinup.golf_9';
+const PLAY_URL = 'https://play.google.com/store/apps/details?id=com.potterwell.ninebelow';
 
 function androidEntry(overrides = {}) {
   return {
@@ -29,11 +29,11 @@ function androidEntry(overrides = {}) {
   };
 }
 
-test('release migration bootstraps build 43 without prompting or locking existing clients', () => {
+test('release migration bootstraps the Nine Below package build without prompting or locking existing clients', () => {
   const store = normalizeReleasePolicyStore();
   const entry = store.entries['playtest.android'];
 
-  assert.equal(entry.latestBuild, 43);
+  assert.equal(entry.latestBuild, 45);
   assert.equal(entry.minimumBuild, 0);
   assert.equal(entry.storeReady, false);
   assert.equal(resolveReleasePolicy(store, { platform: 'android', channel: 'playtest', build: 42 }).status, 'current');

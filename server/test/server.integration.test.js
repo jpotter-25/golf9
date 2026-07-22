@@ -1828,7 +1828,7 @@ test('release policy blocks obsolete builds while preserving update and recovery
           latestBuild: 43,
           latestVersion: '0.1.0',
           minimumBuild: 43,
-          storeUrl: 'https://play.google.com/store/apps/details?id=us.joinup.golf_9',
+          storeUrl: 'https://play.google.com/store/apps/details?id=com.potterwell.ninebelow',
           storeReady: true,
           enforcement: 'after_match',
           requiredTitle: 'Testing update required',

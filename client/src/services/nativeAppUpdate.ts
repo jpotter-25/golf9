@@ -3,7 +3,7 @@
 import * as ExpoInAppUpdates from 'expo-in-app-updates';
 import { Linking, Platform } from 'react-native';
 
-const ANDROID_PACKAGE = 'us.joinup.golf_9';
+const ANDROID_PACKAGE = 'com.potterwell.ninebelow';
 
 async function openStore(storeUrl: string) {
   if (Platform.OS === 'android') {

@@ -64,8 +64,8 @@ module.exports = {
       buildNumber: '2',
     },
     android: {
-      package: 'us.joinup.golf_9',
-      versionCode: 44,
+      package: 'com.potterwell.ninebelow',
+      versionCode: 45,
       permissions: [],
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
