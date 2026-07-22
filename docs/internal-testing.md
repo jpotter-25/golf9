@@ -10,10 +10,15 @@
 - Source commit: `616324cf19087aacc708feb3f68267cb1a7c9fed`
 - AAB: `https://expo.dev/artifacts/eas/aQvGk08ZPWJhLF_NISZ9YA5r5xESLumHfYI0uvOh5SU.aab`
 
-## Nine Below package migration
-- New package: `com.potterwell.ninebelow`
+## Latest Nine Below Google Play build
+- Release date: `2026-07-21`
+- Package: `com.potterwell.ninebelow`
 - App version: `0.1.0`
-- Next Android versionCode: `45`
+- Android versionCode: `45`
+- EAS profile: `playtest`
+- EAS build ID: `edcff206-d436-4fcb-ae0e-c48f19df8e91`
+- Source commit: `a0513328ef71eba23eea6cf585027d574a14ad76`
+- AAB: `https://expo.dev/artifacts/eas/2MbOQZ2zcADXX2UA4N4-EKJUIghF7lOx612ZM7YHrHI.aab`
 - Play Console requirement: publish as a new app because Google Play package names are immutable.
 - Keep the previous `us.joinup.golf_9` listing available as a rollback path; do not upload new-package bundles to it.
 
