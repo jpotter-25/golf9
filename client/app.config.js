@@ -65,9 +65,15 @@ module.exports = {
     },
     android: {
       package: 'com.potterwell.ninebelow',
-      versionCode: 46,
+      versionCode: 47,
       permissions: [],
-      blockedPermissions: ['com.google.android.gms.permission.AD_ID'],
+      blockedPermissions: [
+        'com.google.android.gms.permission.AD_ID',
+        'android.permission.ACCESS_ADSERVICES_AD_ID',
+        'android.permission.ACCESS_ADSERVICES_ATTRIBUTION',
+        'android.permission.ACCESS_ADSERVICES_CUSTOM_AUDIENCE',
+        'android.permission.ACCESS_ADSERVICES_TOPICS',
+      ],
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#080F2A',
