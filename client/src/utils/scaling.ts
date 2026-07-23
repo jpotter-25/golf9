@@ -8,6 +8,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 export type Metrics = { cardW: number; cardH: number; gap: number };
 export type BoardMetrics = { me: Metrics; opp: Metrics };
 
+export const APP_CONTENT_MAX_WIDTH = 720;
+export const GAME_CONTENT_MAX_WIDTH = 760;
+
+export function responsiveHorizontalPadding(width: number): number {
+  if (width < 360) return 12;
+  if (width >= 600) return 24;
+  return 18;
+}
+
 const CARD_ASPECT = 1.45; // height / width
 const SIDE_PAD = 16;
 
@@ -97,5 +106,5 @@ export function computeMetrics(
 export function useBoardMetrics(playerCount: number): BoardMetrics {
   const { width, height } = useWindowDimensions();
   const { top, bottom } = useSafeAreaInsets();
-  return computeMetrics(playerCount, width, height, top, bottom);
+  return computeMetrics(playerCount, Math.min(width, GAME_CONTENT_MAX_WIDTH), height, top, bottom);
 }

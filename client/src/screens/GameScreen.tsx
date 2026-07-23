@@ -24,7 +24,7 @@ import Piles from '../components/Piles';
 import CardView from '../components/Card';
 import { AvatarCluster, rankEmblemForLeague } from '../components/AvatarDecorations';
 import { PlayerAvatar } from '../components/PlayerAvatar';
-import { useBoardMetrics } from '../utils/scaling';
+import { GAME_CONTENT_MAX_WIDTH, useBoardMetrics } from '../utils/scaling';
 import { useAuth } from '../context/AuthContext';
 import { useAvailability } from '../context/AvailabilityContext';
 import { useClubRealtime } from '../context/ClubRealtimeContext';
@@ -208,6 +208,7 @@ export default function GameScreen({ route, navigation }: Props) {
 
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
+  const gameViewportWidth = Math.min(winW, GAME_CONTENT_MAX_WIDTH);
   const localPlayerIdentities = useMemo(
     () => buildLocalPlayerIdentities({ players, mode, user, localPlayerNames, aiDifficulty }),
     [aiDifficulty, localPlayerNames, mode, players, user]
@@ -723,7 +724,7 @@ export default function GameScreen({ route, navigation }: Props) {
     const oppGridWidth = metrics.opp.cardW * 3 + metrics.opp.gap * 2;
     const baseOppPanelWidth = Math.ceil(oppGridWidth + oppPadding * 2 + 2);
     const opponentSlots = Math.max(1, oppCount);
-    const availableOppPanelWidth = Math.floor((winW - sidePad * 2 - gap * Math.max(0, opponentSlots - 1)) / opponentSlots);
+    const availableOppPanelWidth = Math.floor((gameViewportWidth - sidePad * 2 - gap * Math.max(0, opponentSlots - 1)) / opponentSlots);
     const pileMetrics = {
       cardW: Math.max(metrics.opp.cardW + 2, Math.round(metrics.opp.cardW * 1.12)),
       cardH: Math.max(metrics.opp.cardH + 3, Math.round(metrics.opp.cardH * 1.12)),
@@ -736,9 +737,9 @@ export default function GameScreen({ route, navigation }: Props) {
       oppPadding,
       pileMetrics,
       oppPanelWidth: oppCount > 0 ? Math.min(baseOppPanelWidth, availableOppPanelWidth) : baseOppPanelWidth,
-      centerSlotWidth: Math.min(winW - sidePad * 2, Math.max(128, pileClusterWidth)),
+      centerSlotWidth: Math.min(gameViewportWidth - sidePad * 2, Math.max(128, pileClusterWidth)),
     };
-  }, [metrics.opp.cardH, metrics.opp.cardW, metrics.opp.gap, oppCount, winW]);
+  }, [gameViewportWidth, metrics.opp.cardH, metrics.opp.cardW, metrics.opp.gap, oppCount]);
 
   // ===== Solo vs AI flags =====
   const isOnlineTurn = isOnline ? state.players[state.currentPlayerIndex]?.userId === user?.userId : true;
@@ -1872,7 +1873,7 @@ export default function GameScreen({ route, navigation }: Props) {
   return (
     <LinearGradient colors={[tableTheme.backgroundColor, ui.palette.ink, ui.surface.base]} style={styles.container}>
       {/* HUD Layer */}
-      <View style={[styles.header, {
+      <View style={[styles.header, styles.gameFrame, {
         paddingTop: Math.max(14, insets.top + 8),
         backgroundColor: tableTheme.headerColor,
         borderBottomColor: tableTheme.borderColor,
@@ -1946,7 +1947,7 @@ export default function GameScreen({ route, navigation }: Props) {
       </View>
 
       {/* Table/Base Layer */}
-      <View style={[styles.tableZone, { paddingHorizontal: tableLayout.sidePad, gap: tableLayout.gap }]}>
+      <View style={[styles.tableZone, styles.gameFrame, { paddingHorizontal: tableLayout.sidePad, gap: tableLayout.gap }]}>
         {opponents.length ? (
           <View style={[styles.tableOpponentRow, { gap: tableLayout.gap }]}>
             {opponents.map(opponent => (
@@ -1981,6 +1982,7 @@ export default function GameScreen({ route, navigation }: Props) {
       <View
         style={[
           styles.localPanel,
+          styles.gameFrame,
           bottomIsActive && [
             styles.localPanelActive,
             { borderTopColor: tableTheme.accentColor, backgroundColor: tableTheme.activePanelColor },
@@ -2069,7 +2071,7 @@ export default function GameScreen({ route, navigation }: Props) {
       </View>
 
       {/* Action Layer: decision dock */}
-      <View style={[styles.footer, {
+      <View style={[styles.footer, styles.gameFrame, {
         paddingBottom: Math.max(8, insets.bottom + 6),
         backgroundColor: tableTheme.headerColor,
         borderTopColor: tableTheme.borderColor,
@@ -2831,6 +2833,11 @@ function revealHiddenForDisplay(state: GameState): GameState {
 }
 
 const styles = StyleSheet.create({
+  gameFrame: {
+    width: '100%',
+    maxWidth: GAME_CONTENT_MAX_WIDTH,
+    alignSelf: 'center',
+  },
   container: { flex: 1, backgroundColor: '#0B1023' },
 
   header: {

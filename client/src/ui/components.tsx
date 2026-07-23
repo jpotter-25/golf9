@@ -8,6 +8,7 @@ import {
   Switch,
   Text,
   TextStyle,
+  useWindowDimensions,
   View,
   ViewStyle,
 } from 'react-native';
@@ -22,6 +23,7 @@ import { useClubRealtime } from '../context/ClubRealtimeContext';
 import { getGameplayPreferences, setGameplayPreferences, subscribeGameplayPreferences } from '../services/preferences';
 import { ProgressAvatar } from '../components/AvatarDecorations';
 import { ClubEmblem } from '../components/ClubEmblem';
+import { APP_CONTENT_MAX_WIDTH, responsiveHorizontalPadding } from '../utils/scaling';
 import { gradients, ui } from './theme';
 
 type ShellProps = {
@@ -34,12 +36,17 @@ type ShellProps = {
 
 export function ScreenShell({ children, scroll = false, centered = false, showTopBar = true, contentStyle }: ShellProps) {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const { token } = useAuth();
   const topBarVisible = showTopBar && !!token;
   const content = [
     styles.shellContent,
     centered && styles.shellCentered,
-    { paddingTop: topBarVisible ? 14 : Math.max(24, insets.top + 18), paddingBottom: Math.max(72, insets.bottom + 56) },
+    {
+      paddingHorizontal: responsiveHorizontalPadding(width),
+      paddingTop: topBarVisible ? 14 : Math.max(24, insets.top + 18),
+      paddingBottom: Math.max(72, insets.bottom + 56),
+    },
     contentStyle,
   ];
 
@@ -88,6 +95,7 @@ export function ScreenHeader({
 
 function GlobalTopBar() {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const route = useRoute();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const { user, signOut } = useAuth();
@@ -112,7 +120,10 @@ function GlobalTopBar() {
   };
 
   return (
-    <View style={[styles.topBarWrap, { paddingTop: Math.max(10, insets.top + 8) }]}>
+    <View style={[styles.topBarWrap, {
+      paddingHorizontal: Math.max(6, responsiveHorizontalPadding(width) - 12),
+      paddingTop: Math.max(10, insets.top + 8),
+    }]}>
       <View style={styles.topBar}>
         {!isLobby ? (
           <Pressable accessibilityRole="button" accessibilityLabel="Go home" style={[styles.topIconButton, styles.topHomeButton]} onPress={() => navigation.navigate('Lobby')}>
@@ -367,10 +378,17 @@ const styles = StyleSheet.create({
   featureLocked: { opacity: 0.55 },
   fill: { flex: 1 },
   shell: { flex: 1 },
-  shellContent: { flexGrow: 1, paddingHorizontal: 18 },
+  shellContent: {
+    flexGrow: 1,
+    width: '100%',
+    maxWidth: APP_CONTENT_MAX_WIDTH,
+    alignSelf: 'center',
+  },
   shellCentered: { justifyContent: 'center' },
   topBarWrap: {
-    paddingHorizontal: 6,
+    width: '100%',
+    maxWidth: APP_CONTENT_MAX_WIDTH,
+    alignSelf: 'center',
     paddingBottom: 6,
   },
   topBar: {
