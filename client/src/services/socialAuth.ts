@@ -42,7 +42,7 @@ export async function getGoogleCredential(): Promise<SocialAuthPayload> {
 
 export async function getFacebookCredential(): Promise<SocialAuthPayload> {
   configureFacebook();
-  const result = await LoginManager.logInWithPermissions(['public_profile', 'email']);
+  const result = await LoginManager.logInWithPermissions(['public_profile']);
   if (result.isCancelled) throw new Error('Facebook sign-in was cancelled.');
   const data = await AccessToken.getCurrentAccessToken();
   if (!data?.accessToken) throw new Error('Facebook did not return a sign-in token.');
