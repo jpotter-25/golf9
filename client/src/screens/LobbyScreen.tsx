@@ -183,7 +183,7 @@ const styles = StyleSheet.create({
   playStack: { gap: 10 },
   destinationCard: { minHeight: 100, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, overflow: 'hidden' },
   destinationAccent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4 },
-  destinationIcon: { width: 52, height: 52, borderRadius: 8, borderWidth: 1, backgroundColor: 'rgba(7, 10, 24, 0.4)', alignItems: 'center', justifyContent: 'center' },
+  destinationIcon: { width: 52, height: 52, borderRadius: 8, borderWidth: 1, backgroundColor: 'rgba(36, 54, 85, 0.62)', alignItems: 'center', justifyContent: 'center' },
   destinationCopy: { flex: 1, minWidth: 0 },
   destinationTitleRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
   destinationTitle: { color: ui.text.primary, fontSize: 19, fontWeight: '900' },

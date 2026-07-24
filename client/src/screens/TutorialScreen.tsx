@@ -386,7 +386,7 @@ const styles = StyleSheet.create({
   coachBody: { color: ui.text.secondary, fontSize: 14, fontWeight: '700', lineHeight: 20, marginTop: 12 },
   coachPrompt: { color: ui.palette.emerald, fontSize: 13, fontWeight: '900', lineHeight: 18, marginVertical: 10 },
   nudge: { color: ui.palette.gold, fontSize: 12, fontWeight: '900', lineHeight: 17, marginBottom: 10 },
-  table: { borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: 'rgba(7, 11, 29, 0.82)', padding: 12, gap: 12 },
+  table: { borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: 'rgba(32, 52, 79, 0.9)', padding: 12, gap: 12 },
   opponentArea: { alignSelf: 'center', minWidth: 190, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.panel, padding: 10 },
   playerArea: { borderTopWidth: 2, borderTopColor: ui.palette.sky, paddingTop: 12 },
   playerLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 6 },

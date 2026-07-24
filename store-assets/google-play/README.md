@@ -1,6 +1,8 @@
 # Nine Below Google Play Listing
 
 Store-ready assets for package `com.potterwell.ninebelow`.
+This set matches the balanced "midnight lounge" visual refresh introduced for
+Android `versionCode` 49.
 
 - `app-icon-512.png`: 512 x 512 Google Play icon.
 - `feature-graphic-1024x500.png`: 1024 x 500 feature graphic.
@@ -11,6 +13,7 @@ Store-ready assets for package `com.potterwell.ninebelow`.
 
 Store screenshots must use isolated demo data only. Do not publish real player names,
 usernames, email addresses, club names, club tags, or production account history.
+Do not reuse screenshots from earlier dark-theme builds after this visual refresh.
 
 ## Listing Copy
 

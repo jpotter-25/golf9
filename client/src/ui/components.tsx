@@ -13,7 +13,7 @@ import {
   ViewStyle,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Bell, BookOpen, Coins, GraduationCap, Home, LogOut, Mail, Music2, Settings, Users, Volume2, X, Zap } from 'lucide-react-native';
+import { Bell, BookOpen, ChevronRight, Coins, GraduationCap, Home, LogOut, Mail, Music2, Settings, Users, Volume2, X, Zap } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { useNavigation, useRoute, type NavigationProp, type ParamListBase } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -227,7 +227,7 @@ function SettingsToggle({ Icon, label, value, onValueChange }: { Icon: LucideIco
         value={value}
         onValueChange={onValueChange}
         thumbColor={value ? ui.palette.emerald : ui.text.muted}
-        trackColor={{ false: ui.border.strong, true: 'rgba(82, 229, 167, 0.35)' }}
+        trackColor={{ false: ui.border.strong, true: 'rgba(103, 224, 176, 0.42)' }}
       />
     </View>
   );
@@ -238,7 +238,7 @@ function SettingsAction({ Icon, label, onPress, danger = false }: { Icon: Lucide
     <Pressable style={styles.settingsRow} onPress={onPress}>
       <View style={styles.settingsRowIcon}><Icon size={22} color={danger ? ui.feedback.danger : ui.palette.sky} strokeWidth={2.8} /></View>
       <Text style={[styles.settingsRowText, danger && styles.settingsDanger]} numberOfLines={1}>{label}</Text>
-      <Text style={styles.settingsChevron}>›</Text>
+      <ChevronRight size={21} color={ui.text.muted} strokeWidth={2.8} />
     </Pressable>
   );
 }
@@ -396,7 +396,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: ui.border.soft,
-    backgroundColor: 'rgba(10, 15, 37, 0.88)',
+    backgroundColor: 'rgba(36, 54, 85, 0.94)',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
@@ -420,7 +420,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: ui.border.gold,
-    backgroundColor: 'rgba(255, 204, 102, 0.1)',
+    backgroundColor: 'rgba(244, 201, 93, 0.14)',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -473,7 +473,7 @@ const styles = StyleSheet.create({
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.62)',
+    backgroundColor: 'rgba(20, 32, 54, 0.72)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
@@ -505,7 +505,7 @@ const styles = StyleSheet.create({
     minHeight: 72,
     borderBottomWidth: 1,
     borderBottomColor: ui.border.soft,
-    backgroundColor: 'rgba(11, 16, 35, 0.54)',
+    backgroundColor: 'rgba(52, 81, 118, 0.54)',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -522,7 +522,7 @@ const styles = StyleSheet.create({
   settingsRow: {
     minHeight: 54,
     borderRadius: 8,
-    backgroundColor: 'rgba(11, 16, 35, 0.7)',
+    backgroundColor: 'rgba(26, 41, 67, 0.72)',
     borderWidth: 1,
     borderColor: ui.border.soft,
     flexDirection: 'row',
@@ -542,7 +542,6 @@ const styles = StyleSheet.create({
   },
   settingsRowText: { flex: 1, color: ui.text.primary, fontSize: 15, fontWeight: '900' },
   settingsDanger: { color: ui.feedback.danger },
-  settingsChevron: { color: ui.text.muted, fontSize: 27, fontWeight: '900' },
   header: {
     minHeight: 72,
     flexDirection: 'row',
@@ -571,7 +570,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: ui.border.gold,
-    backgroundColor: 'rgba(255, 204, 102, 0.12)',
+    backgroundColor: 'rgba(244, 201, 93, 0.14)',
     alignItems: 'center',
     justifyContent: 'center',
   },

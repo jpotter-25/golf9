@@ -28,7 +28,7 @@ async function ensureAndroidChannel() {
     name: 'Game alerts',
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#52E5A7',
+    lightColor: '#67E0B0',
   });
 }
 

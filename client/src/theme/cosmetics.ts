@@ -44,32 +44,32 @@ export type TableThemeVisual = {
 
 const CARD_BACKS: Record<string, CardBackVisual> = {
   'classic-card-back': {
-    backgroundColor: '#2A2F57',
-    borderColor: '#E8ECF1',
-    textColor: '#E8ECF1',
+    backgroundColor: '#435C7D',
+    borderColor: '#F7FAFC',
+    textColor: '#F7FAFC',
     mark: '?',
   },
   'gold-trim-card-back': {
     backgroundColor: '#251F10',
-    borderColor: '#FFCC66',
-    textColor: '#FFCC66',
+    borderColor: '#F4C95D',
+    textColor: '#F4C95D',
     mark: 'G9',
   },
   'emerald-card-back': {
-    backgroundColor: '#123B32',
-    borderColor: '#52E5A7',
+    backgroundColor: '#205E56',
+    borderColor: '#67E0B0',
     textColor: '#CFFBE8',
     mark: '9',
   },
   'neon-card-back': {
     backgroundColor: '#111A3A',
-    borderColor: '#4DA3FF',
+    borderColor: '#67B7FF',
     textColor: '#BFD9FF',
     mark: 'N',
   },
   's1-gold-card-back': {
     backgroundColor: '#2A2111',
-    borderColor: '#FFCC66',
+    borderColor: '#F4C95D',
     textColor: '#FFE6A3',
     mark: 'S1',
   },
@@ -80,14 +80,14 @@ const CARD_BACKS: Record<string, CardBackVisual> = {
     mark: 'M',
   },
   'club-crest-card-back': {
-    backgroundColor: '#102448',
-    borderColor: '#52E5A7',
-    textColor: '#E8ECF1',
+    backgroundColor: '#294A68',
+    borderColor: '#67E0B0',
+    textColor: '#F7FAFC',
     mark: 'C',
   },
   'club-champion-card-back': {
     backgroundColor: '#21162C',
-    borderColor: '#FFCC66',
+    borderColor: '#F4C95D',
     textColor: '#FFF0C2',
     mark: 'CC',
   },
@@ -95,15 +95,15 @@ const CARD_BACKS: Record<string, CardBackVisual> = {
 
 const AVATAR_FRAMES: Record<string, AvatarFrameVisual> = {
   'rookie-avatar-frame': {
-    borderColor: '#52E5A7',
-    backgroundColor: '#123B32',
+    borderColor: '#67E0B0',
+    backgroundColor: '#205E56',
   },
   'emerald-avatar-frame': {
     borderColor: '#4DE0A0',
     backgroundColor: '#0D3A35',
   },
   'gold-avatar-frame': {
-    borderColor: '#FFCC66',
+    borderColor: '#F4C95D',
     backgroundColor: '#2B2515',
   },
   's1-bronze-frame': {
@@ -112,29 +112,29 @@ const AVATAR_FRAMES: Record<string, AvatarFrameVisual> = {
   },
   's1-diamond-frame': {
     borderColor: '#9BE7FF',
-    backgroundColor: '#102838',
+    backgroundColor: '#214D57',
   },
   'club-emerald-frame': {
-    borderColor: '#52E5A7',
-    backgroundColor: '#102448',
+    borderColor: '#67E0B0',
+    backgroundColor: '#294A68',
   },
 };
 
 const AVATAR_ICONS: Record<string, AvatarIconVisual> = {
   'classic-avatar-icon': {
     icon: 'user',
-    color: '#E8ECF1',
-    backgroundColor: '#123B32',
+    color: '#F7FAFC',
+    backgroundColor: '#205E56',
   },
   'spark-avatar-icon': {
     icon: 'sparkles',
-    color: '#FFCC66',
+    color: '#F4C95D',
     backgroundColor: '#182244',
   },
   'shield-avatar-icon': {
     icon: 'shield',
     color: '#9BE7FF',
-    backgroundColor: '#102838',
+    backgroundColor: '#214D57',
   },
   'trophy-avatar-icon': {
     icon: 'trophy',
@@ -144,7 +144,7 @@ const AVATAR_ICONS: Record<string, AvatarIconVisual> = {
   's1-diamond-avatar-icon': {
     icon: 'sparkles',
     color: '#BDEBFF',
-    backgroundColor: '#102838',
+    backgroundColor: '#214D57',
   },
 };
 
@@ -152,7 +152,7 @@ const AVATAR_ACCESSORIES: Record<string, AvatarAccessoryVisual> = {
   'no-avatar-accessory': {
     icon: 'none',
     label: '',
-    color: '#9BA3C7',
+    color: '#A9B9CD',
     backgroundColor: 'transparent',
     borderColor: 'transparent',
   },
@@ -160,22 +160,22 @@ const AVATAR_ACCESSORIES: Record<string, AvatarAccessoryVisual> = {
     icon: 'watch',
     label: 'S1',
     color: '#BDEBFF',
-    backgroundColor: '#102838',
+    backgroundColor: '#214D57',
     borderColor: '#9BE7FF',
   },
   'emerald-gem-accessory': {
     icon: 'gem',
     label: 'G',
     color: '#CFFBE8',
-    backgroundColor: '#123B32',
-    borderColor: '#52E5A7',
+    backgroundColor: '#205E56',
+    borderColor: '#67E0B0',
   },
   'rocket-charm-accessory': {
     icon: 'rocket',
     label: 'R',
     color: '#FFE6A3',
     backgroundColor: '#2B2515',
-    borderColor: '#FFCC66',
+    borderColor: '#F4C95D',
   },
   'legend-crown-accessory': {
     icon: 'crown',
@@ -188,44 +188,44 @@ const AVATAR_ACCESSORIES: Record<string, AvatarAccessoryVisual> = {
 
 const TABLE_THEMES: Record<string, TableThemeVisual> = {
   'classic-table-theme': {
-    backgroundColor: '#0B1023',
-    headerColor: '#101633',
-    panelColor: '#121737',
-    activePanelColor: '#0F1530',
-    borderColor: '#2A2F57',
-    accentColor: '#4DA3FF',
+    backgroundColor: '#1A2943',
+    headerColor: '#243655',
+    panelColor: '#243655',
+    activePanelColor: '#263A5C',
+    borderColor: '#435C7D',
+    accentColor: '#67B7FF',
   },
   'emerald-felt-table-theme': {
-    backgroundColor: '#071914',
-    headerColor: '#0D2A24',
-    panelColor: '#123B32',
-    activePanelColor: '#0F4637',
-    borderColor: '#235A4B',
-    accentColor: '#52E5A7',
+    backgroundColor: '#174A45',
+    headerColor: '#205E56',
+    panelColor: '#205E56',
+    activePanelColor: '#347F72',
+    borderColor: '#5BA18F',
+    accentColor: '#67E0B0',
   },
   'carbon-table-theme': {
-    backgroundColor: '#080A10',
-    headerColor: '#11141E',
-    panelColor: '#181C29',
-    activePanelColor: '#202638',
-    borderColor: '#343A4D',
+    backgroundColor: '#25303E',
+    headerColor: '#313E50',
+    panelColor: '#39495E',
+    activePanelColor: '#465B73',
+    borderColor: '#677C94',
     accentColor: '#BFD9FF',
   },
   's1-platinum-table-theme': {
-    backgroundColor: '#08111B',
-    headerColor: '#101C2A',
-    panelColor: '#13253A',
-    activePanelColor: '#19314B',
+    backgroundColor: '#1B3449',
+    headerColor: '#24455F',
+    panelColor: '#2D5370',
+    activePanelColor: '#376685',
     borderColor: '#8FB8D8',
     accentColor: '#BDEBFF',
   },
   'club-felt-table-theme': {
-    backgroundColor: '#081712',
-    headerColor: '#0D211D',
-    panelColor: '#132B31',
-    activePanelColor: '#153C38',
-    borderColor: '#2A6655',
-    accentColor: '#52E5A7',
+    backgroundColor: '#1B4644',
+    headerColor: '#245854',
+    panelColor: '#2C6761',
+    activePanelColor: '#347A70',
+    borderColor: '#62A991',
+    accentColor: '#67E0B0',
   },
 };
 

@@ -180,13 +180,13 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   label: {
-    color: '#E8ECF1',
+    color: '#F7FAFC',
     marginBottom: 3,
     fontSize: 13,
     fontWeight: '800',
   },
   count: {
-    color: '#E8ECF1',
+    color: '#F7FAFC',
     fontSize: 12,
     fontWeight: '800',
     marginTop: 2,

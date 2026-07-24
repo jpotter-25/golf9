@@ -239,7 +239,7 @@ const styles = StyleSheet.create({
   connectionText: { flex: 1, color: ui.text.secondary, fontSize: 12, fontWeight: '800', lineHeight: 17 },
   modeCard: { minHeight: 104, flexDirection: 'row', alignItems: 'center', gap: 14, borderWidth: 1, overflow: 'hidden' },
   modeAccent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4 },
-  modeIcon: { width: 54, height: 54, borderRadius: 8, borderWidth: 1, backgroundColor: 'rgba(7, 10, 24, 0.38)', alignItems: 'center', justifyContent: 'center' },
+  modeIcon: { width: 54, height: 54, borderRadius: 8, borderWidth: 1, backgroundColor: 'rgba(36, 54, 85, 0.62)', alignItems: 'center', justifyContent: 'center' },
   modeCopy: { flex: 1, minWidth: 0 },
   modeLocked: { opacity: 0.58 },
   modeTitle: { color: ui.text.primary, fontSize: 19, fontWeight: '900' },

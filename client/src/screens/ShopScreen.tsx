@@ -290,7 +290,7 @@ function cosmeticBadge(item: api.CosmeticItem) {
     return { label, style: { backgroundColor: visual.backgroundColor, borderColor: visual.borderColor } };
   }
   if (item.type === 'avatarIcon') {
-    return { label, style: { backgroundColor: '#123B32', borderColor: '#52E5A7' } };
+    return { label, style: { backgroundColor: '#205E56', borderColor: '#67E0B0' } };
   }
   if (item.type === 'avatarAccessory') {
     const visual = getAvatarAccessoryVisual(item.id);
@@ -415,7 +415,7 @@ const styles = StyleSheet.create({
     borderRadius: ui.radius.md,
     borderWidth: 1,
     borderColor: ui.border.strong,
-    backgroundColor: 'rgba(18, 23, 55, 0.78)',
+    backgroundColor: 'rgba(36, 54, 85, 0.84)',
     paddingHorizontal: 12,
     paddingVertical: 8,
     marginBottom: 8,

@@ -66,12 +66,12 @@ const theme: Theme = {
   ...DefaultTheme,
   colors: {
     ...DefaultTheme.colors,
-    background: '#0B1023',
-    card: '#121737',
-    primary: '#52E5A7',
-    text: '#E8ECF1',
-    border: '#2A2F57',
-    notification: '#FFCC66',
+    background: '#1A2943',
+    card: '#243655',
+    primary: '#67E0B0',
+    text: '#F7FAFC',
+    border: '#435C7D',
+    notification: '#F4C95D',
   },
 };
 
@@ -307,7 +307,7 @@ function AvailabilityRoute({ featureKey, children }: { featureKey: api.FeatureKe
   if (loading) {
     return (
       <View style={styles.availabilityScreen}>
-        <ActivityIndicator color="#52E5A7" />
+        <ActivityIndicator color="#67E0B0" />
         <Text style={styles.availabilityLoadingText}>Checking availability...</Text>
       </View>
     );
@@ -564,9 +564,9 @@ function AppNavigator() {
   const [navigationTick, setNavigationTick] = useState(0);
   if (loading) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0B1023' }}>
-        <ActivityIndicator color="#52E5A7" />
-        <Text style={{ color: '#E8ECF1', marginTop: 16 }}>Loading Nine Below...</Text>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1A2943' }}>
+        <ActivityIndicator color="#67E0B0" />
+        <Text style={{ color: '#F7FAFC', marginTop: 16 }}>Loading Nine Below...</Text>
       </View>
     );
   }
@@ -665,7 +665,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 1200,
     elevation: 1200,
-    backgroundColor: '#080C1C',
+    backgroundColor: '#1A2943',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
@@ -674,13 +674,13 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 440,
     borderWidth: 1,
-    borderColor: '#455181',
+    borderColor: '#60799A',
     borderRadius: 8,
-    backgroundColor: '#121737',
+    backgroundColor: '#243655',
     padding: 24,
   },
   releaseGateEyebrow: {
-    color: '#FFCC66',
+    color: '#F4C95D',
     fontSize: 13,
     fontWeight: '900',
     textTransform: 'uppercase',
@@ -692,7 +692,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   releaseGateCopy: {
-    color: '#C9D1EA',
+    color: '#D7E2EE',
     fontSize: 16,
     lineHeight: 23,
     fontWeight: '700',
@@ -707,9 +707,9 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 74,
     borderWidth: 1,
-    borderColor: '#303A68',
+    borderColor: '#435C7D',
     borderRadius: 8,
-    backgroundColor: '#0D1230',
+    backgroundColor: '#20344F',
     justifyContent: 'center',
     paddingHorizontal: 14,
   },
@@ -734,13 +734,13 @@ const styles = StyleSheet.create({
   releasePrimaryButton: {
     minHeight: 56,
     borderRadius: 8,
-    backgroundColor: '#52E5A7',
+    backgroundColor: '#67E0B0',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 20,
   },
   releasePrimaryButtonText: {
-    color: '#0B1023',
+    color: '#1A2943',
     fontSize: 18,
     fontWeight: '900',
   },
@@ -748,7 +748,7 @@ const styles = StyleSheet.create({
     minHeight: 50,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#455181',
+    borderColor: '#60799A',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 10,
@@ -792,7 +792,7 @@ const styles = StyleSheet.create({
   },
   releaseModalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(4, 7, 17, 0.88)',
+    backgroundColor: 'rgba(20, 32, 54, 0.82)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
@@ -801,9 +801,9 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 420,
     borderWidth: 1,
-    borderColor: '#455181',
+    borderColor: '#60799A',
     borderRadius: 8,
-    backgroundColor: '#121737',
+    backgroundColor: '#243655',
     padding: 22,
   },
   releasePromptTitle: {
@@ -819,20 +819,20 @@ const styles = StyleSheet.create({
     top: 8,
     alignSelf: 'center',
     borderWidth: 1,
-    borderColor: '#FFCC66',
+    borderColor: '#F4C95D',
     borderRadius: 6,
-    backgroundColor: 'rgba(18, 23, 55, 0.96)',
+    backgroundColor: 'rgba(36, 54, 85, 0.96)',
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
   updateAfterMatchText: {
-    color: '#FFCC66',
+    color: '#F4C95D',
     fontSize: 12,
     fontWeight: '900',
   },
   availabilityScreen: {
     flex: 1,
-    backgroundColor: '#080C1C',
+    backgroundColor: '#1A2943',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
@@ -841,13 +841,13 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 440,
     borderWidth: 1,
-    borderColor: '#394574',
+    borderColor: '#60799A',
     borderRadius: 8,
-    backgroundColor: '#121737',
+    backgroundColor: '#243655',
     padding: 24,
   },
   availabilityEyebrow: {
-    color: '#FFCC66',
+    color: '#F4C95D',
     fontSize: 13,
     fontWeight: '900',
     textTransform: 'uppercase',
@@ -859,14 +859,14 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   availabilityCopy: {
-    color: '#C9D1EA',
+    color: '#D7E2EE',
     fontSize: 16,
     lineHeight: 23,
     fontWeight: '700',
     marginTop: 12,
   },
   availabilityRetry: {
-    color: '#52E5A7',
+    color: '#67E0B0',
     fontSize: 14,
     fontWeight: '800',
     marginTop: 14,
@@ -874,13 +874,13 @@ const styles = StyleSheet.create({
   availabilityPrimaryButton: {
     minHeight: 54,
     borderRadius: 8,
-    backgroundColor: '#52E5A7',
+    backgroundColor: '#67E0B0',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 22,
   },
   availabilityPrimaryButtonText: {
-    color: '#0B1023',
+    color: '#1A2943',
     fontSize: 17,
     fontWeight: '900',
   },
@@ -919,7 +919,7 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
   },
   availabilityLoadingText: {
-    color: '#C9D1EA',
+    color: '#D7E2EE',
     fontSize: 15,
     fontWeight: '800',
     marginTop: 14,
@@ -937,13 +937,13 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 420,
     borderWidth: 1,
-    borderColor: '#2A2F57',
+    borderColor: '#435C7D',
     borderRadius: 8,
-    backgroundColor: '#121737',
+    backgroundColor: '#243655',
     padding: 24,
   },
   activeGateEyebrow: {
-    color: '#FFCC66',
+    color: '#F4C95D',
     fontSize: 13,
     fontWeight: '900',
     letterSpacing: 0,
@@ -951,7 +951,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   activeGateTitle: {
-    color: '#E8ECF1',
+    color: '#F7FAFC',
     fontSize: 30,
     fontWeight: '900',
     letterSpacing: 0,
@@ -964,7 +964,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   activeGateMeta: {
-    color: '#52E5A7',
+    color: '#67E0B0',
     fontSize: 15,
     fontWeight: '900',
     marginTop: 16,
@@ -973,7 +973,7 @@ const styles = StyleSheet.create({
     marginTop: 24,
     minHeight: 56,
     borderRadius: 8,
-    backgroundColor: '#52E5A7',
+    backgroundColor: '#67E0B0',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 18,
@@ -982,7 +982,7 @@ const styles = StyleSheet.create({
     opacity: 0.65,
   },
   activeGateButtonText: {
-    color: '#0B1023',
+    color: '#1A2943',
     fontSize: 18,
     fontWeight: '900',
   },

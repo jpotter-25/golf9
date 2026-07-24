@@ -48,7 +48,7 @@ const COLOR_PAIRS = ['emerald', 'gold', 'sky', 'crimson', 'violet'] as const;
 const BADGE_SHAPES = ['shield', 'crest', 'diamond', 'circle', 'hexagon', 'octagon', 'pennant'] as const;
 const BANNER_STYLES = ['classic', 'night', 'fairway', 'champion'] as const;
 const BADGE_ICONS = ['shield', 'flag', 'trophy', 'crown', 'star', 'target', 'bolt', 'gem', 'spade', 'club', 'flame', 'swords', 'mountain', 'trees', 'compass', 'rocket'] as const;
-const CLUB_COLORS = ['#52E5A7', '#4DA3FF', '#FFCC66', '#FF6B6B', '#B99CFF', '#E8ECF1', '#2DD4BF', '#F472B6', '#0B1023', '#123B32', '#102448', '#2B2515', '#331A24', '#211B3D'] as const;
+const CLUB_COLORS = ['#67E0B0', '#67B7FF', '#F4C95D', '#FF6B6B', '#B99CFF', '#F7FAFC', '#2DD4BF', '#F472B6', '#1A2943', '#205E56', '#294A68', '#2B2515', '#331A24', '#211B3D'] as const;
 const DEFAULT_CLUB_CONFIG: api.ClubEconomyConfig = {
   minJoinLevel: 1,
   minCreateLevel: 10,
@@ -60,10 +60,10 @@ const DEFAULT_CLUB_CONFIG: api.ClubEconomyConfig = {
 };
 
 const BRAND_COLORS: Record<string, { accent: string; background: string; soft: string }> = {
-  emerald: { accent: '#52E5A7', background: '#123B32', soft: '#2DD4BF' },
-  gold: { accent: '#FFCC66', background: '#2B2515', soft: '#E8ECF1' },
-  sky: { accent: '#4DA3FF', background: '#102448', soft: '#2DD4BF' },
-  crimson: { accent: '#FF6B6B', background: '#331A24', soft: '#FFCC66' },
+  emerald: { accent: '#67E0B0', background: '#205E56', soft: '#2DD4BF' },
+  gold: { accent: '#F4C95D', background: '#2B2515', soft: '#F7FAFC' },
+  sky: { accent: '#67B7FF', background: '#294A68', soft: '#2DD4BF' },
+  crimson: { accent: '#FF6B6B', background: '#331A24', soft: '#F4C95D' },
   violet: { accent: '#B99CFF', background: '#211B3D', soft: '#F472B6' },
 };
 
@@ -86,8 +86,8 @@ export default function ClubScreen({ navigation }: Props) {
     badgeShape: 'shield',
     bannerStyle: 'classic',
     badgeIcon: 'shield',
-    primaryColor: '#52E5A7',
-    backgroundColor: '#123B32',
+    primaryColor: '#67E0B0',
+    backgroundColor: '#205E56',
     accentColor: '#2DD4BF',
   });
   const [announcementText, setAnnouncementText] = useState('');
@@ -489,11 +489,11 @@ function JoinedClub(props: {
 
       <View style={styles.actionGrid}>
         {availability.isVisible('clubs.chat') ? <HubAction title="Chat" detail={chatEntry.state === 'live' ? 'Live club conversation' : (chatEntry.title || 'Unavailable')} Icon={MessageCircle} accent={activeColors.accent} badge={props.unread} locked={chatEntry.state !== 'live'} testerPreview={chatEntry.testerPreview} onPress={() => openFeatureSection('chat', 'clubs.chat')} /> : null}
-        <HubAction title="Progress" detail={nextReward ? `Next: ${nextReward.name}` : 'All rewards earned'} Icon={Target} accent="#4DA3FF" onPress={() => props.setActiveSection('progress')} />
+        <HubAction title="Progress" detail={nextReward ? `Next: ${nextReward.name}` : 'All rewards earned'} Icon={Target} accent="#67B7FF" onPress={() => props.setActiveSection('progress')} />
         {availability.isVisible('clubs.treasury') ? <HubAction title="Treasury" detail={treasuryEntry.state === 'live' ? `${formatCoins(club.treasury.balance)} available` : (treasuryEntry.title || 'Unavailable')} Icon={Landmark} accent={ui.palette.gold} locked={treasuryEntry.state !== 'live'} testerPreview={treasuryEntry.testerPreview} onPress={() => openFeatureSection('treasury', 'clubs.treasury')} /> : null}
         <HubAction title="Members" detail={`${club.onlineMemberCount} online now`} Icon={Users} accent="#B99CFF" onPress={() => props.setActiveSection('members')} />
         <HubAction title="News" detail={latestAnnouncement?.text || club.event.title} Icon={Megaphone} accent="#FF8D8D" onPress={() => props.setActiveSection('news')} />
-        {canManage && availability.isVisible('clubs.management') ? <HubAction title="Manage" detail={managementEntry.state === 'live' ? `${club.joinRequests.length} join request${club.joinRequests.length === 1 ? '' : 's'}` : (managementEntry.title || 'Unavailable')} Icon={Settings2} accent="#E8ECF1" badge={club.joinRequests.length} locked={managementEntry.state !== 'live'} testerPreview={managementEntry.testerPreview} onPress={() => openFeatureSection('manage', 'clubs.management')} /> : null}
+        {canManage && availability.isVisible('clubs.management') ? <HubAction title="Manage" detail={managementEntry.state === 'live' ? `${club.joinRequests.length} join request${club.joinRequests.length === 1 ? '' : 's'}` : (managementEntry.title || 'Unavailable')} Icon={Settings2} accent="#F7FAFC" badge={club.joinRequests.length} locked={managementEntry.state !== 'live'} testerPreview={managementEntry.testerPreview} onPress={() => openFeatureSection('manage', 'clubs.management')} /> : null}
       </View>
 
       <View style={styles.hubBand}>
@@ -638,7 +638,7 @@ function TreasurySection(props: Parameters<typeof JoinedClub>[0]) {
           <>
             <Text style={styles.rowTitle}>{club.treasuryGoal.title}</Text>
             {club.treasuryGoal.description ? <Text style={styles.metaText}>{club.treasuryGoal.description}</Text> : null}
-            <ProgressBar progress={customGoalProgress} color="#4DA3FF" />
+            <ProgressBar progress={customGoalProgress} color="#67B7FF" />
             <Text style={styles.metaText}>{formatCoins(club.treasury.balance)} / {formatCoins(club.treasuryGoal.targetAmount)}</Text>
           </>
         ) : <Empty text="No optional club goal is set. Donations still fund the next prestige." />}
@@ -1131,7 +1131,7 @@ const styles = StyleSheet.create({
   rowTitle: { color: ui.text.primary, fontSize: 15, fontWeight: '900' },
   metaText: { color: ui.text.secondary, fontSize: 12, fontWeight: '700', lineHeight: 18 },
   helperText: { color: ui.text.muted, fontSize: 11, fontWeight: '700' },
-  progressTrack: { height: 9, borderRadius: 5, overflow: 'hidden', backgroundColor: '#080E24', borderWidth: 1, borderColor: ui.border.soft, marginTop: 8 },
+  progressTrack: { height: 9, borderRadius: 5, overflow: 'hidden', backgroundColor: '#20344F', borderWidth: 1, borderColor: ui.border.soft, marginTop: 8 },
   progressFill: { height: '100%', borderRadius: 5 },
   messageList: { gap: 8, marginBottom: 12 },
   messageRow: { paddingVertical: 10, borderBottomWidth: 1, borderColor: ui.border.soft },

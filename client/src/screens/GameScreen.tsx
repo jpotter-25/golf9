@@ -93,14 +93,14 @@ const QUICK_CHAT_STICKERS = [
   '\u{1F3AF} Bullseye',
 ];
 const TABLE_GIFTS: GiftOption[] = [
-  { id: 'gift-good-luck', label: 'Good Luck', accent: '#52E5A7', icon: '\u{1F340}', price: 5 },
-  { id: 'gift-cheer', label: 'Cheer', accent: '#4DA3FF', icon: '\u{1F389}', price: 10 },
+  { id: 'gift-good-luck', label: 'Good Luck', accent: '#67E0B0', icon: '\u{1F340}', price: 5 },
+  { id: 'gift-cheer', label: 'Cheer', accent: '#67B7FF', icon: '\u{1F389}', price: 10 },
   { id: 'gift-tissues', label: 'Tissues', accent: '#BFD9FF', icon: '\u{1F9FB}', price: 15 },
   { id: 'gift-coffee', label: 'Coffee', accent: '#C58B5A', icon: '\u{2615}', price: 25 },
   { id: 'gift-wine', label: 'Wine', accent: '#D9B8FF', icon: '\u{1F377}', price: 40 },
   { id: 'gift-golf', label: 'Golf Flag', accent: '#65D48A', icon: '\u{26F3}', price: 75 },
   { id: 'gift-gem', label: 'Gem', accent: '#BDEBFF', icon: '\u{1F48E}', price: 250 },
-  { id: 'gift-crown', label: 'Crown', accent: '#FFCC66', icon: '\u{1F451}', price: 500 },
+  { id: 'gift-crown', label: 'Crown', accent: '#F4C95D', icon: '\u{1F451}', price: 500 },
 ];
 const TABLE_GIFTS_BY_ID = new Map(TABLE_GIFTS.map(gift => [gift.id, gift]));
 const QUIET_ONLINE_ACTION_ERRORS = new Set([
@@ -1994,7 +1994,7 @@ export default function GameScreen({ route, navigation }: Props) {
         {autoplayNoticeVisible && bottomAutoplayActive ? (
           <View pointerEvents="none" style={styles.autoplayNotice}>
             <View style={styles.autoplayNoticeIcon}>
-              <Bot color="#52E5A7" size={20} strokeWidth={2.8} />
+              <Bot color="#67E0B0" size={20} strokeWidth={2.8} />
             </View>
             <View style={styles.autoplayNoticeCopy}>
               <Text style={styles.autoplayNoticeTitle}>Autoplay is active</Text>
@@ -2057,7 +2057,7 @@ export default function GameScreen({ route, navigation }: Props) {
             accessibilityRole="button"
             accessibilityLabel="Take back control from autoplay"
           >
-            <Bot color="#0B1023" size={18} strokeWidth={3} />
+            <Bot color="#1A2943" size={18} strokeWidth={3} />
             <Text style={styles.takeControlButtonText}>{takingControl ? 'Restoring Control...' : 'Take Back Control'}</Text>
           </Pressable>
         ) : null}
@@ -2091,7 +2091,7 @@ export default function GameScreen({ route, navigation }: Props) {
               <Text style={styles.cancelBtnText}>X</Text>
             </Pressable>
             <Pressable style={[styles.altBtn, styles.altBtnPrimary]} onPress={onConfirmSelection}>
-              <Text style={[styles.altBtnText, { color: '#0B1023' }]}>{selectedActionText}</Text>
+              <Text style={[styles.altBtnText, { color: '#1A2943' }]}>{selectedActionText}</Text>
             </Pressable>
           </View>
         ) : held && activeSource === 'draw' && heldCanDiscard ? (
@@ -2206,7 +2206,7 @@ export default function GameScreen({ route, navigation }: Props) {
                       refreshProfile().catch(() => {});
                     }}
                   >
-                    <Trophy size={20} color="#52E5A7" strokeWidth={2.8} />
+                    <Trophy size={20} color="#67E0B0" strokeWidth={2.8} />
                     <Text style={styles.avatarHubActionText}>Profile</Text>
                   </Pressable>
                   <Pressable
@@ -2234,7 +2234,7 @@ export default function GameScreen({ route, navigation }: Props) {
                       setShopOpen(true);
                     }}
                   >
-                    {availability.isAvailable('shop') ? <ShoppingBag size={20} color="#FFCC66" strokeWidth={2.8} /> : <LockKeyhole size={20} color={ui.text.muted} strokeWidth={2.8} />}
+                    {availability.isAvailable('shop') ? <ShoppingBag size={20} color="#F4C95D" strokeWidth={2.8} /> : <LockKeyhole size={20} color={ui.text.muted} strokeWidth={2.8} />}
                     <Text style={styles.avatarHubActionText}>{availability.isAvailable('shop') ? 'Shop' : 'Unavailable'}</Text>
                   </Pressable> : null}
                   <Pressable
@@ -2296,7 +2296,7 @@ export default function GameScreen({ route, navigation }: Props) {
                       navigation.navigate('PlayerProfile', { userId: avatarHubUserId, fromActiveMatchRoomCode: roomCode });
                     }}
                   >
-                    <Trophy size={20} color="#52E5A7" strokeWidth={2.8} />
+                    <Trophy size={20} color="#67E0B0" strokeWidth={2.8} />
                     <Text style={styles.avatarHubActionText}>Full Profile</Text>
                   </Pressable>
                   {availability.isVisible('social') ? <Pressable
@@ -2320,7 +2320,7 @@ export default function GameScreen({ route, navigation }: Props) {
                     disabled={availability.isAvailable('social') && (avatarHubProfile?.relationship !== 'friend' || avatarHubBusy === 'invite')}
                     onPress={() => availability.isAvailable('social') ? void inviteAvatarHubPlayer() : availability.showUnavailable('social')}
                   >
-                    {availability.isAvailable('social') ? <MessageCircle size={20} color="#FFCC66" strokeWidth={2.8} /> : <LockKeyhole size={20} color={ui.text.muted} strokeWidth={2.8} />}
+                    {availability.isAvailable('social') ? <MessageCircle size={20} color="#F4C95D" strokeWidth={2.8} /> : <LockKeyhole size={20} color={ui.text.muted} strokeWidth={2.8} />}
                     <Text style={styles.avatarHubActionText}>{availability.isAvailable('social') ? 'Invite' : 'Unavailable'}</Text>
                   </Pressable> : null}
                 </View>
@@ -2400,8 +2400,8 @@ export default function GameScreen({ route, navigation }: Props) {
               <Switch
                 value={gameplayPrefs.turnAlerts}
                 onValueChange={value => setGameplayPreferences({ turnAlerts: value })}
-                thumbColor={gameplayPrefs.turnAlerts ? '#52E5A7' : '#444'}
-                trackColor={{ false: '#555', true: '#52E5A7' }}
+                thumbColor={gameplayPrefs.turnAlerts ? '#67E0B0' : '#444'}
+                trackColor={{ false: '#555', true: '#67E0B0' }}
               />
             </View>
             <View style={styles.settingsRow}>
@@ -2409,8 +2409,8 @@ export default function GameScreen({ route, navigation }: Props) {
               <Switch
                 value={gameplayPrefs.sound}
                 onValueChange={value => setGameplayPreferences({ sound: value })}
-                thumbColor={gameplayPrefs.sound ? '#52E5A7' : '#444'}
-                trackColor={{ false: '#555', true: '#52E5A7' }}
+                thumbColor={gameplayPrefs.sound ? '#67E0B0' : '#444'}
+                trackColor={{ false: '#555', true: '#67E0B0' }}
               />
             </View>
             <View style={styles.settingsRow}>
@@ -2418,8 +2418,8 @@ export default function GameScreen({ route, navigation }: Props) {
               <Switch
                 value={gameplayPrefs.vibrate}
                 onValueChange={value => setGameplayPreferences({ vibrate: value })}
-                thumbColor={gameplayPrefs.vibrate ? '#52E5A7' : '#444'}
-                trackColor={{ false: '#555', true: '#52E5A7' }}
+                thumbColor={gameplayPrefs.vibrate ? '#67E0B0' : '#444'}
+                trackColor={{ false: '#555', true: '#67E0B0' }}
               />
             </View>
             <Pressable style={styles.settingsDoneButton} onPress={() => setAlertSettingsOpen(false)}>
@@ -2838,7 +2838,7 @@ const styles = StyleSheet.create({
     maxWidth: GAME_CONTENT_MAX_WIDTH,
     alignSelf: 'center',
   },
-  container: { flex: 1, backgroundColor: '#0B1023' },
+  container: { flex: 1, backgroundColor: '#1A2943' },
 
   header: {
     paddingTop: 8,
@@ -2847,9 +2847,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#101633',
+    backgroundColor: '#243655',
     borderBottomWidth: 1,
-    borderBottomColor: '#2A2F57',
+    borderBottomColor: '#435C7D',
   },
   turnStatusChip: {
     flex: 1,
@@ -2866,39 +2866,39 @@ const styles = StyleSheet.create({
     height: 42,
     borderRadius: 21,
     borderWidth: 2,
-    borderColor: '#4DA3FF',
+    borderColor: '#67B7FF',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#121737',
+    backgroundColor: '#243655',
   },
   activeAvatarMine: {
-    borderColor: '#52E5A7',
-    backgroundColor: '#123B32',
+    borderColor: '#67E0B0',
+    backgroundColor: '#205E56',
   },
-  activeAvatarText: { color: '#E8ECF1', fontSize: 18, fontWeight: '900' },
+  activeAvatarText: { color: '#F7FAFC', fontSize: 18, fontWeight: '900' },
   turnCopy: { flex: 1, minWidth: 0 },
-  heading: { color: '#E8ECF1', fontSize: 15, fontWeight: '900' },
-  turnInstruction: { color: '#9BA3C7', fontSize: 11, marginTop: 1, fontWeight: '800' },
+  heading: { color: '#F7FAFC', fontSize: 15, fontWeight: '900' },
+  turnInstruction: { color: '#A9B9CD', fontSize: 11, marginTop: 1, fontWeight: '800' },
   profileHudButton: {
     width: 42,
     height: 42,
     borderRadius: 21,
     borderWidth: 2,
-    borderColor: '#52E5A7',
-    backgroundColor: '#121737',
+    borderColor: '#67E0B0',
+    backgroundColor: '#243655',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  profileHudText: { color: '#E8ECF1', fontSize: 17, fontWeight: '900' },
+  profileHudText: { color: '#F7FAFC', fontSize: 17, fontWeight: '900' },
   timerChip: {
     minWidth: 58,
     alignItems: 'center',
     paddingHorizontal: 8,
     paddingVertical: 6,
     borderRadius: 8,
-    backgroundColor: '#121737',
+    backgroundColor: '#243655',
     borderWidth: 1,
-    borderColor: '#2A2F57',
+    borderColor: '#435C7D',
   },
   timerDanger: {
     borderColor: '#FF6B6B',
@@ -2906,12 +2906,12 @@ const styles = StyleSheet.create({
   },
   timerAutoplayChip: {
     minWidth: 70,
-    borderColor: '#52E5A7',
-    backgroundColor: '#123B32',
+    borderColor: '#67E0B0',
+    backgroundColor: '#205E56',
   },
-  timerText: { color: '#E8ECF1', fontSize: 17, fontWeight: '900', fontVariant: ['tabular-nums'] },
-  timerAutoplayText: { color: '#52E5A7', fontSize: 11 },
-  roundText: { color: '#9BA3C7', fontSize: 11, fontWeight: '800', marginTop: 1 },
+  timerText: { color: '#F7FAFC', fontSize: 17, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  timerAutoplayText: { color: '#67E0B0', fontSize: 11 },
+  roundText: { color: '#A9B9CD', fontSize: 11, fontWeight: '800', marginTop: 1 },
   roundChip: {
     minWidth: 58,
     minHeight: 42,
@@ -2920,19 +2920,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 6,
     borderRadius: 8,
-    backgroundColor: '#121737',
+    backgroundColor: '#243655',
     borderWidth: 1,
-    borderColor: '#2A2F57',
+    borderColor: '#435C7D',
   },
-  roundChipLabel: { color: '#9BA3C7', fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
-  roundChipText: { color: '#E8ECF1', fontSize: 15, fontWeight: '900', marginTop: 1, fontVariant: ['tabular-nums'] },
+  roundChipLabel: { color: '#A9B9CD', fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
+  roundChipText: { color: '#F7FAFC', fontSize: 15, fontWeight: '900', marginTop: 1, fontVariant: ['tabular-nums'] },
   chatButton: {
     width: 42,
     height: 42,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
+    borderColor: '#435C7D',
+    backgroundColor: '#243655',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2950,7 +2950,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  chatBadgeText: { color: '#0B1023', fontSize: 10, fontWeight: '900' },
+  chatBadgeText: { color: '#1A2943', fontSize: 10, fontWeight: '900' },
   shopOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -2977,17 +2977,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     borderBottomWidth: 1,
-    borderBottomColor: '#2A2F57',
+    borderBottomColor: '#435C7D',
   },
-  shopSheetEyebrow: { color: '#FFCC66', fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
-  shopSheetTitle: { color: '#E8ECF1', fontSize: 21, fontWeight: '900', marginTop: 1 },
+  shopSheetEyebrow: { color: '#F4C95D', fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
+  shopSheetTitle: { color: '#F7FAFC', fontSize: 21, fontWeight: '900', marginTop: 1 },
   shopCloseButton: {
     width: 42,
     height: 42,
     borderRadius: 9,
     borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
+    borderColor: '#435C7D',
+    backgroundColor: '#243655',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -3017,7 +3017,7 @@ const styles = StyleSheet.create({
   },
   avatarHubHeader: {
     borderBottomWidth: 1,
-    borderBottomColor: '#2A2F57',
+    borderBottomColor: '#435C7D',
     paddingBottom: 12,
   },
   avatarHubScroll: { flexGrow: 0 },
@@ -3029,31 +3029,31 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   avatarHubCopy: { flex: 1, minWidth: 0 },
-  avatarHubName: { color: '#E8ECF1', fontSize: 22, fontWeight: '900' },
-  avatarHubMeta: { color: '#9BA3C7', fontSize: 13, fontWeight: '800', marginTop: 3 },
+  avatarHubName: { color: '#F7FAFC', fontSize: 22, fontWeight: '900' },
+  avatarHubMeta: { color: '#A9B9CD', fontSize: 13, fontWeight: '800', marginTop: 3 },
   avatarHubCloseButton: {
     width: 40,
     height: 40,
     borderRadius: 9,
     borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
+    borderColor: '#435C7D',
+    backgroundColor: '#243655',
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarHubXpTrack: {
     height: 7,
     borderRadius: 4,
-    backgroundColor: '#0B1023',
+    backgroundColor: '#1A2943',
     borderWidth: 1,
-    borderColor: '#2A2F57',
+    borderColor: '#435C7D',
     overflow: 'hidden',
     marginTop: 8,
   },
   avatarHubXpFill: {
     height: '100%',
     borderRadius: 4,
-    backgroundColor: '#52E5A7',
+    backgroundColor: '#67E0B0',
   },
   avatarHubBody: { paddingTop: 14 },
   avatarHubStatRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
@@ -3062,14 +3062,14 @@ const styles = StyleSheet.create({
     minHeight: 54,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
+    borderColor: '#435C7D',
+    backgroundColor: '#243655',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 7,
   },
-  avatarHubStatValue: { color: '#E8ECF1', fontSize: 14, fontWeight: '900' },
-  avatarHubStatLabel: { color: '#9BA3C7', fontSize: 10, fontWeight: '900', marginTop: 2, textTransform: 'uppercase' },
+  avatarHubStatValue: { color: '#F7FAFC', fontSize: 14, fontWeight: '900' },
+  avatarHubStatLabel: { color: '#A9B9CD', fontSize: 10, fontWeight: '900', marginTop: 2, textTransform: 'uppercase' },
   avatarHubActionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   avatarHubAction: {
     flexGrow: 1,
@@ -3077,19 +3077,19 @@ const styles = StyleSheet.create({
     minHeight: 54,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
+    borderColor: '#435C7D',
+    backgroundColor: '#243655',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
     paddingHorizontal: 8,
   },
   avatarHubActionDisabled: { opacity: 0.48 },
-  avatarHubActionText: { color: '#E8ECF1', fontSize: 11, fontWeight: '900', textAlign: 'center' },
-  avatarHubSectionTitle: { color: '#9BA3C7', fontSize: 11, fontWeight: '900', textTransform: 'uppercase', marginTop: 14, marginBottom: 8 },
-  avatarHubEmptyText: { color: '#9BA3C7', fontSize: 11, fontWeight: '800', lineHeight: 16 },
+  avatarHubActionText: { color: '#F7FAFC', fontSize: 11, fontWeight: '900', textAlign: 'center' },
+  avatarHubSectionTitle: { color: '#A9B9CD', fontSize: 11, fontWeight: '900', textTransform: 'uppercase', marginTop: 14, marginBottom: 8 },
+  avatarHubEmptyText: { color: '#A9B9CD', fontSize: 11, fontWeight: '800', lineHeight: 16 },
   lockerSection: { marginTop: 8 },
-  lockerTitle: { color: '#E8ECF1', fontSize: 12, fontWeight: '900', marginBottom: 7 },
+  lockerTitle: { color: '#F7FAFC', fontSize: 12, fontWeight: '900', marginBottom: 7 },
   lockerGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   lockerChip: {
     flexGrow: 1,
@@ -3097,15 +3097,15 @@ const styles = StyleSheet.create({
     minHeight: 50,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
+    borderColor: '#435C7D',
+    backgroundColor: '#243655',
     justifyContent: 'center',
     paddingHorizontal: 10,
   },
-  lockerChipEquipped: { borderColor: '#52E5A7', backgroundColor: '#123B32' },
-  lockerName: { color: '#E8ECF1', fontSize: 12, fontWeight: '900' },
+  lockerChipEquipped: { borderColor: '#67E0B0', backgroundColor: '#205E56' },
+  lockerName: { color: '#F7FAFC', fontSize: 12, fontWeight: '900' },
   lockerState: { color: '#BDEBFF', fontSize: 10, fontWeight: '900', marginTop: 3 },
-  lockerStateEquipped: { color: '#52E5A7' },
+  lockerStateEquipped: { color: '#67E0B0' },
   giftGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   giftChip: {
     flexGrow: 1,
@@ -3113,7 +3113,7 @@ const styles = StyleSheet.create({
     minHeight: 54,
     borderRadius: 8,
     borderWidth: 1,
-    backgroundColor: '#121737',
+    backgroundColor: '#243655',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-start',
@@ -3122,7 +3122,7 @@ const styles = StyleSheet.create({
   },
   giftIcon: { fontSize: 21, lineHeight: 24 },
   giftCopy: { flex: 1, minWidth: 0 },
-  giftChipText: { color: '#E8ECF1', fontSize: 11, fontWeight: '900' },
+  giftChipText: { color: '#F7FAFC', fontSize: 11, fontWeight: '900' },
   giftPrice: { fontSize: 9, fontWeight: '900', marginTop: 2 },
   noticeScrim: {
     flex: 1,
@@ -3136,7 +3136,7 @@ const styles = StyleSheet.create({
     maxWidth: 360,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#52E5A7',
+    borderColor: '#67E0B0',
     backgroundColor: '#102E2A',
     paddingHorizontal: 18,
     paddingVertical: 20,
@@ -3146,15 +3146,15 @@ const styles = StyleSheet.create({
     borderColor: '#FFB020',
     backgroundColor: '#3A2414',
   },
-  noticeTitle: { color: '#52E5A7', fontSize: 24, fontWeight: '900', textAlign: 'center' },
+  noticeTitle: { color: '#67E0B0', fontSize: 24, fontWeight: '900', textAlign: 'center' },
   noticeTitleWarning: { color: '#FFB020' },
-  noticeBody: { color: '#E8ECF1', fontSize: 15, fontWeight: '800', textAlign: 'center', marginTop: 8, lineHeight: 21 },
+  noticeBody: { color: '#F7FAFC', fontSize: 15, fontWeight: '800', textAlign: 'center', marginTop: 8, lineHeight: 21 },
   noticeButton: {
     minWidth: 140,
     minHeight: 46,
     marginTop: 18,
     borderRadius: 8,
-    backgroundColor: '#52E5A7',
+    backgroundColor: '#67E0B0',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 20,
@@ -3162,7 +3162,7 @@ const styles = StyleSheet.create({
   noticeButtonWarning: {
     backgroundColor: '#FFB020',
   },
-  noticeButtonText: { color: '#0B1023', fontSize: 16, fontWeight: '900' },
+  noticeButtonText: { color: '#1A2943', fontSize: 16, fontWeight: '900' },
   settingsScrim: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.55)',
@@ -3175,8 +3175,8 @@ const styles = StyleSheet.create({
     maxWidth: 340,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#101633',
+    borderColor: '#435C7D',
+    backgroundColor: '#243655',
     padding: 18,
   },
   settingsHeader: {
@@ -3185,13 +3185,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 12,
   },
-  settingsTitle: { color: '#E8ECF1', fontSize: 19, fontWeight: '900' },
+  settingsTitle: { color: '#F7FAFC', fontSize: 19, fontWeight: '900' },
   settingsCloseButton: {
     width: 34,
     height: 34,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A2F57',
+    borderColor: '#435C7D',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -3199,15 +3199,15 @@ const styles = StyleSheet.create({
     minHeight: 48,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
+    borderColor: '#435C7D',
+    backgroundColor: '#243655',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     paddingHorizontal: 12,
     marginBottom: 10,
   },
-  menuActionText: { color: '#E8ECF1', fontSize: 15, fontWeight: '900' },
+  menuActionText: { color: '#F7FAFC', fontSize: 15, fontWeight: '900' },
   settingsDivider: {
     height: 1,
     backgroundColor: '#20264A',
@@ -3219,7 +3219,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  settingsSectionTitle: { color: '#E8ECF1', fontSize: 14, fontWeight: '900' },
+  settingsSectionTitle: { color: '#F7FAFC', fontSize: 14, fontWeight: '900' },
   settingsRow: {
     minHeight: 50,
     flexDirection: 'row',
@@ -3228,23 +3228,23 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#20264A',
   },
-  settingsLabel: { color: '#E8ECF1', fontSize: 15, fontWeight: '800' },
+  settingsLabel: { color: '#F7FAFC', fontSize: 15, fontWeight: '800' },
   settingsDoneButton: {
     minHeight: 44,
     marginTop: 16,
     borderRadius: 8,
-    backgroundColor: '#4DA3FF',
+    backgroundColor: '#67B7FF',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  settingsDoneText: { color: '#0B1023', fontSize: 15, fontWeight: '900' },
+  settingsDoneText: { color: '#1A2943', fontSize: 15, fontWeight: '900' },
   turnNotice: {
     marginHorizontal: 12,
     marginTop: 6,
     marginBottom: 2,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#52E5A7',
+    borderColor: '#67E0B0',
     backgroundColor: '#102E2A',
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -3258,9 +3258,9 @@ const styles = StyleSheet.create({
     borderColor: '#FFB020',
     backgroundColor: '#3A2414',
   },
-  turnNoticeTitle: { color: '#52E5A7', fontSize: 15, fontWeight: '900', textAlign: 'center' },
+  turnNoticeTitle: { color: '#67E0B0', fontSize: 15, fontWeight: '900', textAlign: 'center' },
   turnNoticeTitleWarning: { color: '#FFB020' },
-  turnNoticeBody: { color: '#E8ECF1', fontSize: 12, fontWeight: '800', textAlign: 'center', marginTop: 2 },
+  turnNoticeBody: { color: '#F7FAFC', fontSize: 12, fontWeight: '800', textAlign: 'center', marginTop: 2 },
   scoreStrip: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -3277,12 +3277,12 @@ const styles = StyleSheet.create({
     gap: 7,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
+    borderColor: '#435C7D',
+    backgroundColor: '#243655',
     paddingHorizontal: 8,
     paddingVertical: 6,
   },
-  scorePillActive: { borderColor: '#4DA3FF' },
+  scorePillActive: { borderColor: '#67B7FF' },
   scoreAvatar: {
     width: 30,
     height: 30,
@@ -3291,7 +3291,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  scoreAvatarText: { color: '#E8ECF1', fontSize: 13, fontWeight: '900' },
+  scoreAvatarText: { color: '#F7FAFC', fontSize: 13, fontWeight: '900' },
   connectionDot: {
     position: 'absolute',
     right: -2,
@@ -3300,16 +3300,16 @@ const styles = StyleSheet.create({
     height: 9,
     borderRadius: 5,
     borderWidth: 1,
-    borderColor: '#0B1023',
+    borderColor: '#1A2943',
   },
-  connectionDotOnline: { backgroundColor: '#52E5A7' },
+  connectionDotOnline: { backgroundColor: '#67E0B0' },
   connectionDotOffline: { backgroundColor: '#FF6B6B' },
   scoreCopy: { flex: 1, minWidth: 0 },
-  scoreName: { color: '#9BA3C7', fontSize: 11, fontWeight: '900', flexShrink: 1 },
-  scoreMeta: { color: '#9BA3C7', fontSize: 9, fontWeight: '900', marginTop: 1 },
+  scoreName: { color: '#A9B9CD', fontSize: 11, fontWeight: '900', flexShrink: 1 },
+  scoreMeta: { color: '#A9B9CD', fontSize: 9, fontWeight: '900', marginTop: 1 },
   scoreValues: { alignItems: 'flex-end', flexShrink: 0 },
-  scoreNow: { color: '#52E5A7', fontSize: 10, fontWeight: '900' },
-  scoreValue: { color: '#E8ECF1', fontSize: 10, fontWeight: '900', marginTop: 1 },
+  scoreNow: { color: '#67E0B0', fontSize: 10, fontWeight: '900' },
+  scoreValue: { color: '#F7FAFC', fontSize: 10, fontWeight: '900', marginTop: 1 },
   tableZone: {
     flexGrow: 1,
     flexShrink: 1,
@@ -3337,10 +3337,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexShrink: 0,
   },
-  oppCard: { position: 'relative', borderWidth: 1, borderColor: '#2A2F57', backgroundColor: '#121737', borderRadius: 8 },
+  oppCard: { position: 'relative', borderWidth: 1, borderColor: '#435C7D', backgroundColor: '#243655', borderRadius: 8 },
   oppCardTop: { alignSelf: 'center' },
   oppCardSide: { alignSelf: 'center' },
-  oppCardActive: { borderColor: '#4DA3FF', backgroundColor: '#17204A' },
+  oppCardActive: { borderColor: '#67B7FF', backgroundColor: '#345176' },
   oppHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 2 },
   oppName: { flex: 1, minWidth: 0 },
   playerGridHeader: {
@@ -3352,7 +3352,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   oppGridName: {
-    color: '#E8ECF1',
+    color: '#F7FAFC',
     fontSize: 10,
     lineHeight: 12,
     fontWeight: '900',
@@ -3361,11 +3361,11 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   clubTagText: { color: '#B99CFF', fontWeight: '900' },
-  playerGridMeta: { color: '#9BA3C7', fontSize: 8, fontWeight: '900', marginTop: 1 },
+  playerGridMeta: { color: '#A9B9CD', fontSize: 8, fontWeight: '900', marginTop: 1 },
   inlineScores: { alignItems: 'flex-end', flexShrink: 0, minWidth: 42, paddingRight: 1 },
 
   localPanel: { position: 'relative', flexShrink: 0, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 6, borderTopWidth: 1, borderTopColor: 'transparent' },
-  localPanelActive: { borderTopColor: '#4DA3FF', backgroundColor: '#0F1530' },
+  localPanelActive: { borderTopColor: '#67B7FF', backgroundColor: '#263A5C' },
   autoplayNotice: {
     position: 'absolute',
     top: -55,
@@ -3379,8 +3379,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 7,
     borderWidth: 1,
-    borderColor: '#52E5A7',
-    backgroundColor: '#123B32',
+    borderColor: '#67E0B0',
+    backgroundColor: '#205E56',
   },
   autoplayNoticeIcon: {
     width: 30,
@@ -3388,29 +3388,29 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#0B1023',
+    backgroundColor: '#1A2943',
   },
   autoplayNoticeCopy: { flex: 1, minWidth: 0 },
-  autoplayNoticeTitle: { color: '#E8ECF1', fontSize: 12, fontWeight: '900' },
+  autoplayNoticeTitle: { color: '#F7FAFC', fontSize: 12, fontWeight: '900' },
   autoplayNoticeBody: { color: '#B7EED5', fontSize: 10, fontWeight: '700', marginTop: 1 },
   localTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
   localIdentity: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 },
   localTitlePressable: { flex: 1, minWidth: 0 },
   localScoreBox: { alignItems: 'flex-end', marginLeft: 8 },
-  meTitle: { color: '#E8ECF1', fontSize: 15, fontWeight: '900' },
-  activeName: { color: '#E8ECF1' },
+  meTitle: { color: '#F7FAFC', fontSize: 15, fontWeight: '900' },
+  activeName: { color: '#F7FAFC' },
   selfXpTrack: {
     width: 82,
     height: 5,
     borderRadius: 3,
-    backgroundColor: '#0B1023',
+    backgroundColor: '#1A2943',
     overflow: 'hidden',
     marginTop: 4,
   },
   selfXpFill: {
     height: '100%',
     borderRadius: 3,
-    backgroundColor: '#52E5A7',
+    backgroundColor: '#67E0B0',
   },
   takeControlButton: {
     minHeight: 38,
@@ -3420,14 +3420,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 7,
-    backgroundColor: '#52E5A7',
+    backgroundColor: '#67E0B0',
   },
   takeControlButtonDisabled: { opacity: 0.58 },
   takeControlButtonPressed: { opacity: 0.82 },
-  takeControlButtonText: { color: '#0B1023', fontSize: 12, fontWeight: '900' },
+  takeControlButtonText: { color: '#1A2943', fontSize: 12, fontWeight: '900' },
   turnBadge: {
-    color: '#0B1023',
-    backgroundColor: '#52E5A7',
+    color: '#1A2943',
+    backgroundColor: '#67E0B0',
     borderRadius: 6,
     overflow: 'hidden',
     paddingHorizontal: 6,
@@ -3436,8 +3436,8 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   turnBadgeSmall: {
-    color: '#0B1023',
-    backgroundColor: '#52E5A7',
+    color: '#1A2943',
+    backgroundColor: '#67E0B0',
     borderRadius: 5,
     overflow: 'hidden',
     paddingHorizontal: 5,
@@ -3446,7 +3446,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     flexShrink: 0,
   },
-  subtle: { color: '#9BA3C7' },
+  subtle: { color: '#A9B9CD' },
   socialBurst: {
     position: 'absolute',
     top: 5,
@@ -3455,8 +3455,8 @@ const styles = StyleSheet.create({
     maxWidth: '72%',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#52E5A7',
-    backgroundColor: '#123B32',
+    borderColor: '#67E0B0',
+    backgroundColor: '#205E56',
     paddingHorizontal: 10,
     paddingVertical: 6,
     shadowColor: '#000',
@@ -3473,10 +3473,10 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   socialBurstSticker: {
-    borderColor: '#4DA3FF',
-    backgroundColor: '#102448',
+    borderColor: '#67B7FF',
+    backgroundColor: '#294A68',
   },
-  socialBurstText: { color: '#E8ECF1', fontSize: 13, fontWeight: '900', textAlign: 'center' },
+  socialBurstText: { color: '#F7FAFC', fontSize: 13, fontWeight: '900', textAlign: 'center' },
   socialBurstTextCompact: { fontSize: 10 },
   socialBurstEmoji: { fontSize: 22, lineHeight: 26 },
 
@@ -3488,8 +3488,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     borderTopWidth: 1,
-    borderTopColor: '#2A2F57',
-    backgroundColor: '#101633',
+    borderTopColor: '#435C7D',
+    backgroundColor: '#243655',
   },
 
   decisionButtons: { flexDirection: 'row', gap: 8, flex: 1, justifyContent: 'flex-end' },
@@ -3498,8 +3498,8 @@ const styles = StyleSheet.create({
     minHeight: 42,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
+    borderColor: '#435C7D',
+    backgroundColor: '#243655',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 10,
@@ -3509,18 +3509,18 @@ const styles = StyleSheet.create({
     minHeight: 42,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
+    borderColor: '#435C7D',
+    backgroundColor: '#243655',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 8,
   },
-  nextStepText: { color: '#E8ECF1', fontWeight: '800', textAlign: 'center' },
+  nextStepText: { color: '#F7FAFC', fontWeight: '800', textAlign: 'center' },
 
-  altBtn: { flex: 1, minWidth: 0, minHeight: 48, paddingVertical: 7, paddingHorizontal: 6, borderRadius: 8, borderWidth: 2, borderColor: '#4DA3FF', alignItems: 'center', justifyContent: 'center' },
-  altBtnPrimary: { backgroundColor: '#4DA3FF', borderColor: '#4DA3FF' },
-  altBtnText: { color: '#4DA3FF', fontWeight: '800', fontSize: 13, textAlign: 'center' },
-  altBtnTextPrimary: { color: '#0B1023' },
+  altBtn: { flex: 1, minWidth: 0, minHeight: 48, paddingVertical: 7, paddingHorizontal: 6, borderRadius: 8, borderWidth: 2, borderColor: '#67B7FF', alignItems: 'center', justifyContent: 'center' },
+  altBtnPrimary: { backgroundColor: '#67B7FF', borderColor: '#67B7FF' },
+  altBtnText: { color: '#67B7FF', fontWeight: '800', fontSize: 13, textAlign: 'center' },
+  altBtnTextPrimary: { color: '#1A2943' },
   decisionContent: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3540,50 +3540,50 @@ const styles = StyleSheet.create({
   cancelBtnText: { color: '#FF6B6B', fontWeight: '900', fontSize: 14 },
 
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
-  overlayCard: { padding: 20, borderRadius: 16, backgroundColor: '#121737', borderWidth: 1, borderColor: '#2A2F57', width: '78%', alignItems: 'center' },
-  overlayTitle: { color: '#E8ECF1', fontSize: 20, fontWeight: '800', textAlign: 'center' },
+  overlayCard: { padding: 20, borderRadius: 16, backgroundColor: '#243655', borderWidth: 1, borderColor: '#435C7D', width: '78%', alignItems: 'center' },
+  overlayTitle: { color: '#F7FAFC', fontSize: 20, fontWeight: '800', textAlign: 'center' },
   overlayBody: { color: '#C8CEE8', fontSize: 14, fontWeight: '800', lineHeight: 20, textAlign: 'center', marginTop: 10 },
   overlayButton: {
     minWidth: 136,
     minHeight: 44,
     marginTop: 18,
     borderRadius: 10,
-    backgroundColor: '#52E5A7',
+    backgroundColor: '#67E0B0',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 18,
   },
-  overlayButtonText: { color: '#0B1023', fontSize: 15, fontWeight: '900' },
-  summaryLine: { color: '#E8ECF1', fontSize: 15, marginTop: 10, textAlign: 'center' },
+  overlayButtonText: { color: '#1A2943', fontSize: 15, fontWeight: '900' },
+  summaryLine: { color: '#F7FAFC', fontSize: 15, marginTop: 10, textAlign: 'center' },
   rewardBlock: {
     alignSelf: 'stretch',
     marginTop: 14,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#FFCC66',
+    borderColor: '#F4C95D',
     backgroundColor: '#2B2515',
     padding: 10,
   },
-  rewardTitle: { color: '#FFCC66', fontSize: 14, fontWeight: '900', textAlign: 'center', marginBottom: 5 },
-  rewardLine: { color: '#E8ECF1', fontSize: 13, fontWeight: '900', textAlign: 'center' },
-  rewardPrize: { color: '#FFCC66', fontSize: 13, fontWeight: '900', textAlign: 'center', marginTop: 4 },
+  rewardTitle: { color: '#F4C95D', fontSize: 14, fontWeight: '900', textAlign: 'center', marginBottom: 5 },
+  rewardLine: { color: '#F7FAFC', fontSize: 13, fontWeight: '900', textAlign: 'center' },
+  rewardPrize: { color: '#F4C95D', fontSize: 13, fontWeight: '900', textAlign: 'center', marginTop: 4 },
   rewardAfk: { color: '#FF9B9B', fontSize: 12, fontWeight: '900', textAlign: 'center', marginTop: 4 },
-  rewardRanked: { color: '#FFCC66', fontSize: 13, fontWeight: '900', textAlign: 'center', marginTop: 4 },
-  rewardRankedMeta: { color: '#9BA3C7', fontSize: 12, fontWeight: '900', textAlign: 'center', marginTop: 2 },
-  rewardLevel: { color: '#52E5A7', fontSize: 12, fontWeight: '900', textAlign: 'center', marginTop: 4 },
-  rewardAchievement: { color: '#E8ECF1', fontSize: 12, fontWeight: '800', textAlign: 'center', marginTop: 3 },
+  rewardRanked: { color: '#F4C95D', fontSize: 13, fontWeight: '900', textAlign: 'center', marginTop: 4 },
+  rewardRankedMeta: { color: '#A9B9CD', fontSize: 12, fontWeight: '900', textAlign: 'center', marginTop: 2 },
+  rewardLevel: { color: '#67E0B0', fontSize: 12, fontWeight: '900', textAlign: 'center', marginTop: 4 },
+  rewardAchievement: { color: '#F7FAFC', fontSize: 12, fontWeight: '800', textAlign: 'center', marginTop: 3 },
   summaryButton: {
     minWidth: 150,
     minHeight: 44,
     marginTop: 16,
     paddingHorizontal: 18,
     borderRadius: 10,
-    backgroundColor: '#4DA3FF',
+    backgroundColor: '#67B7FF',
     alignItems: 'center',
     justifyContent: 'center',
   },
   summaryButtonText: {
-    color: '#0B1023',
+    color: '#1A2943',
     fontWeight: '900',
     fontSize: 15,
     textAlign: 'center',
@@ -3598,9 +3598,9 @@ const styles = StyleSheet.create({
     maxHeight: '82%',
     paddingTop: 14,
     paddingHorizontal: 12,
-    backgroundColor: '#101633',
+    backgroundColor: '#243655',
     borderTopWidth: 1,
-    borderTopColor: '#2A2F57',
+    borderTopColor: '#435C7D',
   },
   chatHeader: {
     flexDirection: 'row',
@@ -3608,8 +3608,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 10,
   },
-  chatTitle: { color: '#E8ECF1', fontSize: 18, fontWeight: '900' },
-  clubChatSubtitle: { color: '#52E5A7', fontSize: 11, fontWeight: '900', marginTop: 2, maxWidth: 230 },
+  chatTitle: { color: '#F7FAFC', fontSize: 18, fontWeight: '900' },
+  clubChatSubtitle: { color: '#67E0B0', fontSize: 11, fontWeight: '900', marginTop: 2, maxWidth: 230 },
   chatCloseButton: {
     width: 38,
     height: 38,
@@ -3624,8 +3624,8 @@ const styles = StyleSheet.create({
     maxHeight: 220,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#0B1023',
+    borderColor: '#435C7D',
+    backgroundColor: '#1A2943',
   },
   chatMessagesContent: {
     padding: 10,
@@ -3636,25 +3636,25 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
+    borderColor: '#435C7D',
+    backgroundColor: '#243655',
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
   chatBubbleMine: {
     alignSelf: 'flex-end',
-    borderColor: '#52E5A7',
-    backgroundColor: '#123B32',
+    borderColor: '#67E0B0',
+    backgroundColor: '#205E56',
   },
-  chatName: { color: '#9BA3C7', fontSize: 10, fontWeight: '900', marginBottom: 2 },
-  chatNameMine: { color: '#52E5A7' },
-  chatMessageText: { color: '#E8ECF1', fontSize: 14, fontWeight: '700' },
+  chatName: { color: '#A9B9CD', fontSize: 10, fontWeight: '900', marginBottom: 2 },
+  chatNameMine: { color: '#67E0B0' },
+  chatMessageText: { color: '#F7FAFC', fontSize: 14, fontWeight: '700' },
   chatEmojiText: { fontSize: 24, lineHeight: 30 },
   chatStickerText: { color: '#BFD9FF', fontWeight: '900' },
   chatGiftText: { color: '#FFE6A3', fontWeight: '900' },
-  chatEmpty: { color: '#9BA3C7', textAlign: 'center', paddingVertical: 22, fontWeight: '800' },
+  chatEmpty: { color: '#A9B9CD', textAlign: 'center', paddingVertical: 22, fontWeight: '800' },
   chatSectionLabel: {
-    color: '#9BA3C7',
+    color: '#A9B9CD',
     fontSize: 11,
     fontWeight: '900',
     marginTop: 12,
@@ -3665,21 +3665,21 @@ const styles = StyleSheet.create({
     minHeight: 36,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
+    borderColor: '#435C7D',
+    backgroundColor: '#243655',
     paddingHorizontal: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  quickChatText: { color: '#E8ECF1', fontSize: 12, fontWeight: '800' },
+  quickChatText: { color: '#F7FAFC', fontSize: 12, fontWeight: '800' },
   emojiRow: { gap: 8, paddingRight: 12, marginTop: 8 },
   emojiChip: {
     width: 42,
     height: 42,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#121737',
+    borderColor: '#435C7D',
+    backgroundColor: '#243655',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -3689,13 +3689,13 @@ const styles = StyleSheet.create({
     minHeight: 38,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#4DA3FF',
-    backgroundColor: '#102448',
+    borderColor: '#67B7FF',
+    backgroundColor: '#294A68',
     paddingHorizontal: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stickerText: { color: '#E8ECF1', fontSize: 12, fontWeight: '900' },
+  stickerText: { color: '#F7FAFC', fontSize: 12, fontWeight: '900' },
   chatDisabled: { opacity: 0.55 },
   chatInputRow: {
     flexDirection: 'row',
@@ -3709,9 +3709,9 @@ const styles = StyleSheet.create({
     maxHeight: 92,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A2F57',
-    backgroundColor: '#0B1023',
-    color: '#E8ECF1',
+    borderColor: '#435C7D',
+    backgroundColor: '#1A2943',
+    color: '#F7FAFC',
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 14,
@@ -3721,11 +3721,11 @@ const styles = StyleSheet.create({
     minWidth: 72,
     minHeight: 44,
     borderRadius: 8,
-    backgroundColor: '#4DA3FF',
+    backgroundColor: '#67B7FF',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 12,
   },
   chatSendButtonDisabled: { opacity: 0.45 },
-  chatSendText: { color: '#0B1023', fontSize: 13, fontWeight: '900' },
+  chatSendText: { color: '#1A2943', fontSize: 13, fontWeight: '900' },
 });

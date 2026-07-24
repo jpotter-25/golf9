@@ -46,8 +46,8 @@ const FALLBACK_BRANDING: ClubBranding = {
   badgeShape: 'shield',
   bannerStyle: 'classic',
   badgeIcon: 'shield',
-  primaryColor: '#52E5A7',
-  backgroundColor: '#123B32',
+  primaryColor: '#67E0B0',
+  backgroundColor: '#205E56',
   accentColor: '#2DD4BF',
 };
 

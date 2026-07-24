@@ -104,7 +104,7 @@ const Card: React.FC<CardProps> = ({ card, onPress, width, height, margin, selec
                 // Extra bottom padding to ensure no clipping on tiny cards
                 paddingBottom: Math.ceil(H * 0.04),
                 // Color red for hearts/diamonds
-                color: card.suit === '♥' || card.suit === '♦' ? '#FF6B6B' : '#E8ECF1',
+                color: card.suit === '♥' || card.suit === '♦' ? '#FF6B6B' : '#F7FAFC',
               },
             ]}
           >
@@ -134,20 +134,20 @@ const styles = StyleSheet.create({
   card: {
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: '#E8ECF1',
+    borderColor: '#F7FAFC',
     backgroundColor: '#1D2547',
     alignItems: 'center',
     justifyContent: 'center',
     margin: 4,
   },
   faceDown: {
-    backgroundColor: '#2A2F57',
+    backgroundColor: '#435C7D',
   },
   faceDownText: {
     letterSpacing: 0,
   },
   cleared: {
-    borderColor: '#2A2F57',
+    borderColor: '#435C7D',
     backgroundColor: 'transparent',
     opacity: 0.85,
   },
@@ -155,15 +155,15 @@ const styles = StyleSheet.create({
     width: '42%',
     height: 3,
     borderRadius: 3,
-    backgroundColor: '#2A2F57',
+    backgroundColor: '#435C7D',
   },
   zeroed: {
     backgroundColor: '#084D34',
   },
   selected: {
-    borderColor: '#4DA3FF',
+    borderColor: '#67B7FF',
     borderWidth: 3,
-    shadowColor: '#4DA3FF',
+    shadowColor: '#67B7FF',
     shadowOpacity: 0.65,
     shadowRadius: 8,
     elevation: 8,
@@ -180,7 +180,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   rank: {
-    color: '#E8ECF1',
+    color: '#F7FAFC',
     textAlign: 'center',
     fontWeight: '700',
   },

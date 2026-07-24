@@ -28,7 +28,7 @@ const AvatarTimer: React.FC<Props> = ({
 
   // Pick a color: green for the first ~60%, yellow for ~60–85%, red afterwards
   const color = useMemo(() => {
-    if (progress < 0.6) return '#52E5A7';   // green
+    if (progress < 0.6) return '#67E0B0';   // green
     if (progress < 0.85) return '#F7D154';  // yellow
     return '#F36C6C';                       // red
   }, [progress]);

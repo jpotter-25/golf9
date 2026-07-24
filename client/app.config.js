@@ -56,7 +56,7 @@ module.exports = {
     splash: {
       image: './assets/splash.png',
       resizeMode: 'contain',
-      backgroundColor: '#080F2A',
+      backgroundColor: '#1C2E50',
     },
     ios: {
       supportsTablet: true,
@@ -65,7 +65,7 @@ module.exports = {
     },
     android: {
       package: 'com.potterwell.ninebelow',
-      versionCode: 48,
+      versionCode: 49,
       permissions: [],
       blockedPermissions: [
         'com.google.android.gms.permission.AD_ID',
@@ -76,7 +76,7 @@ module.exports = {
       ],
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
-        backgroundColor: '#080F2A',
+        backgroundColor: '#164E73',
       },
     },
     web: {

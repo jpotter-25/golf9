@@ -42,25 +42,25 @@ export function rankEmblemForLeague(league: LeagueLike): RankEmblemVisual {
   const key = rawLeague.toLowerCase();
   const pips = divisionPips(rawName, division);
   if (key.includes('legend')) {
-    return { shortLabel: 'LG', label: rawName, borderColor: '#F8D36A', backgroundColor: '#21162C', textColor: '#FFF0C2', tier: 'legend', primary: '#8B5CFF', secondary: '#FFCC66', shine: '#FFF0C2', glow: '#D9B8FF', pips };
+    return { shortLabel: 'LG', label: rawName, borderColor: '#F8D36A', backgroundColor: '#21162C', textColor: '#FFF0C2', tier: 'legend', primary: '#8B5CFF', secondary: '#F4C95D', shine: '#FFF0C2', glow: '#D9B8FF', pips };
   }
   if (key.includes('grandmaster')) {
     return { shortLabel: 'GM', label: rawName, borderColor: '#FFC9F3', backgroundColor: '#241434', textColor: '#FFE8FA', tier: 'grandmaster', primary: '#FF5ED7', secondary: '#5D6BFF', shine: '#FFF1FC', glow: '#FFC9F3', pips };
   }
   if (key.includes('master')) {
-    return { shortLabel: 'M', label: rawName, borderColor: '#9BE7FF', backgroundColor: '#102838', textColor: '#D8F3FF', tier: 'master', primary: '#3BE7FF', secondary: '#A56BFF', shine: '#EAF8FF', glow: '#9BE7FF', pips };
+    return { shortLabel: 'M', label: rawName, borderColor: '#9BE7FF', backgroundColor: '#214D57', textColor: '#D8F3FF', tier: 'master', primary: '#3BE7FF', secondary: '#A56BFF', shine: '#EAF8FF', glow: '#9BE7FF', pips };
   }
   if (key.includes('diamond')) {
-    return { shortLabel: 'D', label: rawName, borderColor: '#BDEBFF', backgroundColor: '#102448', textColor: '#EAF8FF', tier: 'diamond', primary: '#6FE7FF', secondary: '#4DA3FF', shine: '#FFFFFF', glow: '#BDEBFF', pips };
+    return { shortLabel: 'D', label: rawName, borderColor: '#BDEBFF', backgroundColor: '#294A68', textColor: '#EAF8FF', tier: 'diamond', primary: '#6FE7FF', secondary: '#67B7FF', shine: '#FFFFFF', glow: '#BDEBFF', pips };
   }
   if (key.includes('platinum')) {
-    return { shortLabel: 'P', label: rawName, borderColor: '#BFD9FF', backgroundColor: '#182244', textColor: '#E8ECF1', tier: 'platinum', primary: '#DCEAFF', secondary: '#78B8FF', shine: '#FFFFFF', glow: '#BFD9FF', pips };
+    return { shortLabel: 'P', label: rawName, borderColor: '#BFD9FF', backgroundColor: '#182244', textColor: '#F7FAFC', tier: 'platinum', primary: '#DCEAFF', secondary: '#78B8FF', shine: '#FFFFFF', glow: '#BFD9FF', pips };
   }
   if (key.includes('gold')) {
-    return { shortLabel: division ? `G${division}` : 'G', label: rawName, borderColor: '#FFCC66', backgroundColor: '#2B2515', textColor: '#FFE6A3', tier: 'gold', primary: '#FFCC66', secondary: '#B56A1D', shine: '#FFF0C2', glow: '#FFCC66', pips };
+    return { shortLabel: division ? `G${division}` : 'G', label: rawName, borderColor: '#F4C95D', backgroundColor: '#2B2515', textColor: '#FFE6A3', tier: 'gold', primary: '#F4C95D', secondary: '#B56A1D', shine: '#FFF0C2', glow: '#F4C95D', pips };
   }
   if (key.includes('silver')) {
-    return { shortLabel: division ? `S${division}` : 'S', label: rawName, borderColor: '#BFD9FF', backgroundColor: '#202742', textColor: '#E8ECF1', tier: 'silver', primary: '#DDE8FF', secondary: '#6F84B8', shine: '#FFFFFF', glow: '#BFD9FF', pips };
+    return { shortLabel: division ? `S${division}` : 'S', label: rawName, borderColor: '#BFD9FF', backgroundColor: '#202742', textColor: '#F7FAFC', tier: 'silver', primary: '#DDE8FF', secondary: '#6F84B8', shine: '#FFFFFF', glow: '#BFD9FF', pips };
   }
   if (key.includes('bronze')) {
     return { shortLabel: division ? `B${division}` : 'B', label: rawName, borderColor: '#C58B5A', backgroundColor: '#2B1D17', textColor: '#FFD6B0', tier: 'bronze', primary: '#C58B5A', secondary: '#6D3F26', shine: '#FFD6B0', glow: '#C58B5A', pips };
@@ -183,7 +183,7 @@ export function ProgressAvatar({
           cy={center}
           r={radius}
           fill="none"
-          stroke="#52E5A7"
+          stroke="#67E0B0"
           strokeWidth={ringWidth}
           strokeLinecap="round"
           strokeDasharray={`${circumference} ${circumference}`}
@@ -258,8 +258,8 @@ export function AvatarCluster({
     borderRadius: giftSize / 2,
     right: -1,
     top: -1,
-    borderColor: hasGiftItem ? giftAccent || '#FFCC66' : 'rgba(232,236,241,0.26)',
-    backgroundColor: hasGiftItem ? 'rgba(18,23,55,0.96)' : 'rgba(232,236,241,0.06)',
+    borderColor: hasGiftItem ? giftAccent || '#F4C95D' : 'rgba(232,236,241,0.26)',
+    backgroundColor: hasGiftItem ? 'rgba(36,54,85,0.96)' : 'rgba(247,250,252,0.08)',
   };
   const giftContent = hasGiftItem ? (
     <Text style={[styles.giftItem, { fontSize: Math.max(12, giftSize * 0.6), lineHeight: giftSize }]}>{giftIcon}</Text>
@@ -267,7 +267,7 @@ export function AvatarCluster({
     <Gift color="rgba(232,236,241,0.46)" size={Math.max(10, giftSize * 0.52)} strokeWidth={2.4} />
   );
   const connectionBorderColor =
-    connectionState === 'offline' ? '#FF6B6B' : connectionState === 'online' ? '#52E5A7' : null;
+    connectionState === 'offline' ? '#FF6B6B' : connectionState === 'online' ? '#67E0B0' : null;
   const autoplayWidth = Math.max(34, Math.round(size * 0.78));
   const autoplayHeight = Math.max(18, Math.round(size * 0.36));
 
@@ -298,7 +298,7 @@ export function AvatarCluster({
             },
           ]}
         >
-          <Bot color="#E8ECF1" size={Math.max(10, Math.round(autoplayHeight * 0.58))} strokeWidth={2.8} />
+          <Bot color="#F7FAFC" size={Math.max(10, Math.round(autoplayHeight * 0.58))} strokeWidth={2.8} />
           <Text style={[styles.autoplayText, { fontSize: Math.max(7, Math.round(autoplayHeight * 0.36)) }]}>AUTO</Text>
         </View>
       ) : null}
@@ -437,10 +437,10 @@ const styles = StyleSheet.create({
     gap: 2,
     borderWidth: 1,
     borderColor: 'rgba(232,236,241,0.72)',
-    backgroundColor: 'rgba(11,16,35,0.92)',
+    backgroundColor: 'rgba(36,54,85,0.94)',
   },
   autoplayText: {
-    color: '#E8ECF1',
+    color: '#F7FAFC',
     fontWeight: '900',
     letterSpacing: 0,
   },
@@ -455,13 +455,13 @@ const styles = StyleSheet.create({
     height: 16,
     borderRadius: 8,
     borderWidth: 2,
-    borderColor: '#121737',
+    borderColor: '#243655',
     backgroundColor: '#FF6B6B',
     alignItems: 'center',
     justifyContent: 'center',
   },
   claimText: {
-    color: '#0B1023',
+    color: '#1A2943',
     fontSize: 10,
     fontWeight: '900',
     lineHeight: 12,
