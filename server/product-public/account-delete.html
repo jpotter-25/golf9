@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en-US">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Account Deletion | Nine Below</title>
+  <meta name="description" content="Securely delete a Nine Below player account.">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta name="theme-color" content="#173348">
+  <link rel="icon" href="/brand/nine-below-icon.png" type="image/png">
+  <link rel="stylesheet" href="/brand/styles.css">
+</head>
+<body class="support-page">
+  <a class="skip-link" href="#main">Skip to account deletion</a>
+  <header class="site-header site-header--solid">
+    <nav class="nav shell" aria-label="Account navigation">
+      <a class="brand" href="/" aria-label="Nine Below home">
+        <img src="/brand/nine-below-icon.png" width="42" height="42" alt="">
+        <span>Nine Below</span>
+      </a>
+      <a class="case-back" href="/">Back to Nine Below</a>
+    </nav>
+  </header>
+  <main class="deletion-main shell" id="main">
+    <header class="deletion-heading">
+      <p class="eyebrow">Nine Below by Potterwell</p>
+      <h1>Account Deletion</h1>
+      <p>Delete your player account securely without emailing a password or waiting for manual processing.</p>
+    </header>
+
+    <section class="deletion-callout">
+      <div>
+        <p class="eyebrow">Recommended</p>
+        <h2>Delete from the Nine Below app</h2>
+        <p>While signed in, open <strong>Profile</strong>, choose <strong>Social &amp; Account</strong>, then choose <strong>Delete Account</strong>. The app verifies you through your password, Google, or Facebook before deleting the account.</p>
+      </div>
+      <span class="deletion-badge">Fastest</span>
+    </section>
+
+    <section class="deletion-warning" aria-labelledby="before-title">
+      <h2 id="before-title">Before you continue</h2>
+      <p>Deletion is permanent. Your profile, linked sign-in identifiers, progression, coins, cosmetics, clubs, social connections, and active sessions are removed. Completed match, moderation, security, and support records may be retained only in anonymized form where needed.</p>
+      <p>You cannot delete an account during an active online match. Finish the match first.</p>
+    </section>
+
+    <section class="deletion-options" aria-labelledby="fallback-title">
+      <div class="deletion-options__heading">
+        <p class="eyebrow">Web fallback</p>
+        <h2 id="fallback-title">Verify that the account is yours</h2>
+        <p>Choose a verification method already connected to your Nine Below account.</p>
+      </div>
+
+      <div class="deletion-grid">
+        <form class="deletion-form" id="password-delete-form">
+          <div>
+            <h3>Player password</h3>
+            <p>For accounts that have a Nine Below password.</p>
+          </div>
+          <label>
+            <span>Display name</span>
+            <input name="displayName" minlength="2" maxlength="12" autocomplete="username" required>
+          </label>
+          <label>
+            <span>Password</span>
+            <input name="password" type="password" autocomplete="current-password" required>
+          </label>
+          <label>
+            <span>Type DELETE to confirm</span>
+            <input name="confirmation" autocomplete="off" pattern="DELETE" required>
+          </label>
+          <p class="form-status" id="password-delete-status" role="status" aria-live="polite"></p>
+          <button class="button button--danger" type="submit">Permanently delete account</button>
+        </form>
+
+        <form class="deletion-form" id="email-delete-form">
+          <div>
+            <h3>Verified linked email</h3>
+            <p>For Google or Facebook accounts with a verified email.</p>
+          </div>
+          <label>
+            <span>Display name</span>
+            <input name="displayName" minlength="2" maxlength="12" autocomplete="username" required>
+          </label>
+          <label>
+            <span>Verified email</span>
+            <input name="email" type="email" autocomplete="email" required>
+          </label>
+          <button class="button button--secondary" id="request-code-button" type="submit">Send verification code</button>
+          <div class="verification-fields" id="verification-fields" hidden>
+            <label>
+              <span>Six-digit code</span>
+              <input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6">
+            </label>
+            <label>
+              <span>Type DELETE to confirm</span>
+              <input name="confirmation" autocomplete="off" pattern="DELETE">
+            </label>
+            <button class="button button--danger" id="confirm-code-button" type="button">Permanently delete account</button>
+          </div>
+          <p class="form-status" id="email-delete-status" role="status" aria-live="polite"></p>
+        </form>
+      </div>
+    </section>
+
+    <section class="deletion-help">
+      <h2>Need help?</h2>
+      <p>If you cannot access a linked verification method, contact <a href="mailto:app-developer@potterwell.com">app-developer@potterwell.com</a>. Never send a password.</p>
+    </section>
+
+    <section class="deletion-success" id="deletion-success" hidden aria-live="polite">
+      <span class="success-mark" aria-hidden="true">✓</span>
+      <p class="eyebrow">Deletion complete</p>
+      <h2>Your Nine Below account was deleted.</h2>
+      <p>Any retained operational history has been detached from your identity. You can close this page.</p>
+      <a class="button button--primary" href="/">Return to Nine Below</a>
+    </section>
+  </main>
+  <script src="/brand/account-delete.js" defer></script>
+</body>
+</html>

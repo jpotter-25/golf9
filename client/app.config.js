@@ -65,7 +65,7 @@ module.exports = {
     },
     android: {
       package: 'com.potterwell.ninebelow',
-      versionCode: 49,
+      versionCode: 50,
       permissions: [],
       blockedPermissions: [
         'com.google.android.gms.permission.AD_ID',

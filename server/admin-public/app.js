@@ -704,21 +704,78 @@ async function loadTickets() {
   const output = document.querySelector('#tickets');
   output.replaceChildren(...tickets.map(ticket => {
     const card = document.createElement('div');
-    card.className = 'card';
+    card.className = 'card support-ticket';
+    const source = ticket.source === 'potterwell'
+      ? 'Potterwell.com'
+      : ticket.source === 'ninebelow'
+        ? 'NineBelow.Potterwell.com'
+        : 'In-app';
+    const thread = (ticket.notes || []).map(note => `
+      <article class="support-message ${note.public ? 'public' : 'internal'}">
+        <div class="split-header">
+          <strong>${escapeHtml(note.authorType === 'requester' ? (note.requesterName || ticket.contactName || 'Requester') : (note.adminName || 'Staff'))}</strong>
+          <span class="muted">${note.public ? 'Public' : 'Internal'} - ${new Date(note.createdAt).toLocaleString()}</span>
+        </div>
+        <p>${escapeHtml(note.text)}</p>
+      </article>
+    `).join('');
     card.innerHTML = `
-      <strong>${escapeHtml(ticket.subject)}</strong>
-      <p class="muted">${escapeHtml(ticket.displayName || 'Unknown')} - ${escapeHtml(ticket.status)} - ${new Date(ticket.updatedAt).toLocaleString()}</p>
-      <p>${escapeHtml(ticket.message)}</p>
-      <div class="row">
-        <select>
-          ${['open', 'in_review', 'waiting_on_player', 'resolved', 'closed'].map(status => `<option ${status === ticket.status ? 'selected' : ''}>${status}</option>`).join('')}
-        </select>
-        <button>Update</button>
+      <div class="split-header">
+        <div>
+          <p class="eyebrow">${escapeHtml(ticket.publicReference || 'PLAYER CASE')}</p>
+          <h3>${escapeHtml(ticket.subject)}</h3>
+        </div>
+        <span class="support-source">${escapeHtml(source)}</span>
+      </div>
+      <p class="muted">${escapeHtml(ticket.contactName || ticket.displayName || 'Unknown requester')} ${ticket.contactEmail ? `&lt;${escapeHtml(ticket.contactEmail)}&gt;` : ''} - ${escapeHtml(ticket.category)} - ${new Date(ticket.updatedAt).toLocaleString()}</p>
+      <article class="support-message public">
+        <div class="split-header"><strong>Initial request</strong><span class="muted">${new Date(ticket.createdAt).toLocaleString()}</span></div>
+        <p>${escapeHtml(ticket.message)}</p>
+      </article>
+      <div class="support-thread">${thread}</div>
+      <div class="support-compose">
+        <label>Status
+          <select class="ticket-status">
+            ${['open', 'in_review', 'waiting_on_player', 'resolved', 'closed'].map(status => `<option ${status === ticket.status ? 'selected' : ''}>${status}</option>`).join('')}
+          </select>
+        </label>
+        <label>Reply or note
+          <textarea class="ticket-note" maxlength="800" placeholder="${ticket.publicAccessEnabled ? 'Write a requester reply or an internal note' : 'Write an internal note'}"></textarea>
+        </label>
+        <div class="support-actions">
+          <button class="ticket-update">Update Status</button>
+          ${ticket.publicAccessEnabled ? '<button class="ticket-reply public-reply">Send Public Reply</button>' : ''}
+          <button class="ticket-internal internal-note ghost">Add Internal Note</button>
+        </div>
       </div>
     `;
-    card.querySelector('button').addEventListener('click', async () => {
-      await api(`/support/tickets/${ticket.ticketId}`, { method: 'PATCH', body: JSON.stringify({ status: card.querySelector('select').value }) });
-      loadTickets();
+    card.querySelector('.ticket-update').addEventListener('click', async () => {
+      await api(`/support/tickets/${ticket.ticketId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: card.querySelector('.ticket-status').value }),
+      });
+      status('Ticket status updated.', 'ok');
+      await loadTickets();
+    });
+    card.querySelector('.ticket-reply')?.addEventListener('click', async () => {
+      const note = card.querySelector('.ticket-note').value.trim();
+      if (!note) return status('Write a reply first.', 'error');
+      await api(`/support/tickets/${ticket.ticketId}/notes`, {
+        method: 'POST',
+        body: JSON.stringify({ note, public: true }),
+      });
+      status('Public reply sent.', 'ok');
+      await loadTickets();
+    });
+    card.querySelector('.ticket-internal').addEventListener('click', async () => {
+      const note = card.querySelector('.ticket-note').value.trim();
+      if (!note) return status('Write an internal note first.', 'error');
+      await api(`/support/tickets/${ticket.ticketId}/notes`, {
+        method: 'POST',
+        body: JSON.stringify({ note, public: false }),
+      });
+      status('Internal note saved.', 'ok');
+      await loadTickets();
     });
     return card;
   }));

@@ -469,6 +469,93 @@ h2 {
   font-size: 1.08rem;
 }
 
+.support-ticket {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1.1rem;
+}
+
+.support-ticket .split-header {
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.support-ticket h3 {
+  margin: 0.25rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.support-source {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.6rem;
+  border: 1px solid rgba(77, 157, 255, 0.6);
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  background: rgba(77, 157, 255, 0.1);
+  color: #86bbff;
+  font-size: 0.74rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.support-message,
+.support-compose {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.85rem;
+  background: rgba(9, 15, 35, 0.72);
+}
+
+.support-message.public {
+  border-left: 4px solid var(--blue);
+}
+
+.support-message.internal {
+  border-left: 4px solid var(--gold);
+  background: rgba(255, 209, 102, 0.06);
+}
+
+.support-message p {
+  margin: 0.35rem 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.support-thread {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.support-compose {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.support-compose textarea {
+  min-height: 7rem;
+}
+
+.support-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.support-actions button {
+  width: auto;
+}
+
+.support-actions .public-reply {
+  background: var(--blue);
+}
+
+.support-actions .internal-note {
+  border-color: rgba(255, 209, 102, 0.75);
+  color: var(--gold);
+}
+
 .player-table-wrap {
   margin-top: 0.75rem;
   overflow-x: auto;

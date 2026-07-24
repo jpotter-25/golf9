@@ -23,6 +23,7 @@ export type UserProfile = {
   displayRankEmblem: DisplayRankEmblem | null;
   club: ClubSummary | null;
   authProviders: AuthProviderStatus;
+  passwordSignIn: boolean;
 };
 
 export type AuthResponse = { token: string; user: UserProfile };
@@ -114,6 +115,13 @@ export type SocialAuthPayload = {
   accessToken?: string;
   displayName?: string;
   inviteCode?: string;
+};
+export type AccountDeletionPayload = {
+  confirmation: 'DELETE';
+  method: 'password' | AuthProviderKey;
+  password?: string;
+  idToken?: string;
+  accessToken?: string;
 };
 export type SocialProfileRequiredResponse = {
   requiresProfile: true;
@@ -962,6 +970,14 @@ export function submitMailboxFeedback(
 
 export function logout(token: string): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>('/auth/logout', { method: 'POST' }, token);
+}
+
+export function deleteAccount(token: string, payload: AccountDeletionPayload): Promise<{ ok: true }> {
+  return request<{ ok: true }>(
+    '/auth/account',
+    { method: 'DELETE', body: JSON.stringify(payload) },
+    token
+  );
 }
 
 export function me(token: string): Promise<{ user: UserProfile }> {

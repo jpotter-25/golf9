@@ -25,6 +25,7 @@ type AuthContextValue = {
   signInWithSocial: (provider: api.AuthProviderKey) => Promise<api.SocialAuthResponse | (api.SocialProfileRequiredResponse & api.SocialAuthPayload)>;
   completeSocialSignUp: (credential: api.SocialAuthPayload, displayName: string, inviteCode?: string) => Promise<void>;
   linkSocialProvider: (provider: api.AuthProviderKey) => Promise<void>;
+  deleteAccount: (method: 'password' | api.AuthProviderKey, password?: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 };
@@ -110,6 +111,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const credential = await getSocialCredential(provider);
       const response = await api.linkSocialProvider(token, credential);
       setUser(response.user);
+    },
+    deleteAccount: async (method, password) => {
+      if (!token) throw new Error('Log in before deleting an account.');
+      if (!isOnline) throw new Error('Connect to the internet before deleting your account.');
+      const credential = method === 'password'
+        ? { method, password }
+        : { method, ...await getSocialCredential(method) };
+      await api.deleteAccount(token, { confirmation: 'DELETE', ...credential });
+      await signOutProviders().catch(error => logError(error, { area: 'provider-delete-account' }));
+      setToken(null);
+      setUser(null);
+      await Promise.all([clearSession(), clearCachedProfile()]);
     },
     refreshProfile,
     signOut: async () => {

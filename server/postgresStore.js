@@ -12,6 +12,7 @@ const COLLECTION_TABLES = [
   ['admin_sessions', 'token'],
   ['admin_audit', 'audit_id'],
   ['admin_recovery_requests', 'request_id'],
+  ['account_deletion_requests', 'request_id'],
   ['support_tickets', 'ticket_id'],
   ['mail_entries', 'mail_id'],
   ['bans', 'ban_id'],
@@ -95,6 +96,7 @@ export class PostgresStore {
       adminSessions: [],
       adminAudit: [],
       adminRecoveryRequests: [],
+      accountDeletionRequests: [],
       supportTickets: [],
       mailEntries: [],
       bans: [],
@@ -115,6 +117,7 @@ export class PostgresStore {
       else if (table === 'admin_sessions') state.adminSessions = values;
       else if (table === 'admin_audit') state.adminAudit = values;
       else if (table === 'admin_recovery_requests') state.adminRecoveryRequests = values;
+      else if (table === 'account_deletion_requests') state.accountDeletionRequests = values;
       else if (table === 'support_tickets') state.supportTickets = values;
       else if (table === 'mail_entries') state.mailEntries = values;
       else if (table === 'invite_codes') state.inviteCodes = values;
@@ -149,6 +152,7 @@ export class PostgresStore {
         admin_sessions: state.adminSessions || [],
         admin_audit: state.adminAudit || [],
         admin_recovery_requests: state.adminRecoveryRequests || [],
+        account_deletion_requests: state.accountDeletionRequests || [],
         support_tickets: state.supportTickets || [],
         mail_entries: state.mailEntries || [],
         bans: state.bans || [],

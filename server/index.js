@@ -147,6 +147,7 @@ import {
   createAdminAccount,
   consumeSignupInvite,
   createInviteCode,
+  createPublicSupportTicket,
   createSupportTicket,
   disableInviteCode,
   ensureBootstrapAdmin,
@@ -154,6 +155,7 @@ import {
   loginAdmin,
   normalizeAdminStore,
   normalizeUserAdminFields,
+  publicSupportTicket,
   isUserArchived,
   requireAdmin,
   requestAdminPasswordRecovery,
@@ -165,6 +167,7 @@ import {
   updateAdminAccount,
   updateSupportTicket,
   addSupportNote,
+  addRequesterSupportReply,
   validateSignupInvite,
   verifyAdminMfa,
   writeAudit,
@@ -239,7 +242,11 @@ const ADMIN_SMTP_USER = String(process.env.ADMIN_SMTP_USER || '').trim();
 const ADMIN_SMTP_PASS = String(process.env.ADMIN_SMTP_PASS || '').trim();
 const ADMIN_SMTP_FROM = String(process.env.ADMIN_SMTP_FROM || process.env.ADMIN_BOOTSTRAP_EMAIL || '').trim();
 const ADMIN_SMTP_SECURE = ['1', 'true', 'yes'].includes(String(process.env.ADMIN_SMTP_SECURE || '').trim().toLowerCase());
+const SUPPORT_INBOX_EMAIL = String(process.env.SUPPORT_INBOX_EMAIL || 'app-developer@potterwell.com').trim();
 const adminEmailTestOutbox = [];
+const ACCOUNT_DELETION_CODE_TTL_MS = 1000 * 60 * 15;
+const ACCOUNT_DELETION_REQUEST_TTL_MS = 1000 * 60 * 60 * 24;
+const ACCOUNT_DELETION_MAX_ATTEMPTS = 5;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const ROOM_TTL_MS = 1000 * 60 * 60 * 2;
 const PORT = String(process.env.PORT || 3001);
@@ -249,7 +256,16 @@ const EXTRA_LISTEN_PORTS = [...new Set(
     .map(port => port.trim())
     .filter(port => port && port !== PORT)
 )];
-const CLIENT_ORIGINS = (process.env.CLIENT_ORIGINS || '*').split(',');
+const CLIENT_ORIGINS = (process.env.CLIENT_ORIGINS || '*')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+const PUBLIC_WEB_ORIGINS = new Set([
+  'https://potterwell.com',
+  'https://www.potterwell.com',
+  'https://ninebelow.potterwell.com',
+  ...CLIENT_ORIGINS.filter(origin => origin !== '*'),
+]);
 const MAX_PROCESSED_ACTION_IDS = 500;
 const ROOM_COUNTDOWN_MS = Number(process.env.ROOM_COUNTDOWN_MS || 10000);
 const CHAT_HISTORY_LIMIT = 80;
@@ -358,7 +374,15 @@ function normalizeAdminPublicUrl(value, publicApiUrl) {
 }
 
 const app = express();
-app.use(cors({ origin: CLIENT_ORIGINS.includes('*') ? '*' : CLIENT_ORIGINS, credentials: true }));
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || CLIENT_ORIGINS.includes('*') || PUBLIC_WEB_ORIGINS.has(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Origin is not allowed.'));
+  },
+  credentials: true,
+}));
 app.use(express.json());
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -395,6 +419,48 @@ app.use('/admin/api', (req, res, next) => {
   return next();
 });
 
+const accountDeletionRequestWindow = new Map();
+function accountDeletionRateLimit(req, res, next) {
+  const now = Date.now();
+  const currentWindow = Math.floor(now / (10 * 60 * 1000));
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const bucket = `${ip}:${currentWindow}`;
+  const count = (accountDeletionRequestWindow.get(bucket) || 0) + 1;
+  accountDeletionRequestWindow.set(bucket, count);
+  if (accountDeletionRequestWindow.size > 1000) {
+    for (const key of accountDeletionRequestWindow.keys()) {
+      if (!key.endsWith(`:${currentWindow}`)) accountDeletionRequestWindow.delete(key);
+    }
+  }
+  if (count > 12) {
+    return res.status(429).json({
+      error: 'Too many account deletion attempts. Wait a few minutes and try again.',
+    });
+  }
+  return next();
+}
+
+const publicSupportRequestWindow = new Map();
+function publicSupportRateLimit(req, res, next) {
+  const now = Date.now();
+  const currentWindow = Math.floor(now / (15 * 60 * 1000));
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const bucket = `${ip}:${currentWindow}`;
+  const count = (publicSupportRequestWindow.get(bucket) || 0) + 1;
+  publicSupportRequestWindow.set(bucket, count);
+  if (publicSupportRequestWindow.size > 1000) {
+    for (const key of publicSupportRequestWindow.keys()) {
+      if (!key.endsWith(`:${currentWindow}`)) publicSupportRequestWindow.delete(key);
+    }
+  }
+  if (count > 6) {
+    return res.status(429).json({
+      error: 'Too many support requests. Wait a few minutes and try again.',
+    });
+  }
+  return next();
+}
+
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: CLIENT_ORIGINS.includes('*') ? '*' : CLIENT_ORIGINS } });
 const listeningServers = [server];
@@ -419,6 +485,8 @@ const rankedQueue = new Map();
 const clubs = new Map();
 /** @type {Array<any>} */
 const mailEntries = [];
+/** @type {Array<any>} */
+const accountDeletionRequests = [];
 /** @type {Map<string, number>} */
 const clubChatRate = new Map();
 const competitiveStore = normalizeCompetitiveConfigStore({});
@@ -662,6 +730,27 @@ function adminRecoveryEmailEnabled() {
   return ADMIN_EMAIL_TEST_MODE || (!!ADMIN_SMTP_HOST && !!ADMIN_SMTP_FROM);
 }
 
+async function sendTransactionalEmail(message, testMetadata = {}) {
+  if (ADMIN_EMAIL_TEST_MODE) {
+    adminEmailTestOutbox.push({ ...message, ...testMetadata, sentAt: Date.now() });
+    return;
+  }
+  if (!adminRecoveryEmailEnabled()) throw new Error('Email delivery is not configured.');
+  const auth = ADMIN_SMTP_USER || ADMIN_SMTP_PASS ? { user: ADMIN_SMTP_USER, pass: ADMIN_SMTP_PASS } : undefined;
+  const transport = nodemailer.createTransport({
+    host: ADMIN_SMTP_HOST,
+    port: ADMIN_SMTP_PORT,
+    secure: ADMIN_SMTP_SECURE,
+    auth,
+  });
+  await transport.sendMail({
+    from: ADMIN_SMTP_FROM,
+    to: message.to,
+    subject: message.subject,
+    text: message.text,
+  });
+}
+
 async function sendAdminRecoveryCode({ admin, code, expiresAt }) {
   const message = {
     to: admin.email,
@@ -675,24 +764,103 @@ async function sendAdminRecoveryCode({ admin, code, expiresAt }) {
       'If you did not request this code, ignore this message and review admin audit logs.',
     ].join('\n'),
   };
-  if (ADMIN_EMAIL_TEST_MODE) {
-    adminEmailTestOutbox.push({ ...message, adminId: admin.adminId, code, expiresAt, sentAt: Date.now() });
-    return;
+  await sendTransactionalEmail(message, { type: 'admin-recovery', adminId: admin.adminId, code, expiresAt });
+}
+
+async function sendAccountDeletionCode({ user, requestId, email, code, expiresAt }) {
+  const message = {
+    to: email,
+    subject: 'Nine Below account deletion verification code',
+    text: [
+      `Hello ${user.displayName},`,
+      '',
+      `Your Nine Below account deletion verification code is ${code}.`,
+      `It expires at ${new Date(expiresAt).toLocaleString()}.`,
+      '',
+      'Only enter this code on ninebelow.potterwell.com. If you did not request account deletion, ignore this message and your account will remain unchanged.',
+    ].join('\n'),
+  };
+  await sendTransactionalEmail(message, {
+    type: 'account-deletion',
+    userId: anonymizedDeletedUserId(user.userId),
+    requestId,
+    code,
+    expiresAt,
+  });
+}
+
+function supportTrackingUrl(ticket, accessToken) {
+  const reference = encodeURIComponent(ticket.publicReference || '');
+  const token = encodeURIComponent(accessToken || '');
+  return `${PUBLIC_API_URL}/support/ticket?reference=${reference}#token=${token}`;
+}
+
+async function sendSupportEmailQuietly(message, metadata = {}) {
+  try {
+    await sendTransactionalEmail(message, metadata);
+    return true;
+  } catch (error) {
+    console.error('Support email delivery failed:', error?.message || error);
+    return false;
   }
-  if (!adminRecoveryEmailEnabled()) throw new Error('Admin recovery email is not configured.');
-  const auth = ADMIN_SMTP_USER || ADMIN_SMTP_PASS ? { user: ADMIN_SMTP_USER, pass: ADMIN_SMTP_PASS } : undefined;
-  const transport = nodemailer.createTransport({
-    host: ADMIN_SMTP_HOST,
-    port: ADMIN_SMTP_PORT,
-    secure: ADMIN_SMTP_SECURE,
-    auth,
-  });
-  await transport.sendMail({
-    from: ADMIN_SMTP_FROM,
-    to: admin.email,
-    subject: message.subject,
-    text: message.text,
-  });
+}
+
+async function sendPublicSupportOpened(ticket, accessToken) {
+  const trackingUrl = supportTrackingUrl(ticket, accessToken);
+  const sourceLabel = ticket.source === 'potterwell' ? 'Potterwell' : 'Nine Below';
+  await Promise.all([
+    sendSupportEmailQuietly({
+      to: ticket.contactEmail,
+      subject: `${sourceLabel} support case ${ticket.publicReference}`,
+      text: [
+        `Hello ${ticket.contactName},`,
+        '',
+        `We received your ${sourceLabel} support request.`,
+        `Case: ${ticket.publicReference}`,
+        `Subject: ${ticket.subject}`,
+        '',
+        'Use this private link to follow the case and reply:',
+        trackingUrl,
+        '',
+        'Keep this link private. It provides access to your support conversation.',
+      ].join('\n'),
+    }, { type: 'support-opened-requester', ticketId: ticket.ticketId }),
+    sendSupportEmailQuietly({
+      to: SUPPORT_INBOX_EMAIL,
+      subject: `[${ticket.publicReference}] ${ticket.subject}`,
+      text: [
+        `New ${sourceLabel} support request`,
+        '',
+        `Case: ${ticket.publicReference}`,
+        `From: ${ticket.contactName} <${ticket.contactEmail}>`,
+        `Category: ${ticket.category}`,
+        `Source page: ${ticket.website || 'not supplied'}`,
+        '',
+        ticket.message,
+        '',
+        `Manage this case at ${ADMIN_PUBLIC_URL}`,
+      ].join('\n'),
+    }, { type: 'support-opened-staff', ticketId: ticket.ticketId }),
+  ]);
+}
+
+async function sendSupportRequesterUpdate(ticket, message, status = null) {
+  if (!ticket?.contactEmail || !ticket?.publicReference) return false;
+  const statusLine = status ? `Status: ${status.replaceAll('_', ' ')}` : null;
+  return sendSupportEmailQuietly({
+    to: ticket.contactEmail,
+    subject: `Update for support case ${ticket.publicReference}`,
+    text: [
+      `Hello ${ticket.contactName || ticket.displayName || 'there'},`,
+      '',
+      statusLine,
+      message || 'Your support case has been updated.',
+      '',
+      'Use the private tracking link from your original confirmation email to view the conversation or reply.',
+      '',
+      'Potterwell Support',
+    ].filter(Boolean).join('\n'),
+  }, { type: 'support-requester-update', ticketId: ticket.ticketId, status });
 }
 
 function renderPushTemplate(template, data = {}) {
@@ -904,11 +1072,28 @@ function reconcileClubMemberships(now = Date.now()) {
   return changed;
 }
 
+function normalizeAccountDeletionRequests(entries, now = Date.now()) {
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .filter(entry => entry?.requestId && entry?.userId && entry?.codeHash)
+    .map(entry => ({
+      requestId: String(entry.requestId),
+      userId: String(entry.userId),
+      codeHash: String(entry.codeHash),
+      createdAt: Number(entry.createdAt || now),
+      expiresAt: Number(entry.expiresAt || now),
+      attempts: Math.max(0, Math.trunc(Number(entry.attempts || 0))),
+      usedAt: entry.usedAt ? Number(entry.usedAt) : null,
+    }))
+    .filter(entry => !entry.usedAt && entry.expiresAt > now);
+}
+
 function applyStoreState(parsed = {}) {
   users.clear();
   sessions.clear();
   results.splice(0, results.length);
   mailEntries.splice(0, mailEntries.length);
+  accountDeletionRequests.splice(0, accountDeletionRequests.length);
   clubs.clear();
   normalizeCatalogStore(Object.assign(catalogStore, parsed.catalog || {}));
   seedCatalogStore(catalogStore);
@@ -938,6 +1123,7 @@ function applyStoreState(parsed = {}) {
   }
   results.push(...(parsed.results || []));
   mailEntries.push(...normalizeMailEntries(parsed.mailEntries || []));
+  accountDeletionRequests.push(...normalizeAccountDeletionRequests(parsed.accountDeletionRequests || []));
   storeMigrationPending = reconcileClubMemberships() || storeMigrationPending;
 }
 
@@ -966,6 +1152,7 @@ function storeSnapshot() {
     sessions: [...sessions.values()],
     results,
     mailEntries: normalizeMailEntries(mailEntries),
+    accountDeletionRequests: normalizeAccountDeletionRequests(accountDeletionRequests),
     rankedSeason,
     competitiveConfig: competitiveStore,
     economyConfig: economyStore,
@@ -1023,6 +1210,233 @@ function makeCode() {
 function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
   const passwordHash = crypto.pbkdf2Sync(password, salt, 120_000, 32, 'sha256').toString('hex');
   return { salt, passwordHash };
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(String(value || '')).digest('hex');
+}
+
+function timingSafeTextEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left || ''));
+  const rightBuffer = Buffer.from(String(right || ''));
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function passwordMatches(user, password) {
+  if (!user?.salt || !user?.passwordHash || typeof password !== 'string') return false;
+  const candidate = hashPassword(password, user.salt).passwordHash;
+  return timingSafeTextEqual(candidate, user.passwordHash);
+}
+
+function anonymizedDeletedUserId(userId) {
+  const clean = String(userId || '');
+  if (clean.startsWith('deleted:')) return clean;
+  return `deleted:${sha256(clean).slice(0, 24)}`;
+}
+
+function verifiedDeletionEmails(user) {
+  normalizeAuthProviders(user);
+  return [...new Set(
+    Object.values(user.authProviders || {})
+      .filter(link => link?.emailVerified && link?.email)
+      .map(link => String(link.email).trim().toLowerCase())
+      .filter(Boolean)
+  )];
+}
+
+function findDeletionUser(displayName, email = '') {
+  const cleanName = cleanPlayerNameCandidate(displayName).toLowerCase();
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  if (!cleanName) return null;
+  return [...users.values()].find(user => {
+    if (String(user.displayName || '').trim().toLowerCase() !== cleanName) return false;
+    return !cleanEmail || verifiedDeletionEmails(user).includes(cleanEmail);
+  }) || null;
+}
+
+function accountDeletionCodeHash(requestId, code) {
+  return sha256(`${requestId}:${String(code || '').trim()}`);
+}
+
+async function verifyAccountDeletionCredential(user, body = {}) {
+  const confirmation = String(body.confirmation || '').trim().toUpperCase();
+  if (confirmation !== 'DELETE') return { error: 'Type DELETE to confirm account deletion.' };
+
+  const method = String(body.method || '').trim().toLowerCase();
+  if (method === 'password') {
+    if (!passwordMatches(user, String(body.password || ''))) {
+      return { error: 'Password verification failed.' };
+    }
+    return { method };
+  }
+
+  const provider = normalizeProvider(method);
+  if (!provider) return { error: 'Choose a valid account verification method.' };
+  normalizeAuthProviders(user);
+  const linkedProvider = user.authProviders[provider];
+  if (!linkedProvider) return { error: `${providerLabel(provider)} is not linked to this account.` };
+
+  let profile;
+  try {
+    profile = await verifySocialProfile(provider, body);
+  } catch (error) {
+    return {
+      error: error instanceof Error
+        ? error.message
+        : `${providerLabel(provider)} verification failed.`,
+    };
+  }
+  if (profile.providerUserId !== linkedProvider.providerUserId) {
+    return { error: `${providerLabel(provider)} verification did not match this account.` };
+  }
+  return { method: provider };
+}
+
+function anonymizeClubUserReferences(club, userId, deletedUserId) {
+  removeUserFromClub(club, userId);
+  if (Array.isArray(club.prestige?.history)) {
+    club.prestige.history = club.prestige.history.map(item => (
+      item?.purchasedBy === userId ? { ...item, purchasedBy: deletedUserId } : item
+    ));
+  }
+  if (Array.isArray(club.treasury?.donations)) {
+    club.treasury.donations = club.treasury.donations.map(item => (
+      item?.userId === userId ? { ...item, userId: deletedUserId } : item
+    ));
+  }
+  if (club.treasuryGoal?.createdBy === userId) club.treasuryGoal.createdBy = deletedUserId;
+  if (Array.isArray(club.announcements)) {
+    club.announcements = club.announcements.map(item => ({
+      ...item,
+      ...(item?.userId === userId ? { userId: deletedUserId, displayName: 'Deleted Player' } : {}),
+      ...(item?.authorUserId === userId ? { authorUserId: deletedUserId, authorName: 'Deleted Player' } : {}),
+    }));
+  }
+  const contributors = club.events?.active?.contributors;
+  if (contributors && Object.prototype.hasOwnProperty.call(contributors, userId)) {
+    contributors[deletedUserId] = (Number(contributors[deletedUserId]) || 0) + (Number(contributors[userId]) || 0);
+    delete contributors[userId];
+  }
+  const memberClaims = club.rewards?.memberClaims;
+  if (memberClaims && Object.prototype.hasOwnProperty.call(memberClaims, userId)) {
+    memberClaims[deletedUserId] = [
+      ...new Set([...(memberClaims[deletedUserId] || []), ...(memberClaims[userId] || [])]),
+    ];
+    delete memberClaims[userId];
+  }
+}
+
+function anonymizeDeletedUserHistory(userId, deletedUserId) {
+  for (const result of results) {
+    result.players = (result.players || []).map(player => (
+      player.userId === userId
+        ? { ...player, userId: deletedUserId, displayName: 'Deleted Player' }
+        : player
+    ));
+  }
+
+  for (const ticket of adminStore.supportTickets || []) {
+    if (ticket.userId !== userId) continue;
+    ticket.userId = deletedUserId;
+    ticket.displayName = 'Deleted Player';
+    ticket.contactName = 'Deleted Player';
+    ticket.contactEmail = '';
+    ticket.deviceHash = '';
+    ticket.publicAccessTokenHash = '';
+    ticket.updatedAt = Date.now();
+  }
+
+  for (const ban of adminStore.bans || []) {
+    if (ban.userId === userId) ban.userId = deletedUserId;
+    if (ban.userId === deletedUserId) ban.deviceHash = '';
+  }
+
+  for (const invite of adminStore.inviteCodes || []) {
+    invite.uses = (invite.uses || []).map(use => (
+      use.userId === userId
+        ? { ...use, userId: deletedUserId, displayName: 'Deleted Player' }
+        : use
+    ));
+  }
+}
+
+function removeDeletedUserSocialReferences(userId) {
+  for (const other of users.values()) {
+    if (other.userId === userId) continue;
+    normalizeSocial(other);
+    other.social.friends = other.social.friends.filter(item => item.userId !== userId);
+    other.social.incomingRequests = other.social.incomingRequests.filter(item => item.userId !== userId);
+    other.social.outgoingRequests = other.social.outgoingRequests.filter(item => item.userId !== userId);
+    other.social.roomInvites = other.social.roomInvites.filter(item => item.fromUserId !== userId);
+  }
+}
+
+function removeDeletedUserRooms(userId) {
+  const activeRoom = activePlayingRoomForUser(userId);
+  if (activeRoom) {
+    return {
+      error: 'Finish your active match before deleting your account.',
+      activeRoom: roomSummary(activeRoom),
+    };
+  }
+  for (const [code, room] of rooms) {
+    if (!(room.players || []).some(player => player.userId === userId)) continue;
+    cancelRoomCountdown(room);
+    cancelAllAutoplaySchedules(room);
+    refundWaitingRoom(room);
+    io.to(code).emit('room:cancelled', {
+      error: 'This table closed because a player deleted their account.',
+      code: 'ACCOUNT_DELETED',
+    });
+    rooms.delete(code);
+  }
+  return { ok: true };
+}
+
+function disconnectDeletedUser(userId) {
+  io.to(`user:${userId}`).emit('account:deleted', { ok: true });
+  for (const socketId of userSockets.get(userId) || []) {
+    io.sockets.sockets.get(socketId)?.disconnect(true);
+  }
+  userSockets.delete(userId);
+  clubForegroundSockets.delete(userId);
+}
+
+function deletePlayerAccount(user, req, source = 'authenticated') {
+  const userId = user.userId;
+  const deletedUserId = anonymizedDeletedUserId(userId);
+  const roomCleanup = removeDeletedUserRooms(userId);
+  if (roomCleanup.error) return roomCleanup;
+
+  normalizePushNotifications(user);
+  user.pushNotifications.tokens = [];
+  revokeUserSessions(userId);
+  rankedQueue.delete(userId);
+  removeDeletedUserSocialReferences(userId);
+  for (const club of clubs.values()) anonymizeClubUserReferences(club, userId, deletedUserId);
+  reconcileClubMemberships();
+  anonymizeDeletedUserHistory(userId, deletedUserId);
+
+  for (let index = mailEntries.length - 1; index >= 0; index -= 1) {
+    if (mailEntries[index]?.userId === userId) mailEntries.splice(index, 1);
+  }
+  for (let index = accountDeletionRequests.length - 1; index >= 0; index -= 1) {
+    if (accountDeletionRequests[index]?.userId === userId) accountDeletionRequests.splice(index, 1);
+  }
+
+  users.delete(userId);
+  writeAudit(
+    adminStore,
+    req,
+    null,
+    'auth.account.deleted',
+    { userId: deletedUserId },
+    { source }
+  );
+  disconnectDeletedUser(userId);
+  saveStore();
+  return { ok: true };
 }
 
 const PLAYER_NAME_MIN_LENGTH = 2;
@@ -1166,6 +1580,7 @@ function safeUser(user) {
     ...publicUserProfile(user, rankedSeason, rankedConfig()),
     club: publicClubForUser(user),
     authProviders: publicAuthProviders(user),
+    passwordSignIn: !!(user.passwordHash && user.salt),
   };
 }
 
@@ -3179,8 +3594,15 @@ app.use('/brand', express.static(PRODUCT_PUBLIC_DIR, {
 }));
 
 app.get('/', (_req, res) => {
-  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
   res.sendFile(path.join(PRODUCT_PUBLIC_DIR, 'index.html'));
+});
+
+app.get('/support/ticket', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+  res.sendFile(path.join(PRODUCT_PUBLIC_DIR, 'support-ticket.html'));
 });
 
 app.get('/health', (_req, res) => res.json({ ok: true, ready: storeReady, env: PUBLIC_ENV, storage: storageStatus() }));
@@ -3290,28 +3712,114 @@ app.get('/terms', (_req, res) => sendLegalPage(res, 'Terms of Service', [
   },
 ], '/terms'));
 
-app.get('/account/delete', (_req, res) => sendLegalPage(res, 'Account Deletion', [
-  {
-    title: 'How To Request Deletion',
-    body: [
-      `To delete your Nine Below account, email ${legalEmailLink('Nine Below account deletion request')} with the subject "Nine Below account deletion request".`,
-      'Include your Nine Below display name and, if you used Google or Facebook login, tell us which provider you used. Do not send passwords. We may ask for reasonable confirmation that you control the account before deletion.',
-    ],
-  },
-  {
-    title: 'What Will Be Deleted',
-    body: [
-      'After verification, we will delete or anonymize account identifiers and personal profile information associated with your Nine Below account, including linked social-login identifiers where reasonably possible.',
-      'Some completed match records, moderation records, security logs, or records needed for legal, fraud-prevention, support, or transaction-history reasons may be retained or anonymized instead of fully removed.',
-    ],
-  },
-  {
-    title: 'Timing',
-    body: [
-      'We aim to complete verified deletion requests within 30 days. If more time is needed because of security, legal, or technical reasons, we will let you know when possible.',
-    ],
-  },
-], '/account/delete'));
+app.get('/account/delete', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+  res.sendFile(path.join(PRODUCT_PUBLIC_DIR, 'account-delete.html'));
+});
+
+app.post('/account/delete/request', accountDeletionRateLimit, async (req, res) => {
+  const displayName = cleanPlayerNameCandidate(req.body?.displayName);
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const requestId = crypto.randomUUID();
+  const user = findDeletionUser(displayName, email);
+  const now = Date.now();
+
+  accountDeletionRequests.splice(
+    0,
+    accountDeletionRequests.length,
+    ...normalizeAccountDeletionRequests(accountDeletionRequests, now)
+  );
+
+  if (user && email) {
+    const code = String(crypto.randomInt(100000, 1000000));
+    const expiresAt = now + ACCOUNT_DELETION_CODE_TTL_MS;
+    for (let index = accountDeletionRequests.length - 1; index >= 0; index -= 1) {
+      if (accountDeletionRequests[index]?.userId === user.userId) accountDeletionRequests.splice(index, 1);
+    }
+    accountDeletionRequests.push({
+      requestId,
+      userId: user.userId,
+      codeHash: accountDeletionCodeHash(requestId, code),
+      createdAt: now,
+      expiresAt,
+      attempts: 0,
+      usedAt: null,
+    });
+    try {
+      await sendAccountDeletionCode({ user, requestId, email, code, expiresAt });
+      saveStore();
+    } catch (error) {
+      const index = accountDeletionRequests.findIndex(entry => entry.requestId === requestId);
+      if (index >= 0) accountDeletionRequests.splice(index, 1);
+      saveStore();
+      console.error('Account deletion verification email failed:', error?.message || error);
+    }
+  }
+
+  return res.status(202).json({
+    ok: true,
+    requestId,
+    expiresInSeconds: Math.floor(ACCOUNT_DELETION_CODE_TTL_MS / 1000),
+    message: 'If the display name and verified email match an account, a verification code has been sent.',
+  });
+});
+
+app.post('/account/delete/password', accountDeletionRateLimit, async (req, res) => {
+  const user = findDeletionUser(req.body?.displayName);
+  if (!user) return res.status(401).json({ error: 'Account verification failed.' });
+  const verification = await verifyAccountDeletionCredential(user, {
+    method: 'password',
+    password: req.body?.password,
+    confirmation: req.body?.confirmation,
+  });
+  if (verification.error) {
+    const confirmationError = String(req.body?.confirmation || '').trim().toUpperCase() !== 'DELETE';
+    return res.status(confirmationError ? 400 : 401).json({ error: verification.error });
+  }
+  const result = deletePlayerAccount(user, req, 'public-password');
+  if (result.error) return res.status(409).json(result);
+  return res.json({ ok: true });
+});
+
+app.post('/account/delete/confirm', accountDeletionRateLimit, (req, res) => {
+  if (String(req.body?.confirmation || '').trim().toUpperCase() !== 'DELETE') {
+    return res.status(400).json({ error: 'Type DELETE to confirm account deletion.' });
+  }
+  const requestId = String(req.body?.requestId || '').trim();
+  const code = String(req.body?.code || '').trim();
+  const request = accountDeletionRequests.find(entry => entry.requestId === requestId);
+  const now = Date.now();
+  if (
+    !request
+    || request.usedAt
+    || request.expiresAt <= now
+    || request.attempts >= ACCOUNT_DELETION_MAX_ATTEMPTS
+  ) {
+    return res.status(401).json({ error: 'This verification request is invalid or expired.' });
+  }
+
+  request.attempts += 1;
+  const validCode = timingSafeTextEqual(
+    request.codeHash,
+    accountDeletionCodeHash(requestId, code)
+  );
+  if (!validCode) {
+    saveStore();
+    return res.status(401).json({ error: 'The verification code is invalid.' });
+  }
+
+  const user = users.get(request.userId);
+  if (!user) {
+    request.usedAt = now;
+    saveStore();
+    return res.status(404).json({ error: 'This account is no longer available.' });
+  }
+  const result = deletePlayerAccount(user, req, 'verified-email');
+  if (result.error) return res.status(409).json(result);
+  return res.json({ ok: true });
+});
 
 app.use('/admin', (req, res, next) => {
   const rawUrl = req.originalUrl || req.url || '';
@@ -4157,19 +4665,31 @@ app.post('/admin/api/users/:userId/moderation', requireAdmin(adminStore, 'modera
 
 app.get('/admin/api/support/tickets', requireAdmin(adminStore, 'support:read'), (req, res) => res.json({ tickets: adminTickets(adminStore, req.query.status) }));
 
-app.patch('/admin/api/support/tickets/:ticketId', requireAdmin(adminStore, 'support:write'), (req, res) => {
+app.patch('/admin/api/support/tickets/:ticketId', requireAdmin(adminStore, 'support:write'), async (req, res) => {
   const result = updateSupportTicket(adminStore, req.params.ticketId, req.body || {});
   if (result.error) return res.status(404).json({ error: result.error });
   writeAudit(adminStore, req, req.admin.admin, 'admin.support.ticket.update', { ticketId: req.params.ticketId }, req.body || {});
   saveStore();
+  if (result.previousStatus !== result.ticket.status && result.ticket.publicAccessEnabled) {
+    const statusMessage = result.ticket.status === 'resolved'
+      ? 'Your support case has been marked resolved. Reply through your private case link if you still need help.'
+      : result.ticket.status === 'closed'
+        ? 'Your support case has been closed. This message is your closure receipt.'
+        : `Your support case is now ${String(result.ticket.status).replaceAll('_', ' ')}.`;
+    await sendSupportRequesterUpdate(result.ticket, statusMessage, result.ticket.status);
+  }
   return res.json(result);
 });
 
-app.post('/admin/api/support/tickets/:ticketId/notes', requireAdmin(adminStore, 'support:write'), (req, res) => {
-  const result = addSupportNote(adminStore, req.params.ticketId, req.admin.admin, req.body?.note);
+app.post('/admin/api/support/tickets/:ticketId/notes', requireAdmin(adminStore, 'support:write'), async (req, res) => {
+  const isPublic = req.body?.public === true;
+  const result = addSupportNote(adminStore, req.params.ticketId, req.admin.admin, req.body?.note, { public: isPublic });
   if (result.error) return res.status(400).json({ error: result.error });
-  writeAudit(adminStore, req, req.admin.admin, 'admin.support.ticket.note', { ticketId: req.params.ticketId });
+  writeAudit(adminStore, req, req.admin.admin, 'admin.support.ticket.note', { ticketId: req.params.ticketId }, { public: isPublic });
   saveStore();
+  if (isPublic && result.ticket.publicAccessEnabled) {
+    await sendSupportRequesterUpdate(result.ticket, req.body?.note, result.ticket.status);
+  }
   return res.json(result);
 });
 
@@ -4771,6 +5291,48 @@ app.post('/support/tickets', requireAuth, (req, res) => {
   return res.json(result);
 });
 
+app.post('/support/public', publicSupportRateLimit, async (req, res) => {
+  if (String(req.body?.company || '').trim()) {
+    return res.status(202).json({ ok: true });
+  }
+  const result = createPublicSupportTicket(adminStore, req, req.body || {});
+  if (result.error) return res.status(400).json({ error: result.error });
+  saveStore();
+  await sendPublicSupportOpened(result.ticket, result.accessToken);
+  return res.status(201).json({
+    ok: true,
+    reference: result.ticket.publicReference,
+    accessToken: result.accessToken,
+    trackingUrl: supportTrackingUrl(result.ticket, result.accessToken),
+  });
+});
+
+app.get('/support/public/:reference', (req, res) => {
+  const result = publicSupportTicket(adminStore, req.params.reference, req.query.token);
+  if (result.error) return res.status(404).json({ error: result.error });
+  return res.json(result);
+});
+
+app.post('/support/public/:reference/replies', publicSupportRateLimit, async (req, res) => {
+  if (String(req.body?.company || '').trim()) return res.status(202).json({ ok: true });
+  const result = addRequesterSupportReply(adminStore, req.params.reference, req.body?.accessToken, req.body || {});
+  if (result.error) return res.status(result.error.includes('closed') ? 409 : 404).json({ error: result.error });
+  writeAudit(adminStore, req, null, 'support.ticket.requester_reply', { ticketId: result.ticket.ticketId });
+  saveStore();
+  await sendSupportEmailQuietly({
+    to: SUPPORT_INBOX_EMAIL,
+    subject: `[${result.ticket.publicReference}] Requester replied`,
+    text: [
+      `${result.ticket.contactName} replied to ${result.ticket.publicReference}.`,
+      '',
+      String(req.body?.message || '').trim(),
+      '',
+      `Manage this case at ${ADMIN_PUBLIC_URL}`,
+    ].join('\n'),
+  }, { type: 'support-requester-reply', ticketId: result.ticket.ticketId });
+  return res.json({ ok: true });
+});
+
 app.get('/auth/config', (_req, res) => {
   res.json({
     environment: PUBLIC_ENV,
@@ -4913,6 +5475,24 @@ app.post('/auth/social/link', requireAuth, async (req, res) => {
 app.post('/auth/logout', requireAuth, (req, res) => {
   sessions.delete(req.auth.session.token);
   saveStore();
+  return res.json({ ok: true });
+});
+
+app.delete('/auth/account', requireAuth, accountDeletionRateLimit, async (req, res) => {
+  const activeRoom = activePlayingRoomForUser(req.auth.user.userId);
+  if (activeRoom) {
+    return res.status(409).json({
+      error: 'Finish your active match before deleting your account.',
+      activeRoom: roomSummary(activeRoom),
+    });
+  }
+  const verification = await verifyAccountDeletionCredential(req.auth.user, req.body || {});
+  if (verification.error) {
+    const confirmationError = String(req.body?.confirmation || '').trim().toUpperCase() !== 'DELETE';
+    return res.status(confirmationError ? 400 : 401).json({ error: verification.error });
+  }
+  const result = deletePlayerAccount(req.auth.user, req, `in-app-${verification.method}`);
+  if (result.error) return res.status(409).json(result);
   return res.json({ ok: true });
 });
 

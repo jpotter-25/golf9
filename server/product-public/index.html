@@ -19,7 +19,7 @@
   <meta property="og:image:alt" content="A live Nine Below mobile game table.">
   <meta name="twitter:card" content="summary_large_image">
 </head>
-<body>
+<body data-support-endpoint="/support/public" data-support-source="ninebelow">
   <a class="skip-link" href="#main">Skip to content</a>
   <header class="site-header">
     <nav class="nav shell" aria-label="Primary navigation">
@@ -29,6 +29,7 @@
       </a>
       <div class="nav-links">
         <a href="#game">The game</a>
+        <button class="nav-button" type="button" data-support-open>Support</button>
         <a href="/privacy">Privacy</a>
         <a href="https://potterwell.com/">Potterwell</a>
       </div>
@@ -44,7 +45,7 @@
         <p class="hero-copy">Read the table. Build your grid. Keep the score below everyone else.</p>
         <div class="actions">
           <a class="button button--primary" href="#game">Explore the game</a>
-          <a class="button button--secondary" href="mailto:app-developer@potterwell.com">Contact support</a>
+          <button class="button button--secondary" type="button" data-support-open>Contact support</button>
         </div>
       </div>
     </section>
@@ -65,6 +66,36 @@
       </div>
     </section>
 
+    <section class="band band--gallery" aria-labelledby="gallery-title">
+      <div class="shell">
+        <div class="gallery-heading">
+          <div>
+            <p class="eyebrow">Inside the game</p>
+            <h2 id="gallery-title">A table built for every kind of play.</h2>
+          </div>
+          <p>Explore casual and ranked tables, sharpen your strategy against tuned AI, learn through guided practice, or pass one device around the room.</p>
+        </div>
+        <div class="screen-gallery">
+          <figure>
+            <img src="/brand/screens/play-hub.png" alt="Nine Below play hub with casual, ranked, and offline modes." loading="lazy" width="1080" height="1920">
+            <figcaption>Choose your table</figcaption>
+          </figure>
+          <figure>
+            <img src="/brand/screens/solo-ai.png" alt="A Nine Below solo match against the hard AI." loading="lazy" width="1080" height="1920">
+            <figcaption>Practice against AI</figcaption>
+          </figure>
+          <figure>
+            <img src="/brand/screens/tutorial.png" alt="The guided Nine Below tutorial explaining a card decision." loading="lazy" width="1080" height="1920">
+            <figcaption>Learn by playing</figcaption>
+          </figure>
+          <figure>
+            <img src="/brand/screens/pass-and-play.png" alt="A local Nine Below pass-and-play match." loading="lazy" width="1080" height="1920">
+            <figcaption>Play together offline</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
     <section class="band band--dark" aria-labelledby="testing-title">
       <div class="shell compact">
         <p class="eyebrow">Currently in development</p>
@@ -82,8 +113,68 @@
   <footer>
     <div class="shell footer-inner">
       <p>&copy; 2026 Potterwell. Nine Below is a Potterwell product.</p>
-      <a href="mailto:app-developer@potterwell.com">app-developer@potterwell.com</a>
+      <button class="footer-support" type="button" data-support-open>Contact support</button>
     </div>
   </footer>
+
+  <dialog class="support-dialog" id="support-dialog" aria-labelledby="support-title">
+    <div class="dialog-header">
+      <div>
+        <p class="eyebrow">Nine Below support</p>
+        <h2 id="support-title">How can we help?</h2>
+      </div>
+      <button class="icon-button" type="button" data-support-close aria-label="Close support form">&times;</button>
+    </div>
+    <div class="dialog-body">
+      <form class="support-form" id="support-form">
+        <div class="form-grid">
+          <label>
+            <span>Name</span>
+            <input name="name" type="text" autocomplete="name" maxlength="80" required>
+          </label>
+          <label>
+            <span>Email</span>
+            <input name="email" type="email" autocomplete="email" maxlength="160" required>
+          </label>
+        </div>
+        <label>
+          <span>What can we help with?</span>
+          <select name="category" required>
+            <option value="support">General support</option>
+            <option value="bug">Report a bug</option>
+            <option value="account">Account help</option>
+            <option value="billing">Coins or purchases</option>
+            <option value="feedback">Feedback or suggestion</option>
+            <option value="privacy">Privacy or safety</option>
+            <option value="other">Something else</option>
+          </select>
+        </label>
+        <label>
+          <span>Subject</span>
+          <input name="subject" type="text" maxlength="120" required>
+        </label>
+        <label>
+          <span>Message</span>
+          <textarea name="message" rows="7" maxlength="3000" required></textarea>
+          <small>Include the details that will help us understand what happened. Never send a password.</small>
+        </label>
+        <label class="honeypot" aria-hidden="true">
+          <span>Company</span>
+          <input name="company" type="text" tabindex="-1" autocomplete="off">
+        </label>
+        <p class="form-status" id="support-status" role="status" aria-live="polite"></p>
+        <button class="button button--primary submit-button" type="submit">Submit request</button>
+      </form>
+      <section class="support-success" id="support-success" hidden aria-live="polite">
+        <div class="success-mark" aria-hidden="true">&#10003;</div>
+        <p class="eyebrow">Request received</p>
+        <h3>Support case <span id="support-reference"></span> is open.</h3>
+        <p>We sent a confirmation to your email. Save the private link below to follow replies and continue the conversation without creating an account.</p>
+        <a class="button button--primary" id="support-tracking-link" href="/support/ticket">View support case</a>
+        <button class="button button--quiet" type="button" data-support-new>Send another request</button>
+      </section>
+    </div>
+  </dialog>
+  <script src="/brand/support.js" defer></script>
 </body>
 </html>

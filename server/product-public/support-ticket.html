@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en-US">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Support Case | Nine Below</title>
+  <meta name="description" content="Privately follow and reply to a Potterwell support case.">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta name="theme-color" content="#173348">
+  <link rel="icon" href="/brand/nine-below-icon.png" type="image/png">
+  <link rel="stylesheet" href="/brand/styles.css">
+</head>
+<body class="support-page">
+  <a class="skip-link" href="#main">Skip to support case</a>
+  <header class="site-header site-header--solid">
+    <nav class="nav shell" aria-label="Support navigation">
+      <a class="brand" href="/" aria-label="Nine Below home">
+        <img src="/brand/nine-below-icon.png" width="42" height="42" alt="">
+        <span>Nine Below Support</span>
+      </a>
+      <a class="case-back" href="/">Back to Nine Below</a>
+    </nav>
+  </header>
+  <main class="case-main shell" id="main">
+    <section class="case-loading" id="case-loading" aria-live="polite">
+      <p class="eyebrow">Private support case</p>
+      <h1>Loading your request...</h1>
+    </section>
+    <section id="case-error" class="case-error" hidden>
+      <p class="eyebrow">Link unavailable</p>
+      <h1>We could not open this support case.</h1>
+      <p id="case-error-message">Check that you opened the complete private link from your confirmation email.</p>
+      <button class="button button--primary" type="button" data-support-open-new>Open a new request</button>
+    </section>
+    <section id="case-content" hidden>
+      <header class="case-heading">
+        <div>
+          <p class="eyebrow">Private support case</p>
+          <h1 id="case-subject">Support request</h1>
+          <p class="case-reference">Case <strong id="case-reference"></strong></p>
+        </div>
+        <span class="status-chip" id="case-status"></span>
+      </header>
+      <div class="privacy-note">
+        <strong>Keep this page private.</strong>
+        <span>The link in your browser grants access to this conversation.</span>
+      </div>
+      <div class="case-layout">
+        <section class="case-thread" aria-labelledby="conversation-title">
+          <h2 id="conversation-title">Conversation</h2>
+          <div class="thread-list" id="case-thread"></div>
+        </section>
+        <aside class="case-summary" aria-labelledby="summary-title">
+          <h2 id="summary-title">Request details</h2>
+          <dl>
+            <div><dt>Status</dt><dd id="summary-status"></dd></div>
+            <div><dt>Category</dt><dd id="summary-category"></dd></div>
+            <div><dt>Opened</dt><dd id="summary-created"></dd></div>
+            <div><dt>Last update</dt><dd id="summary-updated"></dd></div>
+          </dl>
+        </aside>
+      </div>
+      <form class="reply-form" id="reply-form">
+        <h2>Reply to support</h2>
+        <label>
+          <span>Message</span>
+          <textarea name="message" maxlength="3000" rows="6" required></textarea>
+          <small>Your reply becomes part of this support case. Never send a password.</small>
+        </label>
+        <label class="honeypot" aria-hidden="true">
+          <span>Company</span>
+          <input name="company" type="text" tabindex="-1" autocomplete="off">
+        </label>
+        <p class="form-status" id="reply-status" role="status" aria-live="polite"></p>
+        <button class="button button--primary" type="submit">Send reply</button>
+      </form>
+    </section>
+  </main>
+  <script src="/brand/support-ticket.js" defer></script>
+</body>
+</html>

@@ -217,6 +217,60 @@ test('public policy pages are available for store and social auth review', async
   });
 });
 
+test('authenticated account deletion requires fresh credentials and revokes the account', async () => {
+  await withServer(async (baseUrl) => {
+    const player = await signup(baseUrl, 'DeleteMe');
+
+    const missingConfirmation = await fetch(`${baseUrl}/auth/account`, {
+      method: 'DELETE',
+      headers: authHeaders(player.token),
+      body: JSON.stringify({
+        method: 'password',
+        password: 'password1',
+        confirmation: 'NOT DELETE',
+      }),
+    });
+    assert.equal(missingConfirmation.status, 400);
+
+    const wrongPassword = await fetch(`${baseUrl}/auth/account`, {
+      method: 'DELETE',
+      headers: authHeaders(player.token),
+      body: JSON.stringify({
+        method: 'password',
+        password: 'wrong-password',
+        confirmation: 'DELETE',
+      }),
+    });
+    assert.equal(wrongPassword.status, 401);
+
+    const deleted = await json(await fetch(`${baseUrl}/auth/account`, {
+      method: 'DELETE',
+      headers: authHeaders(player.token),
+      body: JSON.stringify({
+        method: 'password',
+        password: 'password1',
+        confirmation: 'DELETE',
+      }),
+    }));
+    assert.equal(deleted.ok, true);
+
+    const oldSession = await fetch(`${baseUrl}/auth/me`, {
+      headers: authHeaders(player.token),
+    });
+    assert.equal(oldSession.status, 401);
+
+    const relogin = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        displayName: player.user.displayName,
+        password: 'password1',
+      }),
+    });
+    assert.equal(relogin.status, 401);
+  });
+});
+
 test('admin config is canonical and malformed nested admin URLs redirect', async () => {
   await withServer(async (baseUrl) => {
     const config = await json(await fetch(`${baseUrl}/auth/config`));

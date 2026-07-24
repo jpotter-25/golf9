@@ -40,7 +40,7 @@
   }
   </script>
 </head>
-<body>
+<body data-support-endpoint="https://ninebelow.potterwell.com/support/public" data-support-source="potterwell">
   <a class="skip-link" href="#main">Skip to content</a>
   <header class="site-header">
     <nav class="nav shell" aria-label="Primary navigation">
@@ -52,7 +52,7 @@
         <a href="#products">Products</a>
         <a href="#principles">Principles</a>
         <a href="#ownership">Ownership</a>
-        <a class="nav-contact" href="mailto:app-developer@potterwell.com">Contact</a>
+        <button class="nav-contact nav-contact--button" type="button" data-support-open>Contact</button>
       </div>
     </nav>
   </header>
@@ -66,7 +66,7 @@
           <p class="hero-copy">We build focused digital products with disciplined craft, clear purpose, and the resilience to keep getting better.</p>
           <div class="actions">
             <a class="button button--primary" href="#products">Explore our products</a>
-            <a class="button button--secondary" href="mailto:app-developer@potterwell.com">Work with Potterwell</a>
+            <button class="button button--secondary" type="button" data-support-open>Work with Potterwell</button>
           </div>
         </div>
       </div>
@@ -154,10 +154,73 @@
           <h2 id="contact-title">Have something worth building?</h2>
           <p>Product, partnership, support, and press inquiries are welcome.</p>
         </div>
-        <a class="contact-link" href="mailto:app-developer@potterwell.com">app-developer@potterwell.com</a>
+        <button class="button button--primary" type="button" data-support-open>Contact Potterwell</button>
       </div>
     </section>
   </main>
+
+  <dialog class="support-dialog" id="support-dialog" aria-labelledby="support-title">
+    <div class="support-dialog__panel">
+      <header class="support-dialog__header">
+        <div>
+          <p class="eyebrow">Potterwell support desk</p>
+          <h2 id="support-title">Start a conversation</h2>
+          <p>Tell us what you need. We will create a private case you can follow and reply to.</p>
+        </div>
+        <button class="support-dialog__close" type="button" aria-label="Close support form" data-support-close>&times;</button>
+      </header>
+
+      <form class="support-form" id="support-form">
+        <div class="support-form__grid">
+          <label>
+            <span>Name</span>
+            <input name="name" type="text" maxlength="80" autocomplete="name" required>
+          </label>
+          <label>
+            <span>Email</span>
+            <input name="email" type="email" maxlength="254" autocomplete="email" required>
+          </label>
+        </div>
+        <label>
+          <span>What can we help with?</span>
+          <select name="category" required>
+            <option value="product">Product question</option>
+            <option value="partnership">Partnership</option>
+            <option value="support">Support</option>
+            <option value="press">Press</option>
+            <option value="privacy">Privacy or account</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <label>
+          <span>Subject</span>
+          <input name="subject" type="text" maxlength="120" required>
+        </label>
+        <label>
+          <span>Message</span>
+          <textarea name="message" maxlength="3000" rows="7" required></textarea>
+          <small>Please do not include passwords, payment details, or other sensitive information.</small>
+        </label>
+        <label class="support-honeypot" aria-hidden="true">
+          <span>Company website</span>
+          <input name="company" type="text" tabindex="-1" autocomplete="off">
+        </label>
+        <p class="support-form__status" id="support-status" role="status" aria-live="polite"></p>
+        <div class="support-form__actions">
+          <button class="button button--secondary" type="button" data-support-close>Cancel</button>
+          <button class="button button--primary" type="submit">Submit request</button>
+        </div>
+      </form>
+
+      <section class="support-success" id="support-success" tabindex="-1" hidden>
+        <p class="eyebrow">Request received</p>
+        <h3>Your support case is open.</h3>
+        <p>Case <strong id="support-reference"></strong> was sent to Potterwell Support. Keep the private tracking link below so you can follow updates and reply without an account.</p>
+        <a class="button button--primary" id="support-tracking-link" href="https://ninebelow.potterwell.com/support/ticket">Open private case</a>
+        <button class="button button--secondary" type="button" data-support-new>Start another request</button>
+      </section>
+    </div>
+  </dialog>
 
   <footer class="site-footer">
     <div class="shell footer-row">
@@ -169,5 +232,6 @@
       </nav>
     </div>
   </footer>
+  <script src="/assets/support.js" defer></script>
 </body>
 </html>

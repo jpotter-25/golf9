@@ -10,7 +10,7 @@ ErrorDocument 404 /404.html
   Header always set Permissions-Policy "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
   Header always set Cross-Origin-Opener-Policy "same-origin"
   Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
-  Header always set Content-Security-Policy "default-src 'self'; base-uri 'self'; connect-src 'none'; font-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self' 'sha256-xkg3OzFUyDVwzMGEwwg5ZS1kbX1vy0u8HeQHxrmRyCE='; style-src 'self'; upgrade-insecure-requests"
+  Header always set Content-Security-Policy "default-src 'self'; base-uri 'self'; connect-src https://ninebelow.potterwell.com; font-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self' 'sha256-xkg3OzFUyDVwzMGEwwg5ZS1kbX1vy0u8HeQHxrmRyCE='; style-src 'self'; upgrade-insecure-requests"
 </IfModule>
 
 <IfModule mod_deflate.c>

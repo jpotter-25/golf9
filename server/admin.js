@@ -8,7 +8,7 @@ const ADMIN_LOGIN_LOCK_THRESHOLD = 5;
 const ADMIN_LOGIN_LOCK_MS = 1000 * 60 * 15;
 const ADMIN_RECOVERY_TTL_MS = 1000 * 60 * 15;
 const ADMIN_RECOVERY_MAX_ATTEMPTS = 5;
-const SUPPORT_TICKET_MAX_LENGTH = 1200;
+const SUPPORT_TICKET_MAX_LENGTH = 3000;
 const ADMIN_REASON_MAX_LENGTH = 240;
 const ADMIN_PASSWORD_MIN_LENGTH = 12;
 
@@ -198,6 +198,12 @@ export function normalizeAdminStore(store) {
       ticketId: String(ticket.ticketId),
       userId: ticket.userId ? String(ticket.userId) : null,
       displayName: safeString(ticket.displayName, 40),
+      contactName: safeString(ticket.contactName || ticket.displayName, 80),
+      contactEmail: normalizeEmail(ticket.contactEmail),
+      source: ['in_app', 'ninebelow', 'potterwell'].includes(ticket.source) ? ticket.source : 'in_app',
+      website: safeString(ticket.website, 160),
+      publicReference: safeString(ticket.publicReference, 24).toUpperCase() || null,
+      publicAccessTokenHash: ticket.publicAccessTokenHash ? String(ticket.publicAccessTokenHash) : null,
       category: safeString(ticket.category || 'general', 40),
       status: VALID_TICKET_STATUSES.has(ticket.status) ? ticket.status : 'open',
       subject: safeString(ticket.subject || 'Player support request', 100),
@@ -206,7 +212,18 @@ export function normalizeAdminStore(store) {
       createdAt: Number(ticket.createdAt) || now(),
       updatedAt: Number(ticket.updatedAt) || Number(ticket.createdAt) || now(),
       assignedAdminId: ticket.assignedAdminId ? String(ticket.assignedAdminId) : null,
-      notes: Array.isArray(ticket.notes) ? ticket.notes.slice(-80) : [],
+      notes: Array.isArray(ticket.notes) ? ticket.notes.slice(-100).map(note => ({
+        noteId: String(note?.noteId || crypto.randomUUID()),
+        authorType: ['admin', 'requester', 'system'].includes(note?.authorType)
+          ? note.authorType
+          : (note?.adminId ? 'admin' : 'system'),
+        adminId: note?.adminId ? String(note.adminId) : null,
+        adminName: safeString(note?.adminName, 40),
+        requesterName: safeString(note?.requesterName, 80),
+        text: safeString(note?.text, 1200),
+        public: note?.public === true,
+        createdAt: Number(note?.createdAt) || now(),
+      })).filter(note => note.text) : [],
     }));
 
   store.bans = store.bans
@@ -835,6 +852,12 @@ export function createSupportTicket(store, req, user, body = {}) {
     ticketId: crypto.randomUUID(),
     userId: user?.userId || null,
     displayName: user?.displayName || safeString(body.displayName, 40),
+    contactName: user?.displayName || safeString(body.displayName, 80),
+    contactEmail: '',
+    source: 'in_app',
+    website: '',
+    publicReference: null,
+    publicAccessTokenHash: null,
     category: safeString(body.category || 'general', 40),
     status: 'open',
     subject: safeString(body.subject || 'Player support request', 100),
@@ -849,11 +872,67 @@ export function createSupportTicket(store, req, user, body = {}) {
   return { ticket: publicTicket(ticket) };
 }
 
+function supportReference(store, source) {
+  const prefix = source === 'potterwell' ? 'PW' : 'NB';
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const suffix = crypto.randomBytes(5).toString('hex').toUpperCase();
+    const reference = `${prefix}-${suffix}`;
+    if (!store.supportTickets.some(ticket => ticket.publicReference === reference)) return reference;
+  }
+  return `${prefix}-${Date.now().toString(36).toUpperCase()}`;
+}
+
+export function createPublicSupportTicket(store, req, body = {}) {
+  normalizeAdminStore(store);
+  const requestedSource = String(body.product || body.source || '').trim().toLowerCase();
+  const source = requestedSource === 'potterwell' ? 'potterwell' : 'ninebelow';
+  const contactName = safeString(body.name, 80);
+  const contactEmail = normalizeEmail(body.email);
+  const subject = safeString(body.subject || 'Website support request', 100);
+  const message = safeString(body.message, SUPPORT_TICKET_MAX_LENGTH);
+  const category = safeString(body.category || 'general', 40);
+  const website = safeString(body.website, 160);
+  if (contactName.length < 2) return { error: 'Enter your name.' };
+  if (!contactEmail) return { error: 'Enter a valid email address.' };
+  if (subject.length < 3) return { error: 'Enter a short subject.' };
+  if (message.length < 10) return { error: 'Tell us a little more so we can help.' };
+
+  const accessToken = crypto.randomBytes(32).toString('base64url');
+  const ticket = {
+    ticketId: crypto.randomUUID(),
+    userId: null,
+    displayName: contactName,
+    contactName,
+    contactEmail,
+    source,
+    website,
+    publicReference: supportReference(store, source),
+    publicAccessTokenHash: hashValue(accessToken),
+    category,
+    status: 'open',
+    subject,
+    message,
+    deviceHash: null,
+    createdAt: now(),
+    updatedAt: now(),
+    assignedAdminId: null,
+    notes: [],
+  };
+  store.supportTickets.push(ticket);
+  return { ticket: publicTicket(ticket), accessToken };
+}
+
 function publicTicket(ticket) {
   return {
     ticketId: ticket.ticketId,
     userId: ticket.userId,
     displayName: ticket.displayName,
+    contactName: ticket.contactName || ticket.displayName,
+    contactEmail: ticket.contactEmail || null,
+    source: ticket.source || 'in_app',
+    website: ticket.website || null,
+    publicReference: ticket.publicReference || null,
+    publicAccessEnabled: !!ticket.publicAccessTokenHash,
     category: ticket.category,
     status: ticket.status,
     subject: ticket.subject,
@@ -863,6 +942,78 @@ function publicTicket(ticket) {
     assignedAdminId: ticket.assignedAdminId,
     notes: ticket.notes || [],
   };
+}
+
+function secureValueEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left || ''));
+  const rightBuffer = Buffer.from(String(right || ''));
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function findPublicTicket(store, reference, accessToken) {
+  normalizeAdminStore(store);
+  const normalizedReference = safeString(reference, 24).toUpperCase();
+  const ticket = store.supportTickets.find(item => item.publicReference === normalizedReference);
+  if (!ticket?.publicAccessTokenHash || !accessToken) return null;
+  return secureValueEqual(ticket.publicAccessTokenHash, hashValue(accessToken)) ? ticket : null;
+}
+
+export function publicSupportTicket(store, reference, accessToken) {
+  const ticket = findPublicTicket(store, reference, accessToken);
+  if (!ticket) return { error: 'Support case not found or the private link is invalid.' };
+  return {
+    ticket: {
+      reference: ticket.publicReference,
+      source: ticket.source,
+      contactName: ticket.contactName,
+      category: ticket.category,
+      status: ticket.status,
+      subject: ticket.subject,
+      createdAt: ticket.createdAt,
+      updatedAt: ticket.updatedAt,
+      messages: [
+        {
+          messageId: `initial:${ticket.ticketId}`,
+          authorType: 'requester',
+          authorName: ticket.contactName,
+          text: ticket.message,
+          createdAt: ticket.createdAt,
+        },
+        ...(ticket.notes || [])
+          .filter(note => note.public)
+          .map(note => ({
+            messageId: note.noteId,
+            authorType: note.authorType,
+            authorName: note.authorType === 'admin'
+              ? (note.adminName || 'Potterwell Support')
+              : (note.requesterName || ticket.contactName),
+            text: note.text,
+            createdAt: note.createdAt,
+          })),
+      ],
+    },
+  };
+}
+
+export function addRequesterSupportReply(store, reference, accessToken, body = {}) {
+  const ticket = findPublicTicket(store, reference, accessToken);
+  if (!ticket) return { error: 'Support case not found or the private link is invalid.' };
+  if (ticket.status === 'closed') return { error: 'This support case is closed.' };
+  const text = safeString(body.message, 1200);
+  if (text.length < 2) return { error: 'Reply cannot be empty.' };
+  ticket.notes.push({
+    noteId: crypto.randomUUID(),
+    authorType: 'requester',
+    adminId: null,
+    adminName: '',
+    requesterName: ticket.contactName,
+    text,
+    public: true,
+    createdAt: now(),
+  });
+  ticket.status = 'open';
+  ticket.updatedAt = now();
+  return { ticket: publicTicket(ticket) };
 }
 
 export function adminTickets(store, status = null) {
@@ -878,16 +1029,17 @@ export function updateSupportTicket(store, ticketId, patch = {}) {
   normalizeAdminStore(store);
   const ticket = store.supportTickets.find(item => item.ticketId === ticketId);
   if (!ticket) return { error: 'Support ticket not found.' };
+  const previousStatus = ticket.status;
   if (patch.status !== undefined) {
     if (!VALID_TICKET_STATUSES.has(patch.status)) return { error: 'Invalid support ticket status.' };
     ticket.status = patch.status;
   }
   if (patch.assignedAdminId !== undefined) ticket.assignedAdminId = patch.assignedAdminId ? String(patch.assignedAdminId) : null;
   ticket.updatedAt = now();
-  return { ticket: publicTicket(ticket) };
+  return { ticket: publicTicket(ticket), previousStatus };
 }
 
-export function addSupportNote(store, ticketId, admin, note) {
+export function addSupportNote(store, ticketId, admin, note, options = {}) {
   normalizeAdminStore(store);
   const ticket = store.supportTickets.find(item => item.ticketId === ticketId);
   if (!ticket) return { error: 'Support ticket not found.' };
@@ -895,11 +1047,14 @@ export function addSupportNote(store, ticketId, admin, note) {
   if (!text) return { error: 'Note cannot be empty.' };
   ticket.notes.push({
     noteId: crypto.randomUUID(),
+    authorType: 'admin',
     adminId: admin.adminId,
     adminName: admin.displayName,
     text,
+    public: options.public === true,
     createdAt: now(),
   });
+  if (options.public === true && ticket.status !== 'closed') ticket.status = 'waiting_on_player';
   ticket.updatedAt = now();
   return { ticket: publicTicket(ticket) };
 }
