@@ -163,9 +163,9 @@
     <div class="support-dialog__panel">
       <header class="support-dialog__header">
         <div>
-          <p class="eyebrow">Potterwell support desk</p>
+          <p class="eyebrow">Potterwell contact desk</p>
           <h2 id="support-title">Start a conversation</h2>
-          <p>Tell us what you need. We will create a private case you can follow and reply to.</p>
+          <p>Share an idea, question, or opportunity. We will create a private conversation you can follow and reply to.</p>
         </div>
         <button class="support-dialog__close" type="button" aria-label="Close support form" data-support-close>&times;</button>
       </header>
@@ -184,11 +184,12 @@
         <label>
           <span>What can we help with?</span>
           <select name="category" required>
-            <option value="product">Product question</option>
+            <option value="general">General inquiry</option>
             <option value="partnership">Partnership</option>
-            <option value="support">Support</option>
-            <option value="press">Press</option>
-            <option value="privacy">Privacy or account</option>
+            <option value="suggestion">Suggestion</option>
+            <option value="proposal">Product or venture proposal</option>
+            <option value="press">Media and press</option>
+            <option value="website">Website feedback</option>
             <option value="other">Other</option>
           </select>
         </label>
@@ -214,8 +215,8 @@
 
       <section class="support-success" id="support-success" tabindex="-1" hidden>
         <p class="eyebrow">Request received</p>
-        <h3>Your support case is open.</h3>
-        <p>Case <strong id="support-reference"></strong> is open. Keep the private tracking link below so you can follow updates and reply without an account. We will also send a copy by email when delivery is available.</p>
+        <h3>Your conversation is open.</h3>
+        <p>Reference <strong id="support-reference"></strong> is open. Keep the private tracking link below so you can follow updates and reply without an account. We will also send a copy by email when delivery is available.</p>
         <a class="button button--primary" id="support-tracking-link" href="https://ninebelow.potterwell.com/support/ticket">Open private case</a>
         <button class="button button--secondary" type="button" data-support-new>Start another request</button>
       </section>

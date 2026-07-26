@@ -280,6 +280,58 @@ test('public support returns a private tracking link and queues both email copie
   });
 });
 
+test('Potterwell contact requests use parent branding and the shared support inbox', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/support/public`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: 'potterwell',
+        product: 'potterwell',
+        website: 'https://potterwell.com/?support=1',
+        name: 'Potterwell Visitor',
+        email: 'potterwell-contact@example.com',
+        category: 'partnership',
+        subject: 'Partnership inquiry',
+        message: 'This request verifies Potterwell contact routing and private tracking.',
+        supportFaxNumber__nb_71: '',
+      }),
+    });
+    const payload = await json(response);
+
+    assert.equal(response.status, 201);
+    assert.match(payload.reference, /^PW-/);
+    assert.ok(payload.accessToken);
+    assert.match(payload.trackingUrl, /\/support\/ticket\?reference=/);
+    assert.match(payload.trackingUrl, /#token=/);
+
+    const tracked = await json(await fetch(
+      `${baseUrl}/support/public/${encodeURIComponent(payload.reference)}?token=${encodeURIComponent(payload.accessToken)}`,
+    ));
+    assert.equal(tracked.ticket.source, 'potterwell');
+    assert.equal(tracked.ticket.category, 'partnership');
+    assert.equal(tracked.ticket.subject, 'Partnership inquiry');
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const admin = await adminLogin(baseUrl);
+    const outbox = await json(await fetch(`${baseUrl}/admin/api/auth/recovery/test-outbox`, {
+      headers: adminHeaders(admin),
+    }));
+    assert.ok(outbox.messages.some(message => (
+      message.type === 'support-opened-requester'
+      && message.to === 'potterwell-contact@example.com'
+    )));
+    assert.ok(outbox.messages.some(message => (
+      message.type === 'support-opened-staff'
+      && message.to === 'app-developer@potterwell.com'
+      && message.replyTo === 'potterwell-contact@example.com'
+    )));
+  }, {
+    SEED_ADMIN_ACCOUNT: '1',
+    ADMIN_EMAIL_TEST_MODE: '1',
+  });
+});
+
 test('public support quietly rejects submissions whose bot trap was filled', async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/support/public`, {
