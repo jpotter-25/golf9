@@ -235,6 +235,10 @@ const EXPO_ACCESS_TOKEN = String(process.env.EXPO_ACCESS_TOKEN || '').trim();
 const PUSH_TEST_MODE = process.env.PUSH_TEST_MODE === '1';
 const PUSH_DAILY_SCAN_MS = Math.max(60_000, Number(process.env.PUSH_DAILY_SCAN_MS || 60_000));
 const pushTestOutbox = [];
+function positiveTimeout(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.max(1_000, parsed) : fallback;
+}
 const ADMIN_EMAIL_TEST_MODE = process.env.ADMIN_EMAIL_TEST_MODE === '1';
 const ADMIN_SMTP_HOST = String(process.env.ADMIN_SMTP_HOST || '').trim();
 const ADMIN_SMTP_PORT = Number(process.env.ADMIN_SMTP_PORT || 587);
@@ -242,8 +246,12 @@ const ADMIN_SMTP_USER = String(process.env.ADMIN_SMTP_USER || '').trim();
 const ADMIN_SMTP_PASS = String(process.env.ADMIN_SMTP_PASS || '').trim();
 const ADMIN_SMTP_FROM = String(process.env.ADMIN_SMTP_FROM || process.env.ADMIN_BOOTSTRAP_EMAIL || '').trim();
 const ADMIN_SMTP_SECURE = ['1', 'true', 'yes'].includes(String(process.env.ADMIN_SMTP_SECURE || '').trim().toLowerCase());
+const ADMIN_SMTP_CONNECTION_TIMEOUT_MS = positiveTimeout(process.env.ADMIN_SMTP_CONNECTION_TIMEOUT_MS, 10_000);
+const ADMIN_SMTP_GREETING_TIMEOUT_MS = positiveTimeout(process.env.ADMIN_SMTP_GREETING_TIMEOUT_MS, 10_000);
+const ADMIN_SMTP_SOCKET_TIMEOUT_MS = positiveTimeout(process.env.ADMIN_SMTP_SOCKET_TIMEOUT_MS, 20_000);
 const SUPPORT_INBOX_EMAIL = String(process.env.SUPPORT_INBOX_EMAIL || 'app-developer@potterwell.com').trim();
 const adminEmailTestOutbox = [];
+let adminSmtpTransport = null;
 const ACCOUNT_DELETION_CODE_TTL_MS = 1000 * 60 * 15;
 const ACCOUNT_DELETION_REQUEST_TTL_MS = 1000 * 60 * 60 * 24;
 const ACCOUNT_DELETION_MAX_ATTEMPTS = 5;
@@ -726,8 +734,54 @@ function notificationConfig() {
   return adminStore.notificationConfig;
 }
 
+function adminEmailConfigStatus() {
+  const portConfigured = Number.isInteger(ADMIN_SMTP_PORT) && ADMIN_SMTP_PORT > 0 && ADMIN_SMTP_PORT <= 65_535;
+  const credentialsConfigured = !!ADMIN_SMTP_USER && !!ADMIN_SMTP_PASS;
+  const credentialsValid = credentialsConfigured;
+  const enabled = ADMIN_EMAIL_TEST_MODE || (
+    !!ADMIN_SMTP_HOST
+    && !!ADMIN_SMTP_FROM
+    && portConfigured
+    && credentialsConfigured
+  );
+  return {
+    enabled,
+    testMode: ADMIN_EMAIL_TEST_MODE,
+    hostConfigured: !!ADMIN_SMTP_HOST,
+    fromConfigured: !!ADMIN_SMTP_FROM,
+    credentialsConfigured,
+    credentialsValid,
+    portConfigured,
+    port: portConfigured ? ADMIN_SMTP_PORT : null,
+    secure: ADMIN_SMTP_SECURE,
+  };
+}
+
 function adminRecoveryEmailEnabled() {
-  return ADMIN_EMAIL_TEST_MODE || (!!ADMIN_SMTP_HOST && !!ADMIN_SMTP_FROM);
+  return adminEmailConfigStatus().enabled;
+}
+
+function adminEmailTransport() {
+  if (adminSmtpTransport) return adminSmtpTransport;
+  if (!adminRecoveryEmailEnabled() || ADMIN_EMAIL_TEST_MODE) {
+    throw new Error('Email delivery is not configured.');
+  }
+  const auth = ADMIN_SMTP_USER && ADMIN_SMTP_PASS
+    ? { user: ADMIN_SMTP_USER, pass: ADMIN_SMTP_PASS }
+    : undefined;
+  adminSmtpTransport = nodemailer.createTransport({
+    host: ADMIN_SMTP_HOST,
+    port: ADMIN_SMTP_PORT,
+    secure: ADMIN_SMTP_SECURE,
+    auth,
+    pool: true,
+    maxConnections: 2,
+    maxMessages: 50,
+    connectionTimeout: ADMIN_SMTP_CONNECTION_TIMEOUT_MS,
+    greetingTimeout: ADMIN_SMTP_GREETING_TIMEOUT_MS,
+    socketTimeout: ADMIN_SMTP_SOCKET_TIMEOUT_MS,
+  });
+  return adminSmtpTransport;
 }
 
 async function sendTransactionalEmail(message, testMetadata = {}) {
@@ -736,16 +790,10 @@ async function sendTransactionalEmail(message, testMetadata = {}) {
     return;
   }
   if (!adminRecoveryEmailEnabled()) throw new Error('Email delivery is not configured.');
-  const auth = ADMIN_SMTP_USER || ADMIN_SMTP_PASS ? { user: ADMIN_SMTP_USER, pass: ADMIN_SMTP_PASS } : undefined;
-  const transport = nodemailer.createTransport({
-    host: ADMIN_SMTP_HOST,
-    port: ADMIN_SMTP_PORT,
-    secure: ADMIN_SMTP_SECURE,
-    auth,
-  });
-  await transport.sendMail({
+  await adminEmailTransport().sendMail({
     from: ADMIN_SMTP_FROM,
     to: message.to,
+    replyTo: message.replyTo,
     subject: message.subject,
     text: message.text,
   });
@@ -827,6 +875,7 @@ async function sendPublicSupportOpened(ticket, accessToken) {
     }, { type: 'support-opened-requester', ticketId: ticket.ticketId }),
     sendSupportEmailQuietly({
       to: SUPPORT_INBOX_EMAIL,
+      replyTo: ticket.contactEmail,
       subject: `[${ticket.publicReference}] ${ticket.subject}`,
       text: [
         `New ${sourceLabel} support request`,
@@ -842,6 +891,19 @@ async function sendPublicSupportOpened(ticket, accessToken) {
       ].join('\n'),
     }, { type: 'support-opened-staff', ticketId: ticket.ticketId }),
   ]);
+}
+
+function queueSupportEmail(label, task) {
+  setImmediate(() => {
+    Promise.resolve()
+      .then(task)
+      .catch(error => console.error(`${label} failed:`, error?.message || error));
+  });
+}
+
+function publicSupportHoneypotFilled(body = {}) {
+  return [body.company, body.supportFaxNumber__nb_71]
+    .some(value => String(value || '').trim());
 }
 
 async function sendSupportRequesterUpdate(ticket, message, status = null) {
@@ -3845,7 +3907,7 @@ app.use('/assets/cosmetics', express.static(ASSET_UPLOAD_DIR, {
 }));
 
 app.get('/admin/api/auth/recovery/config', (_req, res) => {
-  res.json({ enabled: adminRecoveryEmailEnabled() });
+  res.json(adminEmailConfigStatus());
 });
 
 app.post('/admin/api/auth/recovery/request', async (req, res) => {
@@ -5291,20 +5353,25 @@ app.post('/support/tickets', requireAuth, (req, res) => {
   return res.json(result);
 });
 
-app.post('/support/public', publicSupportRateLimit, async (req, res) => {
-  if (String(req.body?.company || '').trim()) {
+app.post('/support/public', publicSupportRateLimit, (req, res) => {
+  if (publicSupportHoneypotFilled(req.body)) {
     return res.status(202).json({ ok: true });
   }
   const result = createPublicSupportTicket(adminStore, req, req.body || {});
   if (result.error) return res.status(400).json({ error: result.error });
   saveStore();
-  await sendPublicSupportOpened(result.ticket, result.accessToken);
-  return res.status(201).json({
+  const emailDelivery = adminRecoveryEmailEnabled() ? 'queued' : 'not_configured';
+  res.status(201).json({
     ok: true,
     reference: result.ticket.publicReference,
     accessToken: result.accessToken,
     trackingUrl: supportTrackingUrl(result.ticket, result.accessToken),
+    emailDelivery,
   });
+  queueSupportEmail(
+    `Support case ${result.ticket.publicReference} email delivery`,
+    () => sendPublicSupportOpened(result.ticket, result.accessToken),
+  );
 });
 
 app.get('/support/public/:reference', (req, res) => {
@@ -5313,24 +5380,31 @@ app.get('/support/public/:reference', (req, res) => {
   return res.json(result);
 });
 
-app.post('/support/public/:reference/replies', publicSupportRateLimit, async (req, res) => {
-  if (String(req.body?.company || '').trim()) return res.status(202).json({ ok: true });
+app.post('/support/public/:reference/replies', publicSupportRateLimit, (req, res) => {
+  if (publicSupportHoneypotFilled(req.body)) return res.status(202).json({ ok: true });
   const result = addRequesterSupportReply(adminStore, req.params.reference, req.body?.accessToken, req.body || {});
   if (result.error) return res.status(result.error.includes('closed') ? 409 : 404).json({ error: result.error });
   writeAudit(adminStore, req, null, 'support.ticket.requester_reply', { ticketId: result.ticket.ticketId });
   saveStore();
-  await sendSupportEmailQuietly({
-    to: SUPPORT_INBOX_EMAIL,
-    subject: `[${result.ticket.publicReference}] Requester replied`,
-    text: [
-      `${result.ticket.contactName} replied to ${result.ticket.publicReference}.`,
-      '',
-      String(req.body?.message || '').trim(),
-      '',
-      `Manage this case at ${ADMIN_PUBLIC_URL}`,
-    ].join('\n'),
-  }, { type: 'support-requester-reply', ticketId: result.ticket.ticketId });
-  return res.json({ ok: true });
+  res.json({
+    ok: true,
+    emailDelivery: adminRecoveryEmailEnabled() ? 'queued' : 'not_configured',
+  });
+  queueSupportEmail(
+    `Support case ${result.ticket.publicReference} reply email delivery`,
+    () => sendSupportEmailQuietly({
+      to: SUPPORT_INBOX_EMAIL,
+      replyTo: result.ticket.contactEmail,
+      subject: `[${result.ticket.publicReference}] Requester replied`,
+      text: [
+        `${result.ticket.contactName} replied to ${result.ticket.publicReference}.`,
+        '',
+        String(req.body?.message || '').trim(),
+        '',
+        `Manage this case at ${ADMIN_PUBLIC_URL}`,
+      ].join('\n'),
+    }, { type: 'support-requester-reply', ticketId: result.ticket.ticketId }),
+  );
 });
 
 app.get('/auth/config', (_req, res) => {

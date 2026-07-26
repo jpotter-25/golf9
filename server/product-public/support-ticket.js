@@ -108,7 +108,7 @@
         body: JSON.stringify({
           accessToken: token,
           message: values.message,
-          company: values.company,
+          supportFaxNumber__nb_71: values.supportFaxNumber__nb_71,
         }),
       });
       const payload = await response.json().catch(() => ({}));

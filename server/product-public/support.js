@@ -66,13 +66,13 @@
           category: values.category,
           subject: values.subject,
           message: values.message,
-          company: values.company,
+          supportFaxNumber__nb_71: values.supportFaxNumber__nb_71,
         }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || 'We could not submit your request. Please try again.');
       if (!payload.reference || !payload.trackingUrl) {
-        throw new Error('Your request was received, but its tracking link is not ready. Please try again shortly.');
+        throw new Error('We could not create a private tracking link. Please submit the form again.');
       }
       reference.textContent = payload.reference;
       trackingLink.href = payload.trackingUrl;

@@ -217,6 +217,81 @@ test('public policy pages are available for store and social auth review', async
   });
 });
 
+test('public support returns a private tracking link and queues both email copies', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/support/public`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: 'ninebelow',
+        product: 'ninebelow',
+        website: 'https://ninebelow.potterwell.com',
+        name: 'Support Tester',
+        email: 'support-test@example.com',
+        category: 'general',
+        subject: 'Support form verification',
+        message: 'This request verifies private tracking and queued delivery.',
+        supportFaxNumber__nb_71: '',
+      }),
+    });
+    const payload = await json(response);
+
+    assert.equal(response.status, 201);
+    assert.match(payload.reference, /^NB-/);
+    assert.ok(payload.accessToken);
+    assert.match(payload.trackingUrl, /\/support\/ticket\?reference=/);
+    assert.match(payload.trackingUrl, /#token=/);
+    assert.equal(payload.emailDelivery, 'queued');
+
+    const tracked = await json(await fetch(
+      `${baseUrl}/support/public/${encodeURIComponent(payload.reference)}?token=${encodeURIComponent(payload.accessToken)}`,
+    ));
+    assert.equal(tracked.ticket.subject, 'Support form verification');
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const admin = await adminLogin(baseUrl);
+    const outbox = await json(await fetch(`${baseUrl}/admin/api/auth/recovery/test-outbox`, {
+      headers: adminHeaders(admin),
+    }));
+    assert.ok(outbox.messages.some(message => (
+      message.type === 'support-opened-requester'
+      && message.to === 'support-test@example.com'
+    )));
+    assert.ok(outbox.messages.some(message => (
+      message.type === 'support-opened-staff'
+      && message.to === 'app-developer@potterwell.com'
+      && message.replyTo === 'support-test@example.com'
+    )));
+  }, {
+    SEED_ADMIN_ACCOUNT: '1',
+    ADMIN_EMAIL_TEST_MODE: '1',
+  });
+});
+
+test('public support quietly rejects submissions whose bot trap was filled', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/support/public`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: 'ninebelow',
+        product: 'ninebelow',
+        website: 'https://ninebelow.potterwell.com',
+        name: 'Automated Submission',
+        email: 'bot@example.com',
+        category: 'general',
+        subject: 'Automated submission',
+        message: 'This should not create a ticket.',
+        supportFaxNumber__nb_71: 'filled-by-automation',
+      }),
+    });
+    const payload = await json(response);
+
+    assert.equal(response.status, 202);
+    assert.deepEqual(payload, { ok: true });
+  });
+});
+
 test('authenticated account deletion requires fresh credentials and revokes the account', async () => {
   await withServer(async (baseUrl) => {
     const player = await signup(baseUrl, 'DeleteMe');
