@@ -13,7 +13,7 @@ import {
   ViewStyle,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Bell, BookOpen, ChevronRight, Coins, GraduationCap, Home, LogOut, Mail, Music2, Settings, Users, Volume2, X, Zap } from 'lucide-react-native';
+import { Bell, BookOpen, ChevronRight, Coins, GraduationCap, Home, Mail, Music2, Settings, Users, Volume2, X, Zap } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { useNavigation, useRoute, type NavigationProp, type ParamListBase } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,6 +22,7 @@ import { useAvailability } from '../context/AvailabilityContext';
 import { useClubRealtime } from '../context/ClubRealtimeContext';
 import { getGameplayPreferences, setGameplayPreferences, subscribeGameplayPreferences } from '../services/preferences';
 import { ProgressAvatar } from '../components/AvatarDecorations';
+import { AccountControls } from '../components/AccountControls';
 import { ClubEmblem } from '../components/ClubEmblem';
 import { APP_CONTENT_MAX_WIDTH, responsiveHorizontalPadding } from '../utils/scaling';
 import { gradients, ui } from './theme';
@@ -98,7 +99,7 @@ function GlobalTopBar() {
   const { width } = useWindowDimensions();
   const route = useRoute();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
   const { entry: availabilityEntry, isAvailable, isVisible, showUnavailable } = useAvailability();
   const { club, mailSummary, clubChatUnread, clubActionCount } = useClubRealtime();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -198,7 +199,12 @@ function GlobalTopBar() {
                 <X size={23} color={ui.text.primary} strokeWidth={3} />
               </Pressable>
             </View>
-            <View style={styles.settingsBody}>
+            <ScrollView
+              style={styles.settingsScroll}
+              contentContainerStyle={styles.settingsBody}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
               <Text style={styles.settingsSectionLabel}>Alerts and audio</Text>
               <SettingsToggle Icon={Volume2} label="Sound" value={prefs.sound} onValueChange={value => updatePrefs({ sound: value })} />
               <SettingsToggle Icon={Music2} label="Music" value={prefs.music} onValueChange={value => updatePrefs({ music: value })} />
@@ -209,8 +215,9 @@ function GlobalTopBar() {
               {isVisible('rules') ? <SettingsAction Icon={BookOpen} label={availabilityEntry('rules').state === 'live' ? 'Rules' : availabilityEntry('rules').title || 'Rules'} onPress={() => { setSettingsOpen(false); openFeature('rules', 'Rules'); }} /> : null}
               {isVisible('tutorial') ? <SettingsAction Icon={GraduationCap} label={availabilityEntry('tutorial').state === 'live' ? 'Play Tutorial' : availabilityEntry('tutorial').title || 'Play Tutorial'} onPress={() => { setSettingsOpen(false); openFeature('tutorial', 'Tutorial'); }} /> : null}
               <View style={styles.settingsDivider} />
-              <SettingsAction Icon={LogOut} label="Log Out" danger onPress={() => { setSettingsOpen(false); signOut(); }} />
-            </View>
+              <Text style={styles.settingsSectionLabel}>Account and sign-in</Text>
+              <AccountControls onSessionEnd={() => setSettingsOpen(false)} />
+            </ScrollView>
           </LinearGradient>
         </View>
       </Modal>
@@ -481,6 +488,7 @@ const styles = StyleSheet.create({
   settingsCard: {
     width: '100%',
     maxWidth: 390,
+    maxHeight: '92%',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: ui.border.strong,
@@ -516,6 +524,7 @@ const styles = StyleSheet.create({
   settingsHeaderCopy: { flex: 1, minWidth: 0 },
   settingsEyebrow: { color: ui.palette.gold, fontSize: 11, fontWeight: '900', textTransform: 'uppercase', marginBottom: 3 },
   settingsTitle: { color: ui.text.primary, fontSize: 28, fontWeight: '900' },
+  settingsScroll: { flexShrink: 1 },
   settingsBody: { padding: 16, gap: 9 },
   settingsSectionLabel: { color: ui.text.muted, fontSize: 11, fontWeight: '900', textTransform: 'uppercase', marginTop: 2 },
   settingsDivider: { height: 1, backgroundColor: ui.border.soft, marginVertical: 4 },

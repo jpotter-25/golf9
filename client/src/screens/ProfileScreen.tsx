@@ -2,26 +2,20 @@
 // Purpose: Tabbed player profile hub for progression, results, cosmetics, and social.
 
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
-  CheckCircle2,
   Gift,
-  Link,
   MessageCircle,
   Pencil,
-  ShieldAlert,
   ShoppingBag,
-  Trash2,
   Trophy,
   Users,
-  X,
 } from 'lucide-react-native';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
-import { isProviderConfigured } from '../services/socialAuth';
 import { ActionButton, PremiumPanel, ProgressBar, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
 import { CoinClaimBurst, type CoinClaimBurstState } from '../components/CoinClaimBurst';
 import { PlayerAvatar } from '../components/PlayerAvatar';
@@ -65,7 +59,7 @@ type RankStep = {
 };
 
 const ProfileScreen: React.FC<Props> = ({ navigation }) => {
-  const { token, user, signOut, deleteAccount, refreshProfile, linkSocialProvider } = useAuth();
+  const { token, user, refreshProfile } = useAuth();
   const [tab, setTab] = useState<ProfileTab>('stats');
   const [matchFilter, setMatchFilter] = useState<MatchFilter>('all');
   const [results, setResults] = useState<api.GameResult[]>([]);
@@ -74,11 +68,6 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const [rankProfile, setRankProfile] = useState<api.RankedProfileResponse | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [coinBurst, setCoinBurst] = useState<CoinClaimBurstState>(null);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleteConfirmation, setDeleteConfirmation] = useState('');
-  const [deletePassword, setDeletePassword] = useState('');
-  const [deleteError, setDeleteError] = useState('');
-  const [deleteBusy, setDeleteBusy] = useState<'password' | api.AuthProviderKey | null>(null);
 
   useFocusEffect(useCallback(() => {
     refreshProfile().catch(() => {});
@@ -178,51 +167,6 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
     }
   };
 
-  const onLinkSocialProvider = async (provider: api.AuthProviderKey) => {
-    if (busyId) return;
-    setBusyId(`link-${provider}`);
-    try {
-      await linkSocialProvider(provider);
-      await refreshProfile().catch(() => {});
-      Alert.alert('Account linked', `${provider === 'google' ? 'Google' : 'Facebook'} can now sign in to this Nine Below profile.`);
-    } catch (error) {
-      Alert.alert('Link failed', error instanceof Error ? error.message : 'Try again.');
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const openDeleteAccount = () => {
-    setDeleteConfirmation('');
-    setDeletePassword('');
-    setDeleteError('');
-    setDeleteBusy(null);
-    setDeleteOpen(true);
-  };
-
-  const closeDeleteAccount = () => {
-    if (deleteBusy) return;
-    setDeleteOpen(false);
-  };
-
-  const onDeleteAccount = async (method: 'password' | api.AuthProviderKey) => {
-    if (deleteBusy || deleteConfirmation !== 'DELETE') return;
-    if (method === 'password' && !deletePassword) {
-      setDeleteError('Enter your current password.');
-      return;
-    }
-    setDeleteBusy(method);
-    setDeleteError('');
-    try {
-      await deleteAccount(method, method === 'password' ? deletePassword : undefined);
-      setDeleteOpen(false);
-    } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : 'Account deletion could not be completed.');
-    } finally {
-      setDeleteBusy(null);
-    }
-  };
-
   return (
     <ScreenShell scroll>
       <CoinClaimBurst burst={coinBurst} top={104} right={18} />
@@ -275,11 +219,13 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
 
           <PremiumPanel>
             <View style={styles.cardHeader}>
-              <View>
+              <View style={styles.cardHeaderCopy}>
                 <Text style={styles.sectionTitle}>Ranked Ladders</Text>
                 <Text style={styles.sectionMeta}>Separate ranks for 2, 3, and 4 player competitive tables.</Text>
               </View>
-              <Trophy size={24} color={ui.palette.gold} strokeWidth={2.6} />
+              <View style={styles.cardHeaderIcon}>
+                <Trophy size={21} color={ui.palette.gold} strokeWidth={2.6} />
+              </View>
             </View>
             <View style={styles.ladderRow}>
               {[2, 3, 4].map(count => {
@@ -299,11 +245,13 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
 
           <PremiumPanel>
             <View style={styles.cardHeader}>
-              <View>
+              <View style={styles.cardHeaderCopy}>
                 <Text style={styles.sectionTitle}>Daily Bonus</Text>
                 <Text style={styles.sectionMeta}>Claim every 24 hours to rebuild your stack.</Text>
               </View>
-              <Gift size={24} color={ui.palette.gold} strokeWidth={2.6} />
+              <View style={styles.cardHeaderIcon}>
+                <Gift size={21} color={ui.palette.gold} strokeWidth={2.6} />
+              </View>
             </View>
             <ActionButton
               label={dailyBonus?.canClaim ? `Claim ${dailyBonus.reward} Coins` : 'Daily Bonus Claimed'}
@@ -392,179 +340,11 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
           </View>
           <ActionButton label="Open Social" Icon={Users} onPress={() => navigation.navigate('Social')} />
           <ActionButton label={user?.club ? 'Open Club' : 'Find A Club'} Icon={Trophy} tone="secondary" onPress={() => navigation.navigate('Club')} style={styles.socialButton} />
-          <View style={styles.linkedAccounts}>
-            <Text style={styles.sectionTitle}>Linked Accounts</Text>
-            <Text style={styles.sectionMeta}>Attach Google or Facebook so this same profile can use social login.</Text>
-            <LinkedAccountRow
-              provider="google"
-              linked={!!user?.authProviders?.google}
-              enabled={isProviderConfigured('google')}
-              busy={busyId === 'link-google'}
-              onPress={() => onLinkSocialProvider('google')}
-            />
-            <LinkedAccountRow
-              provider="facebook"
-              linked={!!user?.authProviders?.facebook}
-              enabled={isProviderConfigured('facebook')}
-              busy={busyId === 'link-facebook'}
-              onPress={() => onLinkSocialProvider('facebook')}
-            />
-          </View>
-          <ActionButton label="Log Out" tone="danger" onPress={signOut} style={styles.socialButton} />
-          <View style={styles.dangerZone}>
-            <View style={styles.dangerHeader}>
-              <View style={styles.dangerIcon}>
-                <ShieldAlert size={22} color={ui.feedback.danger} strokeWidth={2.6} />
-              </View>
-              <View style={styles.rowCopy}>
-                <Text style={styles.dangerTitle}>Delete Account</Text>
-                <Text style={styles.dangerCopy}>Permanently remove your Nine Below account and sign-in access.</Text>
-              </View>
-            </View>
-            <Pressable style={styles.deleteAccountButton} onPress={openDeleteAccount}>
-              <Trash2 size={18} color={ui.feedback.danger} strokeWidth={2.6} />
-              <Text style={styles.deleteAccountButtonText}>Delete My Account</Text>
-            </Pressable>
-          </View>
         </PremiumPanel>
       ) : null}
-
-      <Modal
-        animationType="fade"
-        transparent
-        visible={deleteOpen}
-        onRequestClose={closeDeleteAccount}
-      >
-        <View style={styles.deleteModalBackdrop}>
-          <View style={styles.deleteModalSheet}>
-            <View style={styles.deleteModalHeader}>
-              <View style={styles.deleteModalTitleRow}>
-                <View style={styles.deleteModalIcon}>
-                  <Trash2 size={24} color={ui.feedback.danger} strokeWidth={2.7} />
-                </View>
-                <View style={styles.rowCopy}>
-                  <Text style={styles.deleteModalEyebrow}>IRREVERSIBLE</Text>
-                  <Text style={styles.deleteModalTitle}>Delete Account</Text>
-                </View>
-              </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Close account deletion"
-                disabled={!!deleteBusy}
-                style={[styles.deleteModalClose, !!deleteBusy && styles.disabled]}
-                onPress={closeDeleteAccount}
-              >
-                <X size={24} color={ui.text.primary} strokeWidth={2.8} />
-              </Pressable>
-            </View>
-
-            <ScrollView
-              style={styles.deleteModalScroll}
-              contentContainerStyle={styles.deleteModalContent}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-            >
-              <Text style={styles.deleteModalBody}>
-                Your profile, login methods, inventory, coins, club membership, and active social data will be removed.
-                Records required for match integrity, safety, or legal obligations may be anonymized.
-              </Text>
-              <Text style={styles.deleteModalLabel}>Type DELETE to continue</Text>
-              <TextInput
-                accessibilityLabel="Type DELETE to confirm"
-                autoCapitalize="characters"
-                autoCorrect={false}
-                editable={!deleteBusy}
-                maxLength={6}
-                placeholder="DELETE"
-                placeholderTextColor={ui.text.muted}
-                style={styles.deleteModalInput}
-                value={deleteConfirmation}
-                onChangeText={value => {
-                  setDeleteConfirmation(value);
-                  setDeleteError('');
-                }}
-              />
-
-              {user?.passwordSignIn ? (
-                <>
-                  <Text style={styles.deleteModalLabel}>Current password</Text>
-                  <TextInput
-                    accessibilityLabel="Current password"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    editable={!deleteBusy}
-                    placeholder="Enter your password"
-                    placeholderTextColor={ui.text.muted}
-                    secureTextEntry
-                    style={styles.deleteModalInput}
-                    value={deletePassword}
-                    onChangeText={value => {
-                      setDeletePassword(value);
-                      setDeleteError('');
-                    }}
-                  />
-                  <DeleteMethodButton
-                    label="Delete With Password"
-                    busy={deleteBusy === 'password'}
-                    disabled={deleteConfirmation !== 'DELETE' || !deletePassword || !!deleteBusy}
-                    onPress={() => onDeleteAccount('password')}
-                  />
-                </>
-              ) : null}
-
-              {user?.authProviders?.google && isProviderConfigured('google') ? (
-                <DeleteMethodButton
-                  label="Verify And Delete With Google"
-                  busy={deleteBusy === 'google'}
-                  disabled={deleteConfirmation !== 'DELETE' || !!deleteBusy}
-                  onPress={() => onDeleteAccount('google')}
-                />
-              ) : null}
-
-              {user?.authProviders?.facebook && isProviderConfigured('facebook') ? (
-                <DeleteMethodButton
-                  label="Verify And Delete With Facebook"
-                  busy={deleteBusy === 'facebook'}
-                  disabled={deleteConfirmation !== 'DELETE' || !!deleteBusy}
-                  onPress={() => onDeleteAccount('facebook')}
-                />
-              ) : null}
-
-              {deleteError ? <Text style={styles.deleteModalError}>{deleteError}</Text> : null}
-              <Text style={styles.deleteModalFootnote}>
-                Deletion is unavailable while you are seated in an active match. Finish the match, then return here.
-              </Text>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
     </ScreenShell>
   );
 };
-
-function DeleteMethodButton({
-  label,
-  busy,
-  disabled,
-  onPress,
-}: {
-  label: string;
-  busy: boolean;
-  disabled: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      disabled={disabled}
-      style={[styles.deleteMethodButton, disabled && styles.disabled]}
-      onPress={onPress}
-    >
-      <Trash2 size={18} color={ui.text.primary} strokeWidth={2.6} />
-      <Text style={styles.deleteMethodButtonText}>{busy ? 'Deleting Account...' : label}</Text>
-    </Pressable>
-  );
-}
 
 function Stat({ label, value, tone }: { label: string; value: string; tone?: 'gold' }) {
   return (
@@ -620,7 +400,7 @@ function RankRoadmap({
           const passed = placed && currentIndex > stepIndex;
           return (
             <View key={step.id} style={[styles.rankStep, active && styles.rankStepActive, passed && styles.rankStepPassed]}>
-              <RankEmblem league={step.league} size={48} />
+              <RankEmblem league={step.league} size={56} />
               <Text style={styles.rankStepName} numberOfLines={1}>{step.name}</Text>
               <Text style={styles.rankStepMeta} numberOfLines={1}>{active ? 'Current' : passed ? 'Passed' : 'Ahead'}</Text>
             </View>
@@ -673,37 +453,6 @@ function DisplayRankPicker({
           );
         })}
       </ScrollView>
-    </View>
-  );
-}
-
-function LinkedAccountRow({
-  provider,
-  linked,
-  enabled,
-  busy,
-  onPress,
-}: {
-  provider: api.AuthProviderKey;
-  linked: boolean;
-  enabled: boolean;
-  busy: boolean;
-  onPress: () => void;
-}) {
-  const label = provider === 'google' ? 'Google' : 'Facebook';
-  return (
-    <View style={styles.linkRow}>
-      <View style={[styles.providerMark, provider === 'google' ? styles.googleMark : styles.facebookMark]}>
-        <Text style={[styles.providerMarkText, provider === 'facebook' && styles.facebookMarkText]}>{provider === 'google' ? 'G' : 'f'}</Text>
-      </View>
-      <View style={styles.rowCopy}>
-        <Text style={styles.rowTitle}>{label}</Text>
-        <Text style={styles.rowMeta}>{linked ? 'Linked to this profile.' : enabled ? 'Available to link.' : 'Unavailable in this build.'}</Text>
-      </View>
-      <Pressable style={[styles.linkButton, (!enabled || linked || busy) && styles.disabled]} disabled={!enabled || linked || busy} onPress={onPress}>
-        {linked ? <CheckCircle2 size={18} color={ui.palette.emerald} strokeWidth={2.8} /> : <Link size={18} color={ui.text.inverse} strokeWidth={2.8} />}
-        <Text style={styles.linkButtonText}>{linked ? 'Linked' : busy ? '...' : 'Link'}</Text>
-      </Pressable>
     </View>
   );
 }
@@ -877,17 +626,18 @@ const styles = StyleSheet.create({
   rankEyebrow: { color: ui.palette.gold, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
   rankName: { color: ui.text.primary, fontSize: 24, fontWeight: '900', marginTop: 3 },
   rankMeta: { color: ui.text.secondary, fontSize: 12, fontWeight: '800', lineHeight: 17, marginTop: 4 },
-  rankTrack: { gap: 8, paddingTop: 12, paddingBottom: 2 },
+  rankTrack: { gap: 10, paddingTop: 12, paddingBottom: 2 },
   rankStep: {
-    width: 104,
-    minHeight: 108,
+    width: 112,
+    minHeight: 126,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: ui.border.soft,
     backgroundColor: ui.surface.glass,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 8,
+    padding: 10,
+    overflow: 'hidden',
   },
   rankStepActive: { borderColor: ui.palette.gold, backgroundColor: 'rgba(255, 204, 102, 0.13)' },
   rankStepPassed: { borderColor: 'rgba(82, 229, 167, 0.42)' },
@@ -931,7 +681,27 @@ const styles = StyleSheet.create({
   statValue: { color: ui.text.primary, fontSize: 20, fontWeight: '900' },
   goldText: { color: ui.palette.gold },
   statLabel: { color: ui.text.muted, fontSize: 11, fontWeight: '900', marginTop: 4 },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 },
+  cardHeader: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  cardHeaderCopy: { flex: 1, minWidth: 0 },
+  cardHeaderIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 204, 102, 0.45)',
+    backgroundColor: 'rgba(255, 204, 102, 0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
   sectionTitle: { color: ui.text.primary, fontSize: 18, fontWeight: '900' },
   sectionMeta: { color: ui.text.secondary, fontSize: 12, fontWeight: '800', lineHeight: 17, marginTop: 4 },
   ladderRow: { flexDirection: 'row', gap: 8 },
@@ -990,116 +760,4 @@ const styles = StyleSheet.create({
   socialIcon: { width: 52, height: 52, borderRadius: 8, backgroundColor: ui.palette.feltLight, alignItems: 'center', justifyContent: 'center' },
   socialCopy: { flex: 1, minWidth: 0 },
   socialButton: { marginTop: 10 },
-  linkedAccounts: { marginTop: 16, borderTopWidth: 1, borderTopColor: ui.border.soft, paddingTop: 14 },
-  linkRow: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderBottomColor: ui.border.soft, paddingVertical: 10 },
-  providerMark: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
-  googleMark: { backgroundColor: '#F4F7FF' },
-  facebookMark: { backgroundColor: '#1877F2' },
-  providerMarkText: { color: ui.text.inverse, fontSize: 21, fontWeight: '900' },
-  facebookMarkText: { color: ui.text.primary },
-  linkButton: { minWidth: 78, minHeight: 38, borderRadius: 8, backgroundColor: ui.palette.emerald, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 10 },
-  linkButtonText: { color: ui.text.inverse, fontSize: 12, fontWeight: '900' },
-  dangerZone: {
-    marginTop: 18,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: ui.border.soft,
-  },
-  dangerHeader: { flexDirection: 'row', alignItems: 'center', gap: 11 },
-  dangerIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 127, 134, 0.55)',
-    backgroundColor: 'rgba(255, 127, 134, 0.10)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dangerTitle: { color: ui.feedback.danger, fontSize: 16, fontWeight: '900' },
-  dangerCopy: { color: ui.text.secondary, fontSize: 12, fontWeight: '700', lineHeight: 17, marginTop: 3 },
-  deleteAccountButton: {
-    minHeight: 48,
-    marginTop: 13,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: ui.feedback.danger,
-    backgroundColor: 'rgba(255, 127, 134, 0.08)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 9,
-    paddingHorizontal: 14,
-  },
-  deleteAccountButtonText: { color: ui.feedback.danger, fontSize: 14, fontWeight: '900' },
-  deleteModalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(8, 15, 28, 0.78)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 18,
-  },
-  deleteModalSheet: {
-    width: '100%',
-    maxWidth: 520,
-    maxHeight: '92%',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 127, 134, 0.60)',
-    backgroundColor: ui.surface.panel,
-    padding: 18,
-  },
-  deleteModalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  deleteModalTitleRow: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 11 },
-  deleteModalIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 127, 134, 0.55)',
-    backgroundColor: 'rgba(255, 127, 134, 0.10)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  deleteModalEyebrow: { color: ui.feedback.danger, fontSize: 10, fontWeight: '900' },
-  deleteModalTitle: { color: ui.text.primary, fontSize: 23, fontWeight: '900', marginTop: 2 },
-  deleteModalClose: {
-    width: 44,
-    height: 44,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: ui.border.soft,
-    backgroundColor: ui.surface.glass,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  deleteModalScroll: { flexShrink: 1, marginTop: 14 },
-  deleteModalContent: { paddingBottom: 2 },
-  deleteModalBody: { color: ui.text.secondary, fontSize: 13, fontWeight: '700', lineHeight: 19 },
-  deleteModalLabel: { color: ui.text.primary, fontSize: 12, fontWeight: '900', marginTop: 14, marginBottom: 7 },
-  deleteModalInput: {
-    minHeight: 50,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: ui.border.strong,
-    backgroundColor: ui.surface.base,
-    color: ui.text.primary,
-    fontSize: 15,
-    fontWeight: '800',
-    paddingHorizontal: 13,
-  },
-  deleteMethodButton: {
-    minHeight: 50,
-    marginTop: 12,
-    borderRadius: 8,
-    backgroundColor: ui.feedback.danger,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 9,
-    paddingHorizontal: 12,
-  },
-  deleteMethodButtonText: { color: ui.text.primary, fontSize: 13, fontWeight: '900', textAlign: 'center' },
-  deleteModalError: { color: ui.feedback.danger, fontSize: 12, fontWeight: '900', lineHeight: 17, marginTop: 12 },
-  deleteModalFootnote: { color: ui.text.muted, fontSize: 11, fontWeight: '700', lineHeight: 16, marginTop: 13 },
 });

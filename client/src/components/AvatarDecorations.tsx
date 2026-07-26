@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
-import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Path, Polygon, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Path, Polygon, Stop, Text as SvgText } from 'react-native-svg';
 import { Bot, Crown, Gem, Gift, Rocket, Watch, type LucideIcon } from 'lucide-react-native';
 import { PlayerAvatar } from './PlayerAvatar';
 import { getAvatarAccessoryVisual, type EquippedCosmetics } from '../theme/cosmetics';
@@ -33,6 +33,12 @@ function divisionPips(rawName: string, division?: string | null) {
   if (value === 'III' || value === '3') return 3;
   if (value === 'II' || value === '2') return 2;
   return 1;
+}
+
+function divisionLabel(pips: number) {
+  if (pips === 3) return 'III';
+  if (pips === 2) return 'II';
+  return 'I';
 }
 
 export function rankEmblemForLeague(league: LeagueLike): RankEmblemVisual {
@@ -83,68 +89,139 @@ export function RankEmblem({
   const emblem = rankEmblemForLeague(league);
   const gradientId = `rank-${emblem.tier}-${size}`;
   const shineId = `rank-shine-${emblem.tier}-${size}`;
-  const pipStart = 32 - (emblem.pips - 1) * 4;
   const isElite = emblem.tier === 'diamond' || emblem.tier === 'master' || emblem.tier === 'grandmaster' || emblem.tier === 'legend';
-  const isLegend = emblem.tier === 'legend';
+  const isHighElite = emblem.tier === 'master' || emblem.tier === 'grandmaster' || emblem.tier === 'legend';
+  const hasDivision = ['iron', 'bronze', 'silver', 'gold', 'platinum', 'diamond'].includes(emblem.tier);
+  const division = divisionLabel(emblem.pips);
   return (
     <View style={[{ width: size, height: size }, style]}>
-      <Svg width={size} height={size} viewBox="0 0 64 64">
+      <Svg width={size} height={size} viewBox="0 0 72 72">
         <Defs>
-          <SvgLinearGradient id={gradientId} x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+          <SvgLinearGradient id={gradientId} x1="12" y1="7" x2="60" y2="65" gradientUnits="userSpaceOnUse">
             <Stop offset="0" stopColor={emblem.shine} />
-            <Stop offset="0.42" stopColor={emblem.primary} />
+            <Stop offset="0.38" stopColor={emblem.primary} />
             <Stop offset="1" stopColor={emblem.secondary} />
           </SvgLinearGradient>
-          <SvgLinearGradient id={shineId} x1="16" y1="10" x2="42" y2="48" gradientUnits="userSpaceOnUse">
-            <Stop offset="0" stopColor="#FFFFFF" stopOpacity="0.9" />
+          <SvgLinearGradient id={shineId} x1="20" y1="12" x2="49" y2="52" gradientUnits="userSpaceOnUse">
+            <Stop offset="0" stopColor="#FFFFFF" stopOpacity="0.88" />
             <Stop offset="1" stopColor="#FFFFFF" stopOpacity="0" />
           </SvgLinearGradient>
         </Defs>
-        <Circle cx="32" cy="32" r="30.5" fill={emblem.glow} opacity={isElite ? '0.24' : '0.14'} />
-        <Circle cx="32" cy="32" r="29" fill={emblem.backgroundColor} opacity="0.94" stroke={emblem.borderColor} strokeWidth="1.2" />
-        <Polygon points="32,2 39,10 50,9 53,20 62,27 58,38 61,49 49,53 42,62 32,58 22,62 15,53 3,49 6,38 2,27 11,20 14,9 25,10" fill={emblem.glow} opacity={isElite ? '0.24' : '0.1'} />
+
+        <Circle cx="36" cy="36" r="33" fill={emblem.glow} opacity={isElite ? '0.18' : '0.09'} />
+        {isHighElite ? (
+          <Polygon
+            points="36,3 42,10 51,7 54,16 64,17 62,27 69,34 62,41 65,51 55,53 52,63 43,60 36,69 29,60 20,63 17,53 7,51 10,41 3,34 10,27 8,17 18,16 21,7 30,10"
+            fill={emblem.glow}
+            opacity="0.22"
+          />
+        ) : null}
+        {isElite ? (
+          <>
+            <Path d="M17 26 C11 25 7 21 5 15 C14 16 21 20 25 28 Z" fill={emblem.primary} opacity="0.62" />
+            <Path d="M55 28 C59 20 66 16 67 15 C65 22 61 26 55 27 Z" fill={emblem.primary} opacity="0.62" />
+            <Path d="M18 32 C12 33 8 37 6 43 C14 42 20 38 24 32 Z" fill={emblem.secondary} opacity="0.62" />
+            <Path d="M54 32 C60 38 66 42 66 43 C64 37 60 33 54 32 Z" fill={emblem.secondary} opacity="0.62" />
+          </>
+        ) : null}
+
         <Path
-          d="M32 4 L53 13 L50 35 C48 47 40 56 32 61 C24 56 16 47 14 35 L11 13 Z"
-          fill={`url(#${gradientId})`}
-          stroke={emblem.borderColor}
-          strokeWidth="3"
+          d="M36 7 L58 16 L55 39 C53 51 45 60 36 66 C27 60 19 51 17 39 L14 16 Z"
+          fill={emblem.backgroundColor}
+          stroke={emblem.glow}
+          strokeWidth="4.5"
           strokeLinejoin="round"
         />
         <Path
-          d="M20 16 L32 10 L44 16 L41 35 C40 43 35 50 32 52 C29 50 24 43 23 35 Z"
-          fill={`url(#${shineId})`}
-          opacity="0.55"
+          d="M36 9 L56 17 L53 38 C51 49 44 57 36 62 C28 57 21 49 19 38 L16 17 Z"
+          fill={`url(#${gradientId})`}
+          stroke={emblem.borderColor}
+          strokeWidth="2.2"
+          strokeLinejoin="round"
         />
-        {isLegend ? (
+        <Path
+          d="M24 19 L36 14 L48 19 L46 38 C45 45 40 52 36 55 C32 52 27 45 26 38 Z"
+          fill={`url(#${shineId})`}
+          opacity="0.5"
+        />
+
+        {emblem.tier === 'iron' ? (
           <>
-            <Polygon points="32,14 37,26 50,26 39,34 43,48 32,40 21,48 25,34 14,26 27,26" fill="#FFF0C2" opacity="0.96" />
-            <Circle cx="32" cy="32" r="8" fill={emblem.primary} stroke={emblem.secondary} strokeWidth="3" />
+            <Path d="M24 27 H48 L44 33 H40 V44 H32 V33 H28 Z" fill={emblem.shine} opacity="0.92" />
+            <Path d="M28 45 H44 L47 50 H25 Z" fill={emblem.secondary} stroke={emblem.shine} strokeWidth="1.2" />
           </>
-        ) : isElite ? (
+        ) : emblem.tier === 'bronze' ? (
           <>
-            <Polygon points="32,12 47,28 32,51 17,28" fill={emblem.shine} opacity="0.88" />
-            <Polygon points="32,12 32,51 17,28" fill={emblem.primary} opacity="0.42" />
-            <Path d="M18 23 C12 22 9 18 8 14 C15 15 19 18 22 24 Z" fill={emblem.glow} opacity="0.72" />
-            <Path d="M46 24 C49 18 53 15 60 14 C59 18 56 22 50 23 Z" fill={emblem.glow} opacity="0.72" />
+            <Path d="M25 46 L45 24 M47 46 L27 24" stroke={emblem.shine} strokeWidth="4" strokeLinecap="round" />
+            <Polygon points="25,20 31,27 23,29" fill={emblem.shine} />
+            <Polygon points="47,20 49,29 41,27" fill={emblem.shine} />
+            <Circle cx="36" cy="35" r="7" fill={emblem.secondary} stroke={emblem.shine} strokeWidth="2" />
+          </>
+        ) : emblem.tier === 'silver' ? (
+          <>
+            <Polygon points="36,19 40,29 51,29 42,36 45,47 36,41 27,47 30,36 21,29 32,29" fill={emblem.shine} />
+            <Circle cx="36" cy="34" r="6" fill={emblem.secondary} stroke={emblem.backgroundColor} strokeWidth="2" />
+          </>
+        ) : emblem.tier === 'gold' ? (
+          <>
+            <Path d="M23 27 L29 34 L36 23 L43 34 L49 27 L46 45 H26 Z" fill={emblem.shine} stroke={emblem.secondary} strokeWidth="1.8" strokeLinejoin="round" />
+            <Path d="M27 46 H45" stroke={emblem.backgroundColor} strokeWidth="3" strokeLinecap="round" opacity="0.72" />
+            <Circle cx="36" cy="36" r="4" fill={emblem.secondary} />
+          </>
+        ) : emblem.tier === 'platinum' ? (
+          <>
+            <Path d="M20 29 L31 33 L36 45 L25 40 Z" fill={emblem.shine} opacity="0.92" />
+            <Path d="M52 29 L41 33 L36 45 L47 40 Z" fill={emblem.shine} opacity="0.92" />
+            <Polygon points="36,20 45,32 36,47 27,32" fill={emblem.primary} stroke={emblem.shine} strokeWidth="2" />
+          </>
+        ) : emblem.tier === 'diamond' ? (
+          <>
+            <Polygon points="36,18 49,31 36,50 23,31" fill={emblem.shine} stroke={emblem.backgroundColor} strokeWidth="1.8" />
+            <Polygon points="36,18 42,31 36,50 30,31" fill={emblem.primary} opacity="0.66" />
+            <Path d="M23 31 H49 M30 31 L36 18 L42 31" stroke={emblem.secondary} strokeWidth="1.5" opacity="0.82" />
+          </>
+        ) : emblem.tier === 'master' ? (
+          <>
+            <Circle cx="36" cy="34" r="15" fill="none" stroke={emblem.shine} strokeWidth="2.4" />
+            <Polygon points="36,17 40,29 52,29 42,36 46,49 36,41 26,49 30,36 20,29 32,29" fill={emblem.primary} stroke={emblem.shine} strokeWidth="1.6" />
+            <Circle cx="36" cy="34" r="5" fill={emblem.secondary} />
+          </>
+        ) : emblem.tier === 'grandmaster' ? (
+          <>
+            <Path d="M22 27 L29 33 L36 20 L43 33 L50 27 L47 46 H25 Z" fill={emblem.shine} stroke={emblem.secondary} strokeWidth="2" strokeLinejoin="round" />
+            <Polygon points="36,29 42,36 36,45 30,36" fill={emblem.primary} />
+            <Circle cx="36" cy="36" r="3" fill={emblem.secondary} />
           </>
         ) : (
           <>
-            <Path d="M19 28 L32 17 L45 28 L32 43 Z" fill={emblem.shine} opacity="0.78" />
-            <Path d="M22 39 H42 L32 50 Z" fill={emblem.secondary} opacity="0.7" />
-            <Path d="M22 26 H42" stroke={emblem.backgroundColor} strokeWidth="3" strokeLinecap="round" opacity="0.48" />
+            <Polygon points="36,16 41,28 54,28 44,36 48,50 36,42 24,50 28,36 18,28 31,28" fill={emblem.shine} stroke={emblem.secondary} strokeWidth="2" />
+            <Circle cx="36" cy="35" r="8" fill={emblem.primary} stroke={emblem.secondary} strokeWidth="3" />
+            <Polygon points="36,27 39,33 46,34 41,39 42,46 36,42 30,46 31,39 26,34 33,33" fill={emblem.shine} />
           </>
         )}
-        {showPips ? Array.from({ length: emblem.pips }).map((_, index) => (
-          <Circle
-            key={`pip-${index}`}
-            cx={pipStart + index * 8}
-            cy="54"
-            r="2.5"
-            fill={emblem.shine}
-            stroke={emblem.backgroundColor}
-            strokeWidth="1"
-          />
-        )) : null}
+
+        {showPips && hasDivision ? (
+          <>
+            <Path
+              d="M20 51 L25 48 H47 L52 51 L49 62 H23 Z"
+              fill={emblem.backgroundColor}
+              stroke={emblem.borderColor}
+              strokeWidth="1.7"
+              strokeLinejoin="round"
+            />
+            <SvgText
+              x="36"
+              y="59"
+              fill={emblem.shine}
+              fontSize="10"
+              fontWeight="900"
+              textAnchor="middle"
+              letterSpacing="0.6"
+            >
+              {division}
+            </SvgText>
+          </>
+        ) : null}
       </Svg>
     </View>
   );
