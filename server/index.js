@@ -3718,7 +3718,8 @@ app.get('/privacy', (_req, res) => sendLegalPage(res, 'Privacy Policy', [
   {
     title: 'Retention And Deletion',
     body: [
-      `We keep account and gameplay information while your account is active or as needed to operate Nine Below, resolve disputes, prevent abuse, and satisfy legal or store-platform requirements. You can request deletion at ${legalEmailLink()} or by visiting <a href="/account/delete">/account/delete</a>.`,
+      'We keep account and gameplay information while your account is active or as needed to operate Nine Below, resolve disputes, prevent abuse, and satisfy legal or store-platform requirements. While signed in to Nine Below, you can delete your account under <strong>Settings &gt; Account and sign-in &gt; Delete My Account</strong>.',
+      'If you no longer have access to the app, use the secure <a href="/account/delete">account deletion web fallback</a>. It verifies account ownership and completes deletion without requiring a manual email request.',
       'When an account is deleted, we will delete or anonymize personal account data where reasonably possible. Some records may be kept if needed for security, fraud prevention, legal compliance, or completed transaction/history integrity.',
     ],
   },

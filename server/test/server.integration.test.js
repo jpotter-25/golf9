@@ -212,8 +212,20 @@ test('public policy pages are available for store and social auth review', async
       assert.equal(res.status, 200);
       assert.match(res.headers.get('content-type'), /text\/html/);
       assert.match(html, new RegExp(`<h1>${title}</h1>`));
-      assert.match(html, /app-developer@potterwell\.com/);
+      if (route !== '/account/delete') {
+        assert.match(html, /app-developer@potterwell\.com/);
+      }
     }
+
+    const privacy = await (await fetch(`${baseUrl}/privacy`)).text();
+    assert.match(privacy, /Settings &gt; Account and sign-in &gt; Delete My Account/);
+    assert.match(privacy, /href="\/account\/delete"/);
+    assert.doesNotMatch(privacy, /request deletion at <a href="mailto:/);
+
+    const deletion = await (await fetch(`${baseUrl}/account/delete`)).text();
+    assert.match(deletion, /Primary path/);
+    assert.match(deletion, /Cannot access the app\?/);
+    assert.doesNotMatch(deletion, /mailto:/);
   });
 });
 
