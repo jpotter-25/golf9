@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  advancePeek,
   cardValue,
   autoCompleteCurrentPeek,
   continueAfterRoundSummary,
@@ -11,6 +12,7 @@ import {
   drawFromDeck,
   flipForPeek,
   publicGameState,
+  revealForPeek,
   revealGridCardForDecision,
   replaceGridCard,
   resolvePendingGridDecision,
@@ -92,6 +94,29 @@ test('peek validation enforces current peeker and two-card limit', () => {
   result = flipForPeek(state, 0, 0, 1);
   assert.equal(result.error, undefined);
   assert.equal(result.state.peekTurnIndex, 1);
+});
+
+test('pass-and-play peek can hold the second reveal before advancing the handoff', () => {
+  let state = createGameState([
+    { userId: 'u1', displayName: 'One' },
+    { userId: 'u2', displayName: 'Two' },
+  ]);
+
+  let result = revealForPeek(state, 0, 0, 0);
+  assert.equal(result.error, undefined);
+  state = result.state;
+  result = revealForPeek(state, 0, 0, 1);
+  assert.equal(result.error, undefined);
+
+  const revealed = result.state;
+  assert.equal(revealed.phase, 'peek');
+  assert.equal(revealed.peekTurnIndex, 0);
+  assert.equal(revealed.players[0].peekFlips, 2);
+  assert.equal(revealed.players[0].grid[0][1].faceUp, true);
+
+  const advanced = advancePeek(revealed);
+  assert.equal(advanced.phase, 'peek');
+  assert.equal(advanced.peekTurnIndex, 1);
 });
 
 test('simultaneous peek lets players flip independently and auto-completes everyone', () => {

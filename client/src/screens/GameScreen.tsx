@@ -17,6 +17,7 @@ import {
   replaceGridCard,
   discardDrawn,
   flipForPeek,
+  revealForPeek,
   advancePeek
 } from '../game/gameLogic';
 import GridView from '../components/Grid';
@@ -109,6 +110,7 @@ const QUIET_ONLINE_ACTION_ERRORS = new Set([
 ]);
 const SOLO_AI_SOURCE_PAUSE_MS = 1300;
 const SOLO_AI_TARGET_PAUSE_MS = 1900;
+const PASS_AND_PLAY_PEEK_REVEAL_PAUSE_MS = 1000;
 const TURN_CHIME_URI = 'data:audio/wav;base64,UklGRsQFAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YaAFAAAAAEkA4QAtAakAT/+7/eT8jP2//6ICxgTdBHsCcf6Q+tn4c/r9/pAEhQi/CL8EEv639830Bve8/QsGFAzIDHEHNP459czwUfP9+w8HZw/sEIgK2f4f8+PsW+/F+ZYHcxIfFf4NAABw8R7pMusY950HLxVVGckRqQEz8Ijl3ub88yEHjxeCHeEV0QNw7y3ibeJ28CEGixmZITwadwYr7xjf6t3M7H4EIBrFI/8c6gi+8JLfSd3v6kACiRiOI0MeEwvP8pjgzNwo6QAA2BY0I2gfMQ3t9L3hctx358D9ERW3Im4gQg8W9wHjO9zg5YL7NBMWIlIhRBFJ+WPkKdxj5En5RBFSIRYiNBOC++DlO9wB4xb3Qg9uILciERXA/Xfncty94e30MQ1oHzQj2BYAACjpzNyY4M/yEwtDHo4jiRhAAu/qSd2S377w6gj/HMUjIBp+BMzs6t2u3rzutwadG9cjnRu3Brzurt7q3czsfgQgGsUj/xzqCL7wkt9J3e/qQAKJGI4jQx4TC8/ymODM3CjpAADYFjQjaB8xDe30veFy3HfnwP0RFbcibiBCDxb3AeM73ODlgvs0ExYiUiFEEUn5Y+Qp3GPkSflEEVIhFiI0E4L74OU73AHjFvdCD24gtyIRFcD9d+dy3L3h7fQxDWgfNCPYFgAAKOnM3Jjgz/ITC0MejiOJGEAC7+pJ3ZLfvvDqCP8cxSMgGn4EzOzq3a7evO63Bp0b1yOdG7cGvO6u3urdzOx+BCAaxSP/HOoIvvCS30nd7+pAAokYjiNDHhMLz/KY4MzcKOkAANgWNCNoHzEN7fS94XLcd+fA/REVtyJuIEIPFvcB4zvc4OWC+zQTFiJSIUQRSflj5CncY+RJ+UQRUiEWIjQTgvvg5TvcAeMW90IPbiC3IhEVwP1353LcveHt9DENaB80I9gWAAAo6czcmODP8hMLQx6OI4kYQALv6kndkt++8OoI/xzFIyAafgTM7Ordrt687rcGnRvXI50btwa87q7e6t3M7H4EIBrFI/8c6gi+8JLfSd3v6kACiRiOI0MeEwvP8pjgzNwo6QAA2BY0I2gfMQ3t9L3hctx358D9ERW3Im4gQg8W9wHjO9zg5YL7NBMWIlIhRBFJ+WPkKdxj5En5RBFSIRYiNBOC++DlO9wB4xb3Qg9uILciERXA/Xfncty94e30MQ1oHzQj2BYAACjpzNyY4M/yEwtDHo4jiRhAAu/qSd2S377w6gj/HMUjIBp+BMzs6t2u3rzutwadG9cjnRu3Brzurt7q3czsfgQgGsUj/xzqCL7wkt9J3e/qQAKJGI4jQx4TC8/ymODM3CjpAADYFjQjaB8xDe30veFy3HfnwP0RFbcibiBCDxb3AeM73ODlgvs0ExYiKCEYEWP58OQP3TflhfmTENMfYSAmEsf7k+e83i7lzff2DYIdah/2Evz9KuqI4F/lT/Z6CysbRx6IEwAAsuxu4sflDfUjCdAY+hzfE9ABJu9n5GLmBfT0BngWixv8E2oDgPFw5i3nOfPwBCkU/BniE80EvvOC6CTop/IZA+URUxiSE/kF2vWZ6kPpT/J0AbQPlBYQE+wG0vev7IfqLvIAAJgNxRRfEqcHovnA7unrQ/LA/pYL6xKDESoIR/vH8GftjPK2/bMJCxF/EHYIvvy/8vruBfPh/PEHKQ9XD4wIBv6j9J/wrfNC/FUGTA0PDm0IHP9v9lDygPTZ++IEdwusDBwIAAAe+Aj0e/Wl+5kDrwkzC5sHsACu+cL1mfan+38C+QeoCewGKwEa+3v31vfb+5QBWgYQCBMGcgFg/Cv5L/lB/NoA1QRwBhMFhAF7/dD6n/rX/FQAbwPNBO8DYgFr/mP8Ifya/QAALAIrA6sCDgEr/+L9sP2H/uD/DgGQAUwBiQC8/0b/Sf+c//X/GQA=';
 let turnChimeSound: Audio.Sound | null = null;
 let turnChimeLoading: Promise<Audio.Sound | null> | null = null;
@@ -272,6 +274,7 @@ export default function GameScreen({ route, navigation }: Props) {
   const soloAiTurnKey = useRef<string | null>(null);
   const soloAiPeekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const soloAiPeekKey = useRef<string | null>(null);
+  const passPeekRevealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const localRoundRevealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const localEndingRound = useRef<number | null>(null);
   const recordedLocalRoundKey = useRef<string | null>(null);
@@ -710,6 +713,7 @@ export default function GameScreen({ route, navigation }: Props) {
       if (discardFlashTimer.current) clearTimeout(discardFlashTimer.current);
       if (soloAiTurnTimer.current) clearTimeout(soloAiTurnTimer.current);
       if (soloAiPeekTimer.current) clearTimeout(soloAiPeekTimer.current);
+      if (passPeekRevealTimer.current) clearTimeout(passPeekRevealTimer.current);
       if (localRoundRevealTimer.current) clearTimeout(localRoundRevealTimer.current);
       if (turnNoticeTimer.current) clearTimeout(turnNoticeTimer.current);
       Object.values(socialBurstTimers.current).forEach(timer => clearTimeout(timer));
@@ -752,6 +756,27 @@ export default function GameScreen({ route, navigation }: Props) {
   const isHumanPeek = state.phase === 'peek'
     ? isOnlinePeek && !(isSolo && (state.peekTurnIndex ?? 0) !== 0)
     : true;
+
+  // Pass & Play keeps the second reveal on screen briefly before the privacy handoff.
+  useEffect(() => {
+    if (isOnline || isSolo || state.phase !== 'peek' || state.peekTurnIndex == null) return;
+    const peekPlayer = state.players[state.peekTurnIndex];
+    if (!peekPlayer || peekPlayer.peekFlips < 2 || passPeekRevealTimer.current) return;
+
+    setLocked(true);
+    passPeekRevealTimer.current = setTimeout(() => {
+      passPeekRevealTimer.current = null;
+      setState(current => advancePeek(current));
+      setLocked(false);
+    }, PASS_AND_PLAY_PEEK_REVEAL_PAUSE_MS);
+
+    return () => {
+      if (passPeekRevealTimer.current) {
+        clearTimeout(passPeekRevealTimer.current);
+        passPeekRevealTimer.current = null;
+      }
+    };
+  }, [isOnline, isSolo, state.peekTurnIndex, state.phase, state.players]);
 
   // ===== Hide Android navigation bar while in-game =====
   useEffect(() => {
@@ -1384,7 +1409,7 @@ export default function GameScreen({ route, navigation }: Props) {
   // ===== Actions =====
   const onPressGrid = (r: number, c: number) => {
     if (state.phase === 'peek') {
-      if (!isHumanPeek || !isActiveGridVisible) return;
+      if (locked || !isHumanPeek || !isActiveGridVisible) return;
       const peekPlayerIndex = isOnline && onlineViewerIndex >= 0
         ? onlineViewerIndex
         : (state.peekTurnIndex ?? bottomIndex);
@@ -1396,7 +1421,7 @@ export default function GameScreen({ route, navigation }: Props) {
       }
       setState(s => {
         if (s.peekTurnIndex == null) return s;
-        return flipForPeek(s, r, c);
+        return isSolo ? flipForPeek(s, r, c) : revealForPeek(s, r, c);
       });
       return;
     }

@@ -198,7 +198,7 @@ export function advancePeek(state) {
   return startTurns(next);
 }
 
-export function flipForPeek(state, playerIndex, r, c) {
+export function revealForPeek(state, playerIndex, r, c) {
   const next = cloneState(state);
   if (next.phase !== 'peek') return { state: next, error: 'Not in peek phase.' };
   if (!next.simultaneousPeek && next.peekTurnIndex !== playerIndex) return { state: next, error: 'Not your peek turn.' };
@@ -209,6 +209,14 @@ export function flipForPeek(state, playerIndex, r, c) {
   card.faceUp = true;
   player.peekFlips += 1;
   next.revision = (next.revision || 0) + 1;
+  return { state: next };
+}
+
+export function flipForPeek(state, playerIndex, r, c) {
+  const result = revealForPeek(state, playerIndex, r, c);
+  if (result.error) return result;
+  const next = result.state;
+  const player = next.players[playerIndex];
   if (next.simultaneousPeek) {
     return { state: allPeeked(next) ? startTurns(next) : next };
   }

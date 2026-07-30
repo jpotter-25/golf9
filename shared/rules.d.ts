@@ -44,6 +44,7 @@ export function createGameState(playerIdentities: PlayerIdentity[], options?: { 
 export function dealLocal(players: number, identities?: PlayerIdentity[], options?: { round?: number; totalRounds?: number; totals?: number[]; simultaneousPeek?: boolean }): GameState;
 export function startTurns(state: GameState): GameState;
 export function advancePeek(state: GameState): GameState;
+export function revealForPeek(state: GameState, playerIndex: number, r: number, c: number): { state: GameState; error?: string };
 export function flipForPeek(state: GameState, playerIndex: number, r: number, c: number): { state: GameState; error?: string };
 export function autoCompleteCurrentPeek(state: GameState): GameState;
 export function drawFromDeck(state: GameState): { state: GameState; drawn: Card | null; error?: string };

@@ -11,6 +11,7 @@ import {
   flipForPeek as sharedFlipForPeek,
   initGrid,
   isRoundOver,
+  revealForPeek as sharedRevealForPeek,
   replaceGridCard as sharedReplaceGridCard,
   scoreGrid,
   startTurns,
@@ -33,6 +34,11 @@ export function deal(players: number, identities?: PlayerIdentity[], options?: L
 export function flipForPeek(state: GameState, r: number, c: number): GameState {
   const playerIndex = state.peekTurnIndex ?? 0;
   return sharedFlipForPeek(state, playerIndex, r, c).state as GameState;
+}
+
+export function revealForPeek(state: GameState, r: number, c: number): GameState {
+  const playerIndex = state.peekTurnIndex ?? 0;
+  return sharedRevealForPeek(state, playerIndex, r, c).state as GameState;
 }
 
 export function advancePeek(state: GameState): GameState {
