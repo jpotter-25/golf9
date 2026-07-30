@@ -2953,8 +2953,9 @@ function bindRecoveryControls() {
   document.querySelector('#recoveryCompleteForm')?.addEventListener('submit', async event => {
     event.preventDefault();
     message.textContent = '';
+    const recoveryForm = event.currentTarget;
     try {
-      const form = new FormData(event.currentTarget);
+      const form = new FormData(recoveryForm);
       await api('/auth/recovery/complete', {
         method: 'POST',
         body: JSON.stringify({
@@ -2964,7 +2965,7 @@ function bindRecoveryControls() {
         }),
       });
       message.textContent = 'Password updated. Sign in with the new password.';
-      event.currentTarget.reset();
+      recoveryForm.reset();
     } catch (error) {
       message.textContent = error.message;
     }
