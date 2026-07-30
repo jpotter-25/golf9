@@ -11,14 +11,39 @@
       <section class="login shell">
         <p class="eyebrow">Nine Below Operations</p>
         <h1>Admin Console</h1>
-        <p class="muted">Sign in with an admin account. Local development defaults are admin / admin9 / 000000 unless bootstrap env vars are set.</p>
+        <p class="muted">Sign in with an admin account and your rotating authenticator or recovery code.</p>
         <form id="loginForm" class="panel">
           <label>Admin name <input name="displayName" autocomplete="username" required /></label>
           <label>Password <input name="password" type="password" autocomplete="current-password" required /></label>
-          <label>MFA code <input name="mfaCode" inputmode="numeric" placeholder="000000" /></label>
+          <label>Authenticator or recovery code <input name="mfaCode" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code" /></label>
           <button type="submit">Sign In</button>
           <p id="loginError" class="error"></p>
         </form>
+        <section id="mfaEnrollmentPanel" class="panel authenticator-setup hidden" aria-labelledby="mfaEnrollmentTitle">
+          <div id="mfaEnrollmentInstructions">
+            <p class="eyebrow">Authenticator Setup</p>
+            <h2 id="mfaEnrollmentTitle">Secure this admin account</h2>
+            <p class="muted">Scan this QR code with Google Authenticator or another authenticator app. Then enter the rotating six-digit code to finish setup.</p>
+            <img id="mfaEnrollmentQr" class="authenticator-qr" alt="Authenticator setup QR code" />
+            <details>
+              <summary>Enter the setup key manually</summary>
+              <code id="mfaEnrollmentSecret" class="authenticator-secret"></code>
+            </details>
+            <form id="mfaEnrollmentForm" class="compact">
+              <label>Authenticator code <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" required /></label>
+              <button type="submit">Enable Authenticator</button>
+            </form>
+            <p id="mfaEnrollmentError" class="error"></p>
+          </div>
+          <div id="mfaRecoveryCodesPanel" class="hidden">
+            <p class="eyebrow">Recovery Codes</p>
+            <h2>Save these codes now</h2>
+            <p class="muted">Each code works once if your authenticator is unavailable. They will not be shown again.</p>
+            <pre id="mfaRecoveryCodeList" class="recovery-code-list"></pre>
+            <label class="checkline"><input id="mfaRecoveryAcknowledged" type="checkbox" /> I stored these recovery codes securely.</label>
+            <button id="finishMfaEnrollment" type="button" disabled>Continue to Admin Console</button>
+          </div>
+        </section>
         <div class="panel compact">
           <div class="split-header">
             <div>
@@ -776,10 +801,10 @@
                 </select>
               </label>
               <label>Optional temp password <input name="temporaryPassword" type="password" autocomplete="new-password" placeholder="Generated if blank" /></label>
-              <label>Optional MFA code <input name="mfaCode" inputmode="numeric" placeholder="Generated if blank" /></label>
               <label>Reason <input name="reason" placeholder="Required audit reason" required /></label>
-              <label class="checkline"><input name="mfaEnabled" type="checkbox" checked /> Require MFA</label>
+              <label class="checkline"><input name="mfaEnabled" type="checkbox" checked /> Require authenticator MFA</label>
               <button type="submit">Create Admin</button>
+              <p class="muted">Admins enroll their authenticator during their first sign-in. No static MFA code is created.</p>
             </form>
             <div id="adminActionOutput" class="card hidden"></div>
             <div id="adminAccountsOutput" class="player-table-wrap"></div>

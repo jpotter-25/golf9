@@ -144,6 +144,7 @@ import {
   cleanAdminReason,
   clearAdminCookie,
   completeAdminPasswordRecovery,
+  confirmAdminMfaEnrollment,
   createAdminAccount,
   consumeSignupInvite,
   createInviteCode,
@@ -163,6 +164,7 @@ import {
   seedDevelopmentAdmin,
   setAdminCookie,
   signupInvitesRequired,
+  startAdminMfaEnrollment,
   trackUserDevice,
   updateAdminAccount,
   updateSupportTicket,
@@ -3951,6 +3953,33 @@ app.post('/admin/api/auth/mfa/verify', (req, res) => {
   const result = verifyAdminMfa(adminStore, req, decodeURIComponent(cookieToken || headerToken || ''), req.body?.code);
   if (result.error) return res.status(403).json({ error: result.error });
   saveStore();
+  return res.json(result);
+});
+
+app.post('/admin/api/auth/mfa/enroll/start', async (req, res) => {
+  const cookieToken = String(req.headers.cookie || '').match(/(?:^|;\s*)golf9_admin=([^;]+)/)?.[1];
+  const headerToken = req.headers.authorization?.replace(/^Bearer\s+/i, '');
+  const result = await startAdminMfaEnrollment(
+    adminStore,
+    req,
+    decodeURIComponent(cookieToken || headerToken || ''),
+  );
+  if (result.changed) saveStore();
+  if (result.error) return res.status(result.status || 400).json({ error: result.error, code: result.code });
+  return res.json(result);
+});
+
+app.post('/admin/api/auth/mfa/enroll/confirm', (req, res) => {
+  const cookieToken = String(req.headers.cookie || '').match(/(?:^|;\s*)golf9_admin=([^;]+)/)?.[1];
+  const headerToken = req.headers.authorization?.replace(/^Bearer\s+/i, '');
+  const result = confirmAdminMfaEnrollment(
+    adminStore,
+    req,
+    decodeURIComponent(cookieToken || headerToken || ''),
+    req.body?.code,
+  );
+  if (result.changed) saveStore();
+  if (result.error) return res.status(result.status || 400).json({ error: result.error, code: result.code });
   return res.json(result);
 });
 

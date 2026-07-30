@@ -1,9 +1,20 @@
 import crypto from 'crypto';
 import { publicEconomyCatalog } from './economy.js';
 import { publicCosmeticCatalog, publicUserProfile } from './progression.js';
+import {
+  buildTotpUri,
+  decryptMfaSecret,
+  encryptMfaSecret,
+  generateRecoveryCodes,
+  generateTotpSecret,
+  normalizeRecoveryCode,
+  totpQrDataUrl,
+  verifyTotp,
+} from './adminMfa.js';
 
 const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 8;
 const ADMIN_MFA_TTL_MS = 1000 * 60 * 5;
+const ADMIN_MFA_ENROLLMENT_TTL_MS = 1000 * 60 * 10;
 const ADMIN_LOGIN_LOCK_THRESHOLD = 5;
 const ADMIN_LOGIN_LOCK_MS = 1000 * 60 * 15;
 const ADMIN_RECOVERY_TTL_MS = 1000 * 60 * 15;
@@ -95,6 +106,26 @@ function hashValue(value) {
   return crypto.createHash('sha256').update(String(value || '')).digest('hex');
 }
 
+function safeHashEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left || ''));
+  const rightBuffer = Buffer.from(String(right || ''));
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function recoveryMfaHash(adminId, code) {
+  return hashValue(`${adminId}:${normalizeRecoveryCode(code)}`);
+}
+
+function resetAuthenticator(admin) {
+  admin.mfaSecretHash = '';
+  admin.mfaSecretEncrypted = '';
+  admin.mfaPendingSecretEncrypted = '';
+  admin.mfaPendingCreatedAt = null;
+  admin.mfaRecoveryCodeHashes = [];
+  admin.mfaEnrolledAt = null;
+  admin.mfaMethod = admin.mfaEnabled === false ? 'none' : 'pending';
+}
+
 function rolePermissions(role) {
   return ROLE_PERMISSIONS[role] || [];
 }
@@ -115,6 +146,9 @@ function publicAdmin(admin) {
     email: admin.email || null,
     role: admin.role,
     mfaEnabled: admin.mfaEnabled !== false,
+    mfaMethod: admin.mfaEnabled === false ? 'none' : admin.mfaMethod,
+    authenticatorConfigured: admin.mfaMethod === 'totp' && !!admin.mfaSecretEncrypted,
+    recoveryCodesRemaining: Array.isArray(admin.mfaRecoveryCodeHashes) ? admin.mfaRecoveryCodeHashes.length : 0,
     createdAt: admin.createdAt,
     lastLoginAt: admin.lastLoginAt || null,
     disabledAt: admin.disabledAt || null,
@@ -141,23 +175,45 @@ export function normalizeAdminStore(store) {
 
   store.admins = store.admins
     .filter(admin => admin?.adminId && admin?.displayName)
-    .map(admin => ({
-      adminId: String(admin.adminId),
-      displayName: safeString(admin.displayName, 40),
-      email: normalizeEmail(admin.email),
-      role: VALID_ROLES.includes(admin.role) ? admin.role : 'readOnly',
-      salt: String(admin.salt || ''),
-      passwordHash: String(admin.passwordHash || ''),
-      mfaSecretHash: String(admin.mfaSecretHash || ''),
-      mfaEnabled: admin.mfaEnabled !== false,
-      createdAt: Number(admin.createdAt) || now(),
-      lastLoginAt: Number(admin.lastLoginAt) || null,
-      disabledAt: Number(admin.disabledAt) || null,
-      failedLoginCount: Math.max(0, Number(admin.failedLoginCount) || 0),
-      lastFailedLoginAt: Number(admin.lastFailedLoginAt) || null,
-      lockedUntil: Number(admin.lockedUntil) || null,
-      passwordChangedAt: Number(admin.passwordChangedAt) || null,
-    }));
+    .map(admin => {
+      const mfaEnabled = admin.mfaEnabled !== false;
+      const mfaSecretEncrypted = String(admin.mfaSecretEncrypted || '');
+      const mfaSecretHash = String(admin.mfaSecretHash || '');
+      const inferredMfaMethod = !mfaEnabled
+        ? 'none'
+        : mfaSecretEncrypted
+          ? 'totp'
+          : mfaSecretHash
+            ? 'legacy'
+            : 'pending';
+      return {
+        adminId: String(admin.adminId),
+        displayName: safeString(admin.displayName, 40),
+        email: normalizeEmail(admin.email),
+        role: VALID_ROLES.includes(admin.role) ? admin.role : 'readOnly',
+        salt: String(admin.salt || ''),
+        passwordHash: String(admin.passwordHash || ''),
+        mfaSecretHash,
+        mfaSecretEncrypted,
+        mfaPendingSecretEncrypted: String(admin.mfaPendingSecretEncrypted || ''),
+        mfaPendingCreatedAt: Number(admin.mfaPendingCreatedAt) || null,
+        mfaRecoveryCodeHashes: Array.isArray(admin.mfaRecoveryCodeHashes)
+          ? admin.mfaRecoveryCodeHashes.map(value => String(value)).filter(Boolean).slice(0, 20)
+          : [],
+        mfaEnrolledAt: Number(admin.mfaEnrolledAt) || null,
+        mfaMethod: ['none', 'pending', 'legacy', 'totp'].includes(admin.mfaMethod)
+          ? admin.mfaMethod
+          : inferredMfaMethod,
+        mfaEnabled,
+        createdAt: Number(admin.createdAt) || now(),
+        lastLoginAt: Number(admin.lastLoginAt) || null,
+        disabledAt: Number(admin.disabledAt) || null,
+        failedLoginCount: Math.max(0, Number(admin.failedLoginCount) || 0),
+        lastFailedLoginAt: Number(admin.lastFailedLoginAt) || null,
+        lockedUntil: Number(admin.lockedUntil) || null,
+        passwordChangedAt: Number(admin.passwordChangedAt) || null,
+      };
+    });
 
   store.adminSessions = store.adminSessions
     .filter(session => session?.token && session?.adminId && Number(session.expiresAt) > now())
@@ -166,6 +222,7 @@ export function normalizeAdminStore(store) {
       adminId: String(session.adminId),
       expiresAt: Number(session.expiresAt),
       mfaVerifiedAt: Number(session.mfaVerifiedAt) || null,
+      mfaEnrollmentRequired: !!session.mfaEnrollmentRequired,
       createdAt: Number(session.createdAt) || now(),
       ipHash: String(session.ipHash || ''),
       userAgent: safeString(session.userAgent, 180),
@@ -387,17 +444,27 @@ export function ensureBootstrapAdmin(store, env = process.env) {
   normalizeAdminStore(store);
   const username = safeString(env.ADMIN_BOOTSTRAP_USER || '', 40);
   const password = String(env.ADMIN_BOOTSTRAP_PASSWORD || '');
+  const email = normalizeEmail(env.ADMIN_BOOTSTRAP_EMAIL);
   const mfaCode = String(env.ADMIN_BOOTSTRAP_MFA_CODE || '000000');
-  if (!username || !password || store.admins.length) return false;
+  if (store.admins.length) {
+    if (!email) return false;
+    const target = store.admins.find(admin => admin.adminId === 'admin-owner')
+      || store.admins.find(admin => username && admin.displayName.toLowerCase() === username.toLowerCase());
+    if (!target || target.email) return false;
+    target.email = email;
+    return true;
+  }
+  if (!username || !password) return false;
   const credentials = hashPassword(password);
   store.admins.push({
     adminId: 'admin-owner',
     displayName: username,
-    email: normalizeEmail(env.ADMIN_BOOTSTRAP_EMAIL),
+    email,
     role: 'owner',
     salt: credentials.salt,
     passwordHash: credentials.passwordHash,
     mfaSecretHash: hashValue(mfaCode),
+    mfaMethod: 'legacy',
     mfaEnabled: true,
     createdAt: now(),
     lastLoginAt: null,
@@ -422,6 +489,7 @@ export function seedDevelopmentAdmin(store, env = process.env) {
     salt: credentials.salt,
     passwordHash: credentials.passwordHash,
     mfaSecretHash: hashValue('000000'),
+    mfaMethod: 'legacy',
     mfaEnabled: true,
     createdAt: now(),
     lastLoginAt: null,
@@ -510,9 +578,8 @@ export function createAdminAccount(store, req, actor, body = {}) {
   const temporaryPassword = body.temporaryPassword ? String(body.temporaryPassword) : generateTemporaryPassword();
   const passwordError = validateAdminPassword(temporaryPassword);
   if (passwordError) return { error: passwordError };
-  const mfaCode = body.mfaCode ? String(body.mfaCode).trim() : generateMfaCode();
-  if (!/^\d{6}$/.test(mfaCode)) return { error: 'MFA code must be exactly 6 digits.' };
   const credentials = hashPassword(temporaryPassword);
+  const mfaEnabled = body.mfaEnabled !== false;
   const admin = {
     adminId: crypto.randomUUID(),
     displayName: nameCheck.displayName,
@@ -520,8 +587,14 @@ export function createAdminAccount(store, req, actor, body = {}) {
     role,
     salt: credentials.salt,
     passwordHash: credentials.passwordHash,
-    mfaSecretHash: hashValue(mfaCode),
-    mfaEnabled: body.mfaEnabled !== false,
+    mfaSecretHash: '',
+    mfaSecretEncrypted: '',
+    mfaPendingSecretEncrypted: '',
+    mfaPendingCreatedAt: null,
+    mfaRecoveryCodeHashes: [],
+    mfaEnrolledAt: null,
+    mfaMethod: mfaEnabled ? 'pending' : 'none',
+    mfaEnabled,
     createdAt: now(),
     lastLoginAt: null,
     disabledAt: null,
@@ -541,7 +614,6 @@ export function createAdminAccount(store, req, actor, body = {}) {
   return {
     admin: publicAdmin(admin),
     temporaryPassword: body.temporaryPassword ? null : temporaryPassword,
-    mfaCode: body.mfaCode ? null : mfaCode,
   };
 }
 
@@ -567,12 +639,17 @@ export function updateAdminAccount(store, req, actor, adminId, patch = {}) {
     }
     admin.role = patch.role;
   }
-  if (patch.mfaEnabled !== undefined) admin.mfaEnabled = patch.mfaEnabled !== false;
-  if (patch.mfaCode !== undefined && String(patch.mfaCode || '').trim()) {
-    const mfaCode = String(patch.mfaCode).trim();
-    if (!/^\d{6}$/.test(mfaCode)) return { error: 'MFA code must be exactly 6 digits.' };
-    admin.mfaSecretHash = hashValue(mfaCode);
+  if (patch.mfaEnabled !== undefined) {
+    const enabled = patch.mfaEnabled !== false;
+    if (admin.mfaEnabled !== enabled) {
+      admin.mfaEnabled = enabled;
+      resetAuthenticator(admin);
+      revokeAdminSessions(store, admin.adminId);
+    }
+  }
+  if (patch.resetMfa === true) {
     admin.mfaEnabled = true;
+    resetAuthenticator(admin);
     revokeAdminSessions(store, admin.adminId);
   }
   if (patch.disabled !== undefined) {
@@ -614,6 +691,7 @@ export function createAdminSession(store, req, admin) {
     adminId: admin.adminId,
     expiresAt: now() + ADMIN_SESSION_TTL_MS,
     mfaVerifiedAt: null,
+    mfaEnrollmentRequired: admin.mfaEnabled !== false && admin.mfaMethod === 'pending',
     createdAt: now(),
     ...requestMeta(req),
   };
@@ -654,7 +732,14 @@ export function loginAdmin(store, req, displayName, password) {
   admin.lockedUntil = null;
   const session = createAdminSession(store, req, admin);
   writeAudit(store, req, admin, 'admin.login.started', { adminId: admin.adminId });
-  return { sessionToken: session.token, token: session.token, mfaRequired: !!admin.mfaEnabled, admin: publicAdmin(admin), changed: true };
+  return {
+    sessionToken: session.token,
+    token: session.token,
+    mfaRequired: admin.mfaEnabled !== false && ['legacy', 'totp'].includes(admin.mfaMethod),
+    mfaEnrollmentRequired: admin.mfaEnabled !== false && admin.mfaMethod === 'pending',
+    admin: publicAdmin(admin),
+    changed: true,
+  };
 }
 
 function findRecoveryAdmin(store, identifier) {
@@ -725,6 +810,7 @@ export function completeAdminPasswordRecovery(store, req, body = {}) {
   admin.failedLoginCount = 0;
   admin.lastFailedLoginAt = null;
   admin.lockedUntil = null;
+  if (admin.mfaEnabled !== false) resetAuthenticator(admin);
   request.usedAt = now();
   request.attempts += 1;
   const revokedSessions = revokeAdminSessions(store, admin.adminId);
@@ -732,14 +818,107 @@ export function completeAdminPasswordRecovery(store, req, body = {}) {
   return { ok: true, admin: publicAdmin(admin), changed: true };
 }
 
-export function verifyAdminMfa(store, req, token, code) {
+export function verifyAdminMfa(store, req, token, code, env = process.env) {
   const auth = authenticateAdmin(store, token);
   if (!auth) return { error: 'Admin authentication required.' };
-  const expectedHash = auth.admin.mfaSecretHash || hashValue('000000');
-  if (expectedHash !== hashValue(String(code || '').trim())) return { error: 'Invalid MFA code.' };
+  const normalizedCode = String(code || '').trim();
+  let valid = false;
+  let usedRecoveryCode = false;
+  if (auth.admin.mfaMethod === 'totp' && auth.admin.mfaSecretEncrypted) {
+    try {
+      valid = verifyTotp(decryptMfaSecret(auth.admin.mfaSecretEncrypted, env), normalizedCode);
+    } catch {
+      return { error: 'Authenticator configuration is unavailable. Contact an owner administrator.' };
+    }
+    if (!valid) {
+      const recoveryHash = recoveryMfaHash(auth.admin.adminId, normalizedCode);
+      const recoveryIndex = auth.admin.mfaRecoveryCodeHashes.findIndex(hash => safeHashEqual(hash, recoveryHash));
+      if (recoveryIndex >= 0) {
+        auth.admin.mfaRecoveryCodeHashes.splice(recoveryIndex, 1);
+        valid = true;
+        usedRecoveryCode = true;
+      }
+    }
+  } else if (auth.admin.mfaMethod === 'legacy' && auth.admin.mfaSecretHash) {
+    valid = safeHashEqual(auth.admin.mfaSecretHash, hashValue(normalizedCode));
+    if (valid) auth.session.mfaEnrollmentRequired = true;
+  }
+  if (!valid) return { error: 'Invalid authenticator or recovery code.' };
   auth.session.mfaVerifiedAt = now();
-  writeAudit(store, req, auth.admin, 'admin.login.completed', { adminId: auth.admin.adminId });
-  return { admin: publicAdmin(auth.admin) };
+  writeAudit(store, req, auth.admin, usedRecoveryCode ? 'admin.login.recovery_code' : 'admin.login.completed', { adminId: auth.admin.adminId });
+  return {
+    admin: publicAdmin(auth.admin),
+    mfaEnrollmentRequired: !!auth.session.mfaEnrollmentRequired,
+    recoveryCodesRemaining: auth.admin.mfaRecoveryCodeHashes.length,
+  };
+}
+
+export async function startAdminMfaEnrollment(store, req, token, env = process.env) {
+  const auth = authenticateAdmin(store, token);
+  if (!auth) return { error: 'Admin authentication required.', status: 401 };
+  if (auth.admin.mfaMethod === 'totp' && !auth.session.mfaVerifiedAt) {
+    return { error: 'Verify the current authenticator before replacing it.', status: 403 };
+  }
+  try {
+    const secret = generateTotpSecret();
+    const uri = buildTotpUri({
+      secret,
+      accountName: auth.admin.email || auth.admin.displayName,
+      issuer: 'Nine Below Admin',
+    });
+    auth.admin.mfaEnabled = true;
+    auth.admin.mfaPendingSecretEncrypted = encryptMfaSecret(secret, env);
+    auth.admin.mfaPendingCreatedAt = now();
+    auth.session.mfaEnrollmentRequired = true;
+    writeAudit(store, req, auth.admin, 'admin.mfa.enrollment.started', { adminId: auth.admin.adminId });
+    return {
+      secret,
+      otpAuthUri: uri,
+      qrDataUrl: await totpQrDataUrl(uri),
+      expiresAt: auth.admin.mfaPendingCreatedAt + ADMIN_MFA_ENROLLMENT_TTL_MS,
+      changed: true,
+    };
+  } catch (error) {
+    return { error: error.message || 'Authenticator enrollment is unavailable.', status: 503 };
+  }
+}
+
+export function confirmAdminMfaEnrollment(store, req, token, code, env = process.env) {
+  const auth = authenticateAdmin(store, token);
+  if (!auth) return { error: 'Admin authentication required.', status: 401 };
+  if (!auth.admin.mfaPendingSecretEncrypted || !auth.admin.mfaPendingCreatedAt) {
+    return { error: 'Start authenticator enrollment first.' };
+  }
+  if (now() - auth.admin.mfaPendingCreatedAt > ADMIN_MFA_ENROLLMENT_TTL_MS) {
+    auth.admin.mfaPendingSecretEncrypted = '';
+    auth.admin.mfaPendingCreatedAt = null;
+    return { error: 'Authenticator setup expired. Start again.', changed: true };
+  }
+  try {
+    const secret = decryptMfaSecret(auth.admin.mfaPendingSecretEncrypted, env);
+    if (!verifyTotp(secret, code)) return { error: 'Invalid authenticator code.' };
+    const recoveryCodes = generateRecoveryCodes();
+    auth.admin.mfaSecretEncrypted = auth.admin.mfaPendingSecretEncrypted;
+    auth.admin.mfaPendingSecretEncrypted = '';
+    auth.admin.mfaPendingCreatedAt = null;
+    auth.admin.mfaSecretHash = '';
+    auth.admin.mfaRecoveryCodeHashes = recoveryCodes.map(value => recoveryMfaHash(auth.admin.adminId, value));
+    auth.admin.mfaEnrolledAt = now();
+    auth.admin.mfaMethod = 'totp';
+    auth.admin.mfaEnabled = true;
+    auth.session.mfaVerifiedAt = now();
+    auth.session.mfaEnrollmentRequired = false;
+    writeAudit(store, req, auth.admin, 'admin.mfa.enrollment.completed', { adminId: auth.admin.adminId }, {
+      recoveryCodeCount: recoveryCodes.length,
+    });
+    return {
+      admin: publicAdmin(auth.admin),
+      recoveryCodes,
+      changed: true,
+    };
+  } catch (error) {
+    return { error: error.message || 'Authenticator enrollment failed.' };
+  }
 }
 
 export function requireAdmin(store, permission = null) {
@@ -748,7 +927,10 @@ export function requireAdmin(store, permission = null) {
     const headerToken = req.headers.authorization?.replace(/^Bearer\s+/i, '');
     const auth = authenticateAdmin(store, decodeURIComponent(cookieToken || headerToken || ''));
     if (!auth) return res.status(401).json({ error: 'Admin authentication required.' });
-    if (!auth.session.mfaVerifiedAt || now() - auth.session.mfaVerifiedAt > ADMIN_MFA_TTL_MS + ADMIN_SESSION_TTL_MS) {
+    if (auth.session.mfaEnrollmentRequired) {
+      return res.status(403).json({ error: 'Authenticator enrollment required.', code: 'ADMIN_MFA_ENROLLMENT_REQUIRED' });
+    }
+    if (auth.admin.mfaEnabled !== false && (!auth.session.mfaVerifiedAt || now() - auth.session.mfaVerifiedAt > ADMIN_MFA_TTL_MS + ADMIN_SESSION_TTL_MS)) {
       return res.status(403).json({ error: 'Admin MFA verification required.' });
     }
     if (permission && !adminHasPermission(auth.admin, permission)) return res.status(403).json({ error: 'Admin permission denied.' });

@@ -108,6 +108,62 @@ code {
   padding-top: 12vh;
 }
 
+.authenticator-setup {
+  text-align: center;
+}
+
+.authenticator-setup p {
+  line-height: 1.55;
+}
+
+.authenticator-qr {
+  display: block;
+  width: min(240px, 72vw);
+  aspect-ratio: 1;
+  margin: 1.25rem auto;
+  border-radius: 12px;
+  border: 8px solid #fff;
+  background: #fff;
+}
+
+.authenticator-setup details {
+  margin: 0 auto 1rem;
+  text-align: left;
+}
+
+.authenticator-setup summary {
+  color: var(--blue);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.authenticator-secret {
+  display: flex;
+  margin-top: 0.75rem;
+  justify-content: center;
+  word-break: break-all;
+  letter-spacing: 0.08em;
+}
+
+.recovery-code-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin: 1.25rem 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(6, 11, 24, 0.7);
+  color: var(--gold);
+  text-align: center;
+  font: 800 0.95rem/1.45 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .eyebrow {
   margin: 0 0 0.5rem;
   color: var(--gold);

@@ -2756,7 +2756,7 @@ function renderAdmins() {
             <td class="primary-cell"><strong>${escapeHtml(admin.displayName)}</strong><br /><span class="muted">${escapeHtml(admin.adminId)}</span></td>
             <td>${escapeHtml(admin.email || '-')}</td>
             <td>${escapeHtml(admin.role)}</td>
-            <td>${admin.mfaEnabled ? 'Required' : 'Off'}</td>
+            <td>${adminMfaStatusMarkup(admin)}</td>
             <td>${adminStatusMarkup(admin)}</td>
             <td>${escapeHtml(admin.lastLoginAt ? new Date(admin.lastLoginAt).toLocaleString() : 'Never')}</td>
             <td>${escapeHtml(new Date(admin.createdAt).toLocaleString())}</td>
@@ -2779,6 +2779,15 @@ function renderAdmins() {
   });
 }
 
+function adminMfaStatusMarkup(admin) {
+  if (!admin.mfaEnabled) return '<span class="status-pill">Off</span>';
+  if (admin.authenticatorConfigured) {
+    return `<span class="status-pill ok-pill">Authenticator</span><br /><span class="muted">${Number(admin.recoveryCodesRemaining || 0)} recovery codes</span>`;
+  }
+  if (admin.mfaMethod === 'legacy') return '<span class="status-pill danger-pill">Upgrade required</span>';
+  return '<span class="status-pill danger-pill">Setup required</span>';
+}
+
 function adminStatusMarkup(admin) {
   if (admin.disabledAt) return '<span class="status-pill danger-pill">Disabled</span>';
   if (admin.lockedUntil && admin.lockedUntil > Date.now()) return '<span class="status-pill danger-pill">Locked</span>';
@@ -2793,7 +2802,6 @@ async function createAdmin(event) {
     email: form.elements.email.value,
     role: form.elements.role.value,
     temporaryPassword: form.elements.temporaryPassword.value || undefined,
-    mfaCode: form.elements.mfaCode.value || undefined,
     mfaEnabled: form.elements.mfaEnabled.checked,
     reason: form.elements.reason.value,
   };
@@ -2809,11 +2817,11 @@ function showAdminActionOutput(result, title) {
   node.classList.remove('hidden');
   const lines = [];
   if (result.temporaryPassword) lines.push(`<p><strong>Temporary password:</strong> <code>${escapeHtml(result.temporaryPassword)}</code></p>`);
-  if (result.mfaCode) lines.push(`<p><strong>Temporary MFA code:</strong> <code>${escapeHtml(result.mfaCode)}</code></p>`);
   node.innerHTML = `
     <strong>${escapeHtml(title)}</strong>
     <p class="muted">Share any temporary credentials through a private channel. They are shown once here.</p>
     ${lines.join('') || '<p class="muted">No one-time credentials were generated.</p>'}
+    ${result.admin?.mfaEnabled && !result.admin?.authenticatorConfigured ? '<p class="muted">This administrator will enroll an authenticator after signing in.</p>' : ''}
   `;
 }
 
@@ -2827,15 +2835,17 @@ async function runAdminAction(adminId, action) {
       const email = prompt('Admin email', admin.email || '');
       if (!email) return;
       const role = prompt(`Role (${adminRolesCache.map(item => item.role).join(', ')})`, admin.role);
-      const mfaCode = prompt('New MFA code, or leave blank to keep current MFA code', '');
       const mfaChoice = prompt('Require MFA? Type yes or no.', admin.mfaEnabled ? 'yes' : 'no');
       if (mfaChoice == null) return;
       const mfaEnabled = !/^no$/i.test(mfaChoice.trim());
+      const resetMfa = mfaEnabled
+        && admin.authenticatorConfigured
+        && confirm('Reset this administrator authenticator? They will need to scan a new QR code after their next sign-in.');
       const reason = prompt('Reason for audit log');
       if (!reason) return;
       await api(`/admins/${encodeURIComponent(adminId)}`, {
         method: 'PATCH',
-        body: JSON.stringify({ displayName, email, role, mfaCode: mfaCode || undefined, mfaEnabled, reason }),
+        body: JSON.stringify({ displayName, email, role, mfaEnabled, resetMfa, reason }),
       });
       status('Admin account updated.', 'ok');
     }
@@ -2961,6 +2971,58 @@ function bindRecoveryControls() {
   });
 }
 
+async function beginMfaEnrollment() {
+  const loginForm = document.querySelector('#loginForm');
+  const recoveryPanel = document.querySelector('#recoveryPanel');
+  const enrollmentPanel = document.querySelector('#mfaEnrollmentPanel');
+  const instructions = document.querySelector('#mfaEnrollmentInstructions');
+  const recoveryCodesPanel = document.querySelector('#mfaRecoveryCodesPanel');
+  const errorNode = document.querySelector('#mfaEnrollmentError');
+  const setup = await api('/auth/mfa/enroll/start', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  loginForm?.classList.add('hidden');
+  recoveryPanel?.classList.add('hidden');
+  instructions?.classList.remove('hidden');
+  recoveryCodesPanel?.classList.add('hidden');
+  enrollmentPanel?.classList.remove('hidden');
+  errorNode.textContent = '';
+  const qr = document.querySelector('#mfaEnrollmentQr');
+  if (qr) {
+    qr.src = setup.qrDataUrl;
+    qr.alt = 'Nine Below Admin authenticator QR code';
+  }
+  document.querySelector('#mfaEnrollmentSecret').textContent = setup.secret;
+}
+
+document.querySelector('#mfaEnrollmentForm')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const errorNode = document.querySelector('#mfaEnrollmentError');
+  errorNode.textContent = '';
+  try {
+    const form = new FormData(event.currentTarget);
+    const result = await api('/auth/mfa/enroll/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ code: form.get('code') }),
+    });
+    document.querySelector('#mfaEnrollmentInstructions')?.classList.add('hidden');
+    document.querySelector('#mfaRecoveryCodesPanel')?.classList.remove('hidden');
+    document.querySelector('#mfaRecoveryCodeList').textContent = (result.recoveryCodes || []).join('\n');
+  } catch (error) {
+    errorNode.textContent = error.message;
+  }
+});
+
+document.querySelector('#mfaRecoveryAcknowledged')?.addEventListener('change', event => {
+  const finish = document.querySelector('#finishMfaEnrollment');
+  if (finish) finish.disabled = !event.currentTarget.checked;
+});
+
+document.querySelector('#finishMfaEnrollment')?.addEventListener('click', () => {
+  renderConsole();
+});
+
 document.querySelector('#loginForm')?.addEventListener('submit', async event => {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
@@ -2974,11 +3036,18 @@ document.querySelector('#loginForm')?.addEventListener('submit', async event => 
         password: form.get('password'),
       }),
     });
+    let mfaResult = null;
     if (login.mfaRequired) {
-      await api('/auth/mfa/verify', {
+      const code = String(form.get('mfaCode') || '').trim();
+      if (!code) throw new Error('Enter your authenticator or recovery code.');
+      mfaResult = await api('/auth/mfa/verify', {
         method: 'POST',
-        body: JSON.stringify({ code: form.get('mfaCode') || '000000' }),
+        body: JSON.stringify({ code }),
       });
+    }
+    if (login.mfaEnrollmentRequired || mfaResult?.mfaEnrollmentRequired) {
+      await beginMfaEnrollment();
+      return;
     }
     renderConsole();
   } catch (error) {

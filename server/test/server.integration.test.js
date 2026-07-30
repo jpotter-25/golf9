@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import test from 'node:test';
+import { generateTotp } from '../adminMfa.js';
 
 const require = createRequire(import.meta.url);
 const { io } = require('socket.io-client');
@@ -94,22 +95,61 @@ async function signup(baseUrl, displayName, inviteCode = '') {
   }));
 }
 
-async function adminLogin(baseUrl) {
+const adminTotpSecrets = new Map();
+
+function adminTotpKey(baseUrl, displayName) {
+  return `${baseUrl}:${String(displayName || '').trim().toLowerCase()}`;
+}
+
+async function enrollAdminMfa(baseUrl, cookie, displayName) {
+  const setup = await json(await fetch(`${baseUrl}/admin/api/auth/mfa/enroll/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+  }));
+  adminTotpSecrets.set(adminTotpKey(baseUrl, displayName), setup.secret);
+  const confirmed = await json(await fetch(`${baseUrl}/admin/api/auth/mfa/enroll/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify({ code: generateTotp(setup.secret) }),
+  }));
+  assert.equal(confirmed.admin.authenticatorConfigured, true);
+  assert.equal(confirmed.recoveryCodes.length, 10);
+  return confirmed;
+}
+
+async function loginAdminCredentials(baseUrl, {
+  displayName,
+  password,
+  legacyCode = '000000',
+}) {
   const loginRes = await fetch(`${baseUrl}/admin/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ displayName: 'admin', password: 'admin9' }),
+    body: JSON.stringify({ displayName, password }),
   });
   const login = await json(loginRes);
   const cookie = loginRes.headers.get('set-cookie').split(';')[0];
+  let verification = null;
+  let enrollment = null;
   if (login.mfaRequired) {
-    await json(await fetch(`${baseUrl}/admin/api/auth/mfa/verify`, {
+    const secret = adminTotpSecrets.get(adminTotpKey(baseUrl, displayName));
+    verification = await json(await fetch(`${baseUrl}/admin/api/auth/mfa/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
-      body: JSON.stringify({ code: '000000' }),
+      body: JSON.stringify({ code: secret ? generateTotp(secret) : legacyCode }),
     }));
   }
-  return { token: login.token, cookie };
+  if (login.mfaEnrollmentRequired || verification?.mfaEnrollmentRequired) {
+    enrollment = await enrollAdminMfa(baseUrl, cookie, displayName);
+  }
+  return { token: login.token, cookie, login, enrollment };
+}
+
+async function adminLogin(baseUrl) {
+  return loginAdminCredentials(baseUrl, {
+    displayName: 'admin',
+    password: 'admin9',
+  });
 }
 
 async function earnFreeCoins(baseUrl, token) {
@@ -832,20 +872,7 @@ test('admin console supports MFA login, audited player ops, support tickets, and
     }));
     assert.equal(ticket.ticket.status, 'open');
 
-    const loginRes = await fetch(`${baseUrl}/admin/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: 'admin', password: 'admin9' }),
-    });
-    const login = await json(loginRes);
-    const cookie = loginRes.headers.get('set-cookie').split(';')[0];
-    assert.equal(login.mfaRequired, true);
-
-    await json(await fetch(`${baseUrl}/admin/api/auth/mfa/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Cookie: cookie },
-      body: JSON.stringify({ code: '000000' }),
-    }));
+    const { cookie } = await adminLogin(baseUrl);
 
     const usersList = await json(await fetch(`${baseUrl}/admin/api/users?q=Ops`, { headers: { Cookie: cookie } }));
     assert.ok(usersList.users.some(user => user.userId === player.user.userId));
@@ -950,6 +977,43 @@ test('admin console supports MFA login, audited player ops, support tickets, and
   }, { SEED_ADMIN_ACCOUNT: '1' });
 });
 
+test('admin authenticator recovery codes are single use', async () => {
+  await withServer(async (baseUrl) => {
+    const enrolled = await adminLogin(baseUrl);
+    const recoveryCode = enrolled.enrollment?.recoveryCodes?.[0];
+    assert.ok(recoveryCode);
+
+    const firstLoginRes = await fetch(`${baseUrl}/admin/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'admin', password: 'admin9' }),
+    });
+    const firstLogin = await json(firstLoginRes);
+    assert.equal(firstLogin.mfaRequired, true);
+    const firstCookie = firstLoginRes.headers.get('set-cookie').split(';')[0];
+    const firstUse = await json(await fetch(`${baseUrl}/admin/api/auth/mfa/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: firstCookie },
+      body: JSON.stringify({ code: recoveryCode }),
+    }));
+    assert.equal(firstUse.admin.recoveryCodesRemaining, 9);
+
+    const secondLoginRes = await fetch(`${baseUrl}/admin/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'admin', password: 'admin9' }),
+    });
+    await json(secondLoginRes);
+    const secondCookie = secondLoginRes.headers.get('set-cookie').split(';')[0];
+    const reused = await fetch(`${baseUrl}/admin/api/auth/mfa/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: secondCookie },
+      body: JSON.stringify({ code: recoveryCode }),
+    });
+    assert.equal(reused.status, 403);
+  }, { SEED_ADMIN_ACCOUNT: '1' });
+});
+
 test('owner admins can manage admin accounts and email recovery unlocks password reset', async () => {
   await withServer(async (baseUrl) => {
     const owner = await adminLogin(baseUrl);
@@ -962,7 +1026,6 @@ test('owner admins can manage admin accounts and email recovery unlocks password
         email: 'ops-admin@example.com',
         role: 'support',
         temporaryPassword: 'StrongPass9!',
-        mfaCode: '123456',
         reason: 'Automated admin management test.',
       }),
     }));
@@ -970,19 +1033,11 @@ test('owner admins can manage admin accounts and email recovery unlocks password
     assert.equal(created.admin.email, 'ops-admin@example.com');
     assert.equal(created.temporaryPassword, null);
 
-    const supportLoginRes = await fetch(`${baseUrl}/admin/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: 'Ops Admin', password: 'StrongPass9!' }),
+    const support = await loginAdminCredentials(baseUrl, {
+      displayName: 'Ops Admin',
+      password: 'StrongPass9!',
     });
-    const supportLogin = await json(supportLoginRes);
-    const supportCookie = supportLoginRes.headers.get('set-cookie').split(';')[0];
-    assert.equal(supportLogin.mfaRequired, true);
-    await json(await fetch(`${baseUrl}/admin/api/auth/mfa/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Cookie: supportCookie },
-      body: JSON.stringify({ code: '123456' }),
-    }));
+    const supportCookie = support.cookie;
 
     const forbidden = await fetch(`${baseUrl}/admin/api/admins`, { headers: { Cookie: supportCookie } });
     assert.equal(forbidden.status, 403);
@@ -1030,19 +1085,11 @@ test('owner admins can manage admin accounts and email recovery unlocks password
       }),
     }));
 
-    const recoveredLoginRes = await fetch(`${baseUrl}/admin/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: 'Ops Admin', password: 'RecoveredPass9!' }),
+    const recovered = await loginAdminCredentials(baseUrl, {
+      displayName: 'Ops Admin',
+      password: 'RecoveredPass9!',
     });
-    const recoveredLogin = await json(recoveredLoginRes);
-    const recoveredCookie = recoveredLoginRes.headers.get('set-cookie').split(';')[0];
-    await json(await fetch(`${baseUrl}/admin/api/auth/mfa/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Cookie: recoveredCookie },
-      body: JSON.stringify({ code: '123456' }),
-    }));
-    assert.equal(recoveredLogin.admin.displayName, 'Ops Admin');
+    assert.equal(recovered.login.admin.displayName, 'Ops Admin');
 
     const audit = await json(await fetch(`${baseUrl}/admin/api/audit`, { headers: adminHeaders(owner) }));
     assert.ok(audit.audit.some(entry => entry.action === 'admin.admins.create'));
@@ -1054,20 +1101,7 @@ test('admin competitive operations manage config, players, and ranked queues', a
   await withServer(async (baseUrl) => {
     const player = await signup(baseUrl, `RankOps${Date.now()}`);
 
-    const loginRes = await fetch(`${baseUrl}/admin/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: 'admin', password: 'admin9' }),
-    });
-    const login = await json(loginRes);
-    const cookie = loginRes.headers.get('set-cookie').split(';')[0];
-    assert.equal(login.mfaRequired, true);
-
-    await json(await fetch(`${baseUrl}/admin/api/auth/mfa/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Cookie: cookie },
-      body: JSON.stringify({ code: '000000' }),
-    }));
+    const { cookie } = await adminLogin(baseUrl);
 
     const overview = await json(await fetch(`${baseUrl}/admin/api/competitive/overview`, { headers: { Cookie: cookie } }));
     assert.ok(overview.overview.season.id);
