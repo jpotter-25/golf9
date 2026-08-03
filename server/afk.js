@@ -31,6 +31,36 @@ export function normalizeAfkConfig(input = {}) {
   };
 }
 
+export function autoplayTargetCueMs(input = {}) {
+  const config = normalizeAfkConfig(input);
+  return config.sourceCueMs + Math.floor((config.commitMs - config.sourceCueMs) / 2);
+}
+
+export function autoplayCueFromMove(move = {}) {
+  const candidate = move && typeof move === 'object' ? move : {};
+  const target = Number.isInteger(candidate.target?.r)
+    && Number.isInteger(candidate.target?.c)
+    && candidate.target.r >= 0
+    && candidate.target.r < 3
+    && candidate.target.c >= 0
+    && candidate.target.c < 3
+      ? { r: candidate.target.r, c: candidate.target.c }
+      : null;
+  const action = candidate.discardDrawn
+    ? 'discard'
+    : candidate.revealThenDecide && target
+      ? 'reveal'
+      : target
+        ? 'replace'
+        : 'wait';
+  return {
+    source: candidate.source === 'discard' ? 'discard' : 'draw',
+    intent: typeof candidate.intent === 'string' && candidate.intent ? candidate.intent : 'easy-autoplay',
+    target,
+    action,
+  };
+}
+
 export function normalizeAfkPlayerState(input = {}) {
   return {
     consecutiveMisses: integer(input.consecutiveMisses, 0, 0, 10_000),

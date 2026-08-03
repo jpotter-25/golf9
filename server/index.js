@@ -34,6 +34,8 @@ import {
 import { aiPlayTurn, chooseAiMove } from '../shared/soloAi.js';
 import {
   applyAfkCoinPenalty,
+  autoplayCueFromMove,
+  autoplayTargetCueMs,
   normalizeAfkConfig,
   normalizeAfkPlayerState,
   placementsWithAfkPenalty,
@@ -2707,6 +2709,7 @@ function cancelAutoplaySchedule(room, userId) {
   const schedule = room.autoplaySchedules?.get(userId);
   if (!schedule) return;
   clearTimeout(schedule.cueTimer);
+  clearTimeout(schedule.targetCueTimer);
   clearTimeout(schedule.commitTimer);
   room.autoplaySchedules.delete(userId);
 }
@@ -2717,25 +2720,27 @@ function cancelAllAutoplaySchedules(room) {
 
 function autoplayCueFor(room, userId, window) {
   if (window.phase === 'peek') {
-    return { source: 'peek', intent: 'complete-initial-peek' };
+    return { source: 'peek', intent: 'complete-initial-peek', target: null, action: 'wait' };
   }
   const playerIndex = getRoomPlayerIndex(room, userId);
   const move = chooseAiMove(room.game, playerIndex, 'easy');
-  return {
-    source: move?.source || 'draw',
-    intent: move?.intent || 'easy-autoplay',
-  };
+  return autoplayCueFromMove(move);
 }
 
-function emitAutoplayCue(room, userId, window) {
+function emitAutoplayCue(room, userId, window, stage = 'source') {
   const current = autoplayWindowFor(room, userId);
   if (!current || current.key !== window.key) return;
-  const cue = autoplayCueFor(room, userId, window);
+  const scheduled = room.autoplaySchedules?.get(userId);
+  if (!scheduled || scheduled.key !== window.key) return;
+  const cue = scheduled.cue;
   io.to(room.code).emit('game:autoplay:cue', {
     userId,
     phase: window.phase,
+    stage,
     source: cue.source,
     intent: cue.intent,
+    target: stage === 'target' ? cue.target : null,
+    action: stage === 'target' ? cue.action : null,
     round: room.game.round || 1,
     turnSerial: room.game.turnSerial || 0,
     windowKey: window.key,
@@ -2786,11 +2791,16 @@ function commitAutoplayWindow(room, userId, window) {
 
 function scheduleAutoplayWindow(room, userId, window) {
   const config = normalizeAfkConfig(afkConfigStore);
-  const cueTimer = setTimeout(() => emitAutoplayCue(room, userId, window), config.sourceCueMs);
+  const cue = autoplayCueFor(room, userId, window);
+  const cueTimer = setTimeout(() => emitAutoplayCue(room, userId, window, 'source'), config.sourceCueMs);
+  const targetCueTimer = window.phase === 'turn'
+    ? setTimeout(() => emitAutoplayCue(room, userId, window, 'target'), autoplayTargetCueMs(config))
+    : null;
   const commitTimer = setTimeout(() => commitAutoplayWindow(room, userId, window), config.commitMs);
   cueTimer.unref?.();
+  targetCueTimer?.unref?.();
   commitTimer.unref?.();
-  room.autoplaySchedules.set(userId, { ...window, cueTimer, commitTimer });
+  room.autoplaySchedules.set(userId, { ...window, cue, cueTimer, targetCueTimer, commitTimer });
 }
 
 function ensureAutoplaySchedules(room) {

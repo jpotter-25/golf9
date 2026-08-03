@@ -1093,12 +1093,32 @@ export default function GameScreen({ route, navigation }: Props) {
     ))
     || peekAutoplayActive
   );
-  const activeAutoplayCueSource = autoplayCue?.phase === 'turn'
+  const activeAutoplayCue = autoplayCue?.phase === 'turn'
     && state.phase === 'turn'
     && autoplayCue.userId === currentTurnUserId
-    && (autoplayCue.source === 'draw' || autoplayCue.source === 'discard')
-      ? autoplayCue.source
+      ? autoplayCue
       : null;
+  const activeAutoplayCueSource = activeAutoplayCue
+    && (activeAutoplayCue.stage ?? 'source') === 'source'
+    && (activeAutoplayCue.source === 'draw' || activeAutoplayCue.source === 'discard')
+      ? activeAutoplayCue.source
+      : null;
+  const activeAutoplayCueTarget = activeAutoplayCue?.stage === 'target' && activeAutoplayCue.target
+    ? { playerIndex: activeIndex, ...activeAutoplayCue.target }
+    : null;
+  const activeAutoplayInstruction = activeAutoplayCue?.stage === 'target'
+    ? activeAutoplayCue.action === 'reveal'
+      ? 'Revealing the highlighted card'
+      : activeAutoplayCue.action === 'discard'
+        ? 'Discarding the drawn card'
+        : activeAutoplayCue.action === 'replace'
+          ? 'Replacing the highlighted card'
+          : 'Choosing a move'
+    : activeAutoplayCueSource === 'discard'
+      ? 'Taking the discard'
+      : activeAutoplayCueSource === 'draw'
+        ? 'Drawing from the deck'
+        : null;
   const visibleRoundScores = useMemo(
     () => state.players.map(player => visibleGridScore(player.grid)),
     [state.players]
@@ -1132,7 +1152,9 @@ export default function GameScreen({ route, navigation }: Props) {
   const passPeekPlayer = passPeekPlayerIndex == null ? null : state.players[passPeekPlayerIndex] ?? null;
   const pendingForBottom = pending?.playerIndex === bottomIndex ? pending : null;
   const selectedForBottom = selectedCell?.playerIndex === bottomIndex ? selectedCell : null;
-  const bottomActiveCell = selectedForBottom ?? pendingForBottom;
+  const bottomActiveCell = selectedForBottom
+    ?? pendingForBottom
+    ?? (activeAutoplayCueTarget?.playerIndex === bottomIndex ? activeAutoplayCueTarget : null);
   const selectedGridCard = selectedCell
     ? state.players[selectedCell.playerIndex]?.grid?.[selectedCell.r]?.[selectedCell.c] ?? null
     : null;
@@ -1157,7 +1179,7 @@ export default function GameScreen({ route, navigation }: Props) {
             ? 'Final Turn'
             : 'Your Turn'
           : 'Opponent Turn';
-  const hudInstruction = state.phase === 'peek'
+  const hudInstruction = activeAutoplayInstruction ?? (state.phase === 'peek'
     ? bottomIsActive
       ? 'Flip two cards'
       : 'Table is peeking'
@@ -1173,7 +1195,7 @@ export default function GameScreen({ route, navigation }: Props) {
             : isDrawOnlyTurn
               ? 'Draw from deck'
               : 'Draw or take discard'
-          : 'Watch the table';
+          : 'Watch the table');
   const actionModel = useMemo<GameActionModel>(() => {
     if (state.phase === 'peek') {
       return {
@@ -1889,7 +1911,11 @@ export default function GameScreen({ route, navigation }: Props) {
         <GridView
           grid={p.grid}
           metrics={metrics.opp}
-          activeCell={pending?.playerIndex === i ? pending : null}
+          activeCell={pending?.playerIndex === i
+            ? pending
+            : activeAutoplayCueTarget?.playerIndex === i
+              ? activeAutoplayCueTarget
+              : null}
           cardBackId={playerCosmetics(p, i)?.cardBack}
         />
       </View>

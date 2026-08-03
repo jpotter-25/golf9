@@ -2,12 +2,42 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   applyAfkCoinPenalty,
+  autoplayCueFromMove,
+  autoplayTargetCueMs,
   normalizeAfkConfig,
   placementsWithAfkPenalty,
   recordAutomatedAfkWindow,
   recordHumanAfkAction,
   recordMissedAfkWindow,
 } from '../afk.js';
+
+test('AFK autoplay gives source and target decisions equal visual time', () => {
+  assert.equal(autoplayTargetCueMs({ sourceCueMs: 1300, commitMs: 3200 }), 2250);
+});
+
+test('AFK autoplay cues describe the chosen target action without exposing the card', () => {
+  assert.deepEqual(autoplayCueFromMove({
+    source: 'discard',
+    intent: 'take-obvious-discard',
+    target: { playerIndex: 1, r: 2, c: 1 },
+  }), {
+    source: 'discard',
+    intent: 'take-obvious-discard',
+    target: { r: 2, c: 1 },
+    action: 'replace',
+  });
+  assert.deepEqual(autoplayCueFromMove({
+    source: 'draw',
+    intent: 'reveal-before-commit',
+    target: { playerIndex: 0, r: 1, c: 2 },
+    revealThenDecide: true,
+  }), {
+    source: 'draw',
+    intent: 'reveal-before-commit',
+    target: { r: 1, c: 2 },
+    action: 'reveal',
+  });
+});
 
 test('AFK takeover starts on the second consecutive miss and keeps cumulative windows', () => {
   const config = normalizeAfkConfig({});

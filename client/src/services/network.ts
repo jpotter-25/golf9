@@ -29,8 +29,11 @@ export type GameCelebration = ChatMessage;
 export type AutoplayCue = {
   userId: string;
   phase: 'peek' | 'turn';
+  stage?: 'source' | 'target';
   source: 'peek' | 'draw' | 'discard';
   intent: string;
+  target?: { r: number; c: number } | null;
+  action?: 'replace' | 'reveal' | 'discard' | 'wait' | null;
   round: number;
   turnSerial: number;
   windowKey: string;
