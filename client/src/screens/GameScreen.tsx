@@ -315,6 +315,7 @@ export default function GameScreen({ route, navigation }: Props) {
   const viewerAutoplayActive = isOnline && !!state.viewerAutoplay?.active;
   const sweepStarterName = state.sweepStarterIndex == null ? 'A player' : state.players[state.sweepStarterIndex]?.name ?? 'A player';
   const viewerCosmetics = user?.inventory?.equipped;
+  // Table themes are a local viewing preference and never come from room or opponent cosmetics.
   const tableTheme = getTableThemeVisual(viewerCosmetics?.tableTheme);
   const playerCosmetics = useCallback((player: GameState['players'][number] | undefined, index: number): EquippedCosmetics | undefined => {
     if (player?.userId && player.userId === user?.userId && viewerCosmetics) return viewerCosmetics;

@@ -138,7 +138,7 @@ export type RoomPlayer = {
   progression?: ProgressionState | null;
   competitive?: Pick<CompetitiveState, 'league' | 'placementComplete' | 'placementsRemaining' | 'rankedGames' | 'wins' | 'losses' | 'seasonBestLeague'> | null;
   displayRankEmblem?: DisplayRankEmblem | null;
-  cosmetics?: PlayerInventory['equipped'] | null;
+  cosmetics?: PublicPlayerCosmetics | null;
   club?: ClubSummary | null;
   ready: boolean;
   connected: boolean;
@@ -215,7 +215,7 @@ export type PublicPlayerSummary = {
   competitive: Pick<CompetitiveState, 'league' | 'rankedGames' | 'wins'>;
   competitiveByPlayers?: RankedLadders;
   displayRankEmblem?: DisplayRankEmblem | null;
-  cosmetics: PlayerInventory['equipped'];
+  cosmetics: PublicPlayerCosmetics;
   club: ClubSummary | null;
   relationship: SocialRelationship;
   status: PlayerStatus;
@@ -268,7 +268,7 @@ export type PublicPlayerProfile = {
   };
   competitiveByPlayers?: RankedLadders;
   displayRankEmblem?: DisplayRankEmblem | null;
-  cosmetics: PlayerInventory['equipped'];
+  cosmetics: PublicPlayerCosmetics;
   club: ClubSummary | null;
   relationship: SocialRelationship;
   status: PlayerStatus;
@@ -362,6 +362,7 @@ export type PlayerInventory = {
   cosmetics: string[];
   equipped: { cardBack: string; avatarFrame: string; avatarIcon: string; avatarAccessory: string; title: string; tableTheme: string };
 };
+export type PublicPlayerCosmetics = Omit<PlayerInventory['equipped'], 'tableTheme'>;
 
 export type MatchProgressionSummary = {
   xpGained: number;

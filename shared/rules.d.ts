@@ -3,6 +3,7 @@ export type Rank = 'A' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 
 export type Card = { id: string; suit: Suit; rank: Rank; faceUp: boolean; zeroed?: boolean };
 export type Grid = (Card | null)[][];
 export type EquippedCosmetics = { cardBack?: string; avatarFrame?: string; avatarIcon?: string; avatarAccessory?: string; title?: string; tableTheme?: string };
+export type SharedPlayerCosmetics = Omit<EquippedCosmetics, 'tableTheme'>;
 export type DisplayRankEmblem = { playerCount: 2 | 3 | 4; source: 'current' | 'careerBest'; league: { league: string; division: string | null; name: string } };
 export type PlayerIdentity = { userId: string; displayName?: string; name?: string; avatarInitial?: string; displayRankEmblem?: DisplayRankEmblem | null; cosmetics?: EquippedCosmetics };
 export type Player = { id: string; userId: string; name: string; avatarInitial?: string; displayRankEmblem?: DisplayRankEmblem | null; cosmetics?: EquippedCosmetics; grid: Grid; score: number; peekFlips: number; connected?: boolean };
@@ -32,6 +33,7 @@ export const ROUND_SUMMARY_DURATION: number;
 export const MAX_PLAYERS: number;
 export const MIN_PLAYERS: number;
 export function makeId(prefix?: string): string;
+export function sharedPlayerCosmetics(cosmetics?: EquippedCosmetics | null): SharedPlayerCosmetics | null;
 export function sanitizePlayerIdentity(user: { userId: string; displayName?: string; inventory?: { equipped?: EquippedCosmetics }; cosmetics?: EquippedCosmetics }): PlayerIdentity;
 export function deckCountForPlayers(playerCount: number): number;
 export function createDeck(deckCount?: number): Card[];

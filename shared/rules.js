@@ -10,8 +10,19 @@ export const MIN_PLAYERS = 2;
 const suits = ['♠', '♥', '♦', '♣'];
 const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 
+const SHARED_COSMETIC_KEYS = ['cardBack', 'avatarFrame', 'avatarIcon', 'avatarAccessory', 'title'];
+
 export function makeId(prefix = '') {
   return `${prefix}${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+}
+
+export function sharedPlayerCosmetics(cosmetics) {
+  if (!cosmetics || typeof cosmetics !== 'object') return null;
+  const shared = {};
+  for (const key of SHARED_COSMETIC_KEYS) {
+    if (typeof cosmetics[key] === 'string' && cosmetics[key]) shared[key] = cosmetics[key];
+  }
+  return shared;
 }
 
 export function sanitizePlayerIdentity(user) {
@@ -26,7 +37,6 @@ export function sanitizePlayerIdentity(user) {
       avatarIcon: user.inventory?.equipped?.avatarIcon || user.cosmetics?.avatarIcon || 'classic-avatar-icon',
       avatarAccessory: user.inventory?.equipped?.avatarAccessory || user.cosmetics?.avatarAccessory || 'no-avatar-accessory',
       title: user.inventory?.equipped?.title || user.cosmetics?.title || 'rookie-title',
-      tableTheme: user.inventory?.equipped?.tableTheme || user.cosmetics?.tableTheme || 'classic-table-theme',
     },
   };
 }
@@ -666,6 +676,7 @@ export function publicGameState(
   next.viewerHeldCanDiscard = !!viewerHeldCanDiscard;
   next.players = next.players.map(player => ({
     ...player,
+    cosmetics: sharedPlayerCosmetics(player.cosmetics),
     grid: player.grid.map(row => row.map(card => {
       if (!card || card.faceUp) return card;
       return { id: card.id, suit: '♠', rank: 'A', faceUp: false, zeroed: card.zeroed };

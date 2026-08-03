@@ -18,6 +18,7 @@ import {
   resolvePendingGridDecision,
   resolvePendingGridDecisionWithoutHeld,
   resolveExpiredTimers,
+  sanitizePlayerIdentity,
   scoreGrid,
   startTurns,
   takeDiscard,
@@ -77,6 +78,33 @@ test('deck count scales up for three and four player games', () => {
 test('match timer defaults give players enough time to act', () => {
   assert.equal(PEEK_DURATION, 30_000);
   assert.equal(TURN_DURATION, 45_000);
+});
+
+test('online player cosmetics keep table themes local to their owner', () => {
+  const identity = sanitizePlayerIdentity({
+    userId: 'u1',
+    displayName: 'One',
+    inventory: {
+      equipped: {
+        cardBack: 'gold-trim-card-back',
+        avatarFrame: 'rookie-avatar-frame',
+        avatarIcon: 'classic-avatar-icon',
+        avatarAccessory: 'no-avatar-accessory',
+        title: 'rookie-title',
+        tableTheme: 'emerald-felt-table-theme',
+      },
+    },
+  });
+  assert.equal(identity.cosmetics.cardBack, 'gold-trim-card-back');
+  assert.equal(identity.cosmetics.tableTheme, undefined);
+
+  const state = createGameState([
+    { ...identity, cosmetics: { ...identity.cosmetics, tableTheme: 'emerald-felt-table-theme' } },
+    { userId: 'u2', displayName: 'Two' },
+  ]);
+  const view = publicGameState(state, 'u2');
+  assert.equal(state.players[0].cosmetics.tableTheme, 'emerald-felt-table-theme');
+  assert.equal(view.players.every(player => player.cosmetics?.tableTheme === undefined), true);
 });
 
 test('peek validation enforces current peeker and two-card limit', () => {

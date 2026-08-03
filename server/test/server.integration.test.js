@@ -1194,6 +1194,7 @@ test('auth, room readiness, authoritative intents, duplicate rejection, and held
       body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
     }));
     const code = created.room.code;
+    assert.equal(created.room.players[0].cosmetics.tableTheme, undefined);
 
     await json(await fetch(`${baseUrl}/rooms/${code}/join`, { method: 'POST', headers: authHeaders(two.token) }));
 
@@ -1212,6 +1213,7 @@ test('auth, room readiness, authoritative intents, duplicate rejection, and held
       assert.equal(joinOne.game.phase, 'peek');
       assert.equal(joinOne.game.simultaneousPeek, true);
       assert.equal(joinOne.game.viewerHeldCard, null);
+      assert.equal(joinOne.game.players.every(player => player.cosmetics?.tableTheme === undefined), true);
 
       const malformed = await emitAck(socketOne, 'game:intent', { code, actionId: 'bad', type: 'peek', payload: { r: 99, c: 0 } });
       assert.equal(malformed.error, 'Invalid action id.');
@@ -1750,6 +1752,7 @@ test('friends, public profiles, and room invites work end to end', async () => {
       headers: authHeaders(one.token),
     }));
     assert.equal(search.players.some(player => player.userId === two.user.userId), true);
+    assert.equal(search.players.find(player => player.userId === two.user.userId).cosmetics.tableTheme, undefined);
 
     const requested = await json(await fetch(`${baseUrl}/friends/requests`, {
       method: 'POST',
@@ -1772,12 +1775,19 @@ test('friends, public profiles, and room invites work end to end', async () => {
     assert.equal(viewed.profile.displayName, two.user.displayName);
     assert.equal(viewed.profile.relationship, 'friend');
     assert.equal(typeof viewed.profile.statistics.gamesPlayed, 'number');
+    assert.equal(viewed.profile.cosmetics.tableTheme, undefined);
+
+    const ownProfile = await json(await fetch(`${baseUrl}/profiles/${one.user.userId}`, { headers: authHeaders(one.token) }));
+    assert.equal(ownProfile.profile.cosmetics.tableTheme, undefined);
+    const personalProfile = await json(await fetch(`${baseUrl}/profile/me`, { headers: authHeaders(one.token) }));
+    assert.equal(personalProfile.user.inventory.equipped.tableTheme, 'classic-table-theme');
 
     const created = await json(await fetch(`${baseUrl}/rooms`, {
       method: 'POST',
       headers: authHeaders(one.token),
       body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
     }));
+    assert.equal(created.room.players[0].cosmetics.tableTheme, undefined);
     const invited = await json(await fetch(`${baseUrl}/rooms/${created.room.code}/invites`, {
       method: 'POST',
       headers: authHeaders(one.token),
