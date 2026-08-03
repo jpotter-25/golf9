@@ -262,7 +262,6 @@ export default function GameScreen({ route, navigation }: Props) {
   const [gameplayPrefs, setGameplayPrefs] = useState<GameplayPreferences>(getGameplayPreferences());
   const [matchProgression, setMatchProgression] = useState<api.MatchProgressionSummary | null>(null);
   const [autoplayCue, setAutoplayCue] = useState<AutoplayCue | null>(null);
-  const [autoplayControlVisible, setAutoplayControlVisible] = useState(false);
   const [takingControl, setTakingControl] = useState(false);
 
   const [sweepActive, setSweepActive] = useState(false);
@@ -290,7 +289,6 @@ export default function GameScreen({ route, navigation }: Props) {
   const localRoundScores = useRef<number[]>([]);
   const localColumnClears = useRef<number[]>(Array.from({ length: players }, () => 0));
   const autoplayCueTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const previousViewerAutoplay = useRef(false);
 
   const metrics = useBoardMetrics(state.players.length);
   const isSolo = mode === 'solo';
@@ -524,7 +522,6 @@ export default function GameScreen({ route, navigation }: Props) {
     try {
       const response = await takeBackControl(token, roomCode);
       applyOnlineGameState(response.game);
-      setAutoplayControlVisible(false);
     } catch (error) {
       handleOnlineActionError('Unable to take control', error);
     } finally {
@@ -582,18 +579,6 @@ export default function GameScreen({ route, navigation }: Props) {
       cleanupCelebration();
     };
   }, [applyOnlineGameState, isOnline, resyncOnlineRoom, roomCode, showSocialBurst, token, user?.userId]);
-
-  useEffect(() => {
-    const wasActive = previousViewerAutoplay.current;
-    previousViewerAutoplay.current = viewerAutoplayActive;
-    if (!viewerAutoplayActive) {
-      setAutoplayControlVisible(false);
-      return;
-    }
-    if (!wasActive) {
-      setAutoplayControlVisible(true);
-    }
-  }, [viewerAutoplayActive]);
 
   useEffect(() => () => {
     if (autoplayCueTimer.current) clearTimeout(autoplayCueTimer.current);
@@ -2049,15 +2034,7 @@ export default function GameScreen({ route, navigation }: Props) {
               onPress={() => openAvatarHub(bottomPlayer.userId ?? user?.userId)}
               disabled={!(bottomPlayer.userId ?? user?.userId) || (!isOnline && (bottomPlayer.userId ?? user?.userId) !== user?.userId)}
             />
-            <Pressable
-              style={styles.localTitlePressable}
-              onPress={bottomAutoplayActive && bottomPlayer.userId === user?.userId
-                ? () => setAutoplayControlVisible(true)
-                : undefined}
-              disabled={!bottomAutoplayActive || bottomPlayer.userId !== user?.userId}
-              accessibilityRole={bottomAutoplayActive && bottomPlayer.userId === user?.userId ? 'button' : undefined}
-              accessibilityLabel={bottomAutoplayActive && bottomPlayer.userId === user?.userId ? 'Manage autoplay' : undefined}
-            >
+            <View style={styles.localTitlePressable}>
               <Text
                 style={[styles.meTitle, bottomIsActive && styles.activeName]}
                 numberOfLines={1}
@@ -2067,7 +2044,7 @@ export default function GameScreen({ route, navigation }: Props) {
               </Text>
               <Text style={styles.playerGridMeta}>
                 {bottomAutoplayActive
-                  ? bottomPlayer.userId === user?.userId ? 'AUTOPLAY - TAP TO MANAGE' : 'AUTOPLAY'
+                  ? 'AUTOPLAY'
                   : bottomIsActive && !isRoundReveal && !isRoundSummary
                     ? (state.phase === 'peek' ? 'PEEK' : 'TURN')
                     : bottomConnected ? 'ONLINE' : 'OFFLINE'}
@@ -2077,7 +2054,7 @@ export default function GameScreen({ route, navigation }: Props) {
                   <View style={[styles.selfXpFill, { width: `${Math.round((user.progression.levelProgress || 0) * 100)}%` }]} />
                 </View>
               ) : null}
-            </Pressable>
+            </View>
           </View>
           <View style={styles.localScoreBox}>
             <Text style={styles.scoreNow}>Now {visibleRoundScores[bottomIndex] ?? 0}</Text>
@@ -2142,11 +2119,9 @@ export default function GameScreen({ route, navigation }: Props) {
       {/* Feedback Layer */}
       <Modal
         transparent
-        visible={isFocused && autoplayControlVisible && bottomAutoplayActive && bottomPlayer.userId === user?.userId}
+        visible={isFocused && bottomAutoplayActive && bottomPlayer.userId === user?.userId}
         animationType="fade"
-        onRequestClose={() => {
-          if (!takingControl) setAutoplayControlVisible(false);
-        }}
+        onRequestClose={() => {}}
       >
         <View style={styles.autoplayControlScrim}>
           <View style={styles.autoplayControlCard}>
@@ -2155,7 +2130,7 @@ export default function GameScreen({ route, navigation }: Props) {
             </View>
             <Text style={styles.autoplayControlTitle}>Autoplay is active</Text>
             <Text style={styles.autoplayControlBody}>
-              Easy AI is keeping the table moving for you. You can take back control whenever you are ready.
+              Autoplay took over after missed turns. Take back control to continue playing.
             </Text>
             <Pressable
               style={({ pressed }) => [
@@ -2170,15 +2145,6 @@ export default function GameScreen({ route, navigation }: Props) {
             >
               <Bot color="#1A2943" size={19} strokeWidth={3} />
               <Text style={styles.takeControlButtonText}>{takingControl ? 'Restoring Control...' : 'Take Back Control'}</Text>
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [styles.keepWatchingButton, pressed && styles.keepWatchingButtonPressed]}
-              onPress={() => setAutoplayControlVisible(false)}
-              disabled={takingControl}
-              accessibilityRole="button"
-              accessibilityLabel="Keep watching autoplay"
-            >
-              <Text style={styles.keepWatchingButtonText}>Keep Watching</Text>
             </Pressable>
           </View>
         </View>
@@ -3497,15 +3463,6 @@ const styles = StyleSheet.create({
   },
   autoplayControlTitle: { color: '#67E0B0', fontSize: 24, fontWeight: '900', textAlign: 'center' },
   autoplayControlBody: { color: '#F7FAFC', fontSize: 14, fontWeight: '800', textAlign: 'center', marginTop: 8, lineHeight: 20 },
-  keepWatchingButton: {
-    minHeight: 42,
-    marginTop: 8,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  keepWatchingButtonPressed: { opacity: 0.7 },
-  keepWatchingButtonText: { color: '#BDEBFF', fontSize: 13, fontWeight: '900' },
   turnBadge: {
     color: '#1A2943',
     backgroundColor: '#67E0B0',
