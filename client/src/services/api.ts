@@ -24,6 +24,18 @@ export type UserProfile = {
   club: ClubSummary | null;
   authProviders: AuthProviderStatus;
   passwordSignIn: boolean;
+  forfeitStatus?: ForfeitStatus;
+};
+
+export type ForfeitStatus = {
+  ranked: {
+    restricted: boolean;
+    lockedUntil: number | null;
+    rollingWindowHours: number;
+    rollingCount: number;
+    seasonId: string | null;
+    seasonCount: number;
+  };
 };
 
 export type AuthResponse = { token: string; user: UserProfile };
@@ -143,6 +155,7 @@ export type RoomPlayer = {
   ready: boolean;
   connected: boolean;
   autoplayActive?: boolean;
+  forfeited?: boolean;
   isHost: boolean;
 };
 export type RoomSummary = {
@@ -299,6 +312,8 @@ export type GameResult = {
     ranked?: RankedMatchSummary;
     economy?: MatchEconomyResult;
     afk?: AfkMatchResult;
+    forfeited?: boolean;
+    forfeit?: { confirmedAt: number; permanentAi: boolean; restriction?: ForfeitStatus['ranked'] } | null;
   }>;
 };
 
@@ -376,6 +391,7 @@ export type MatchProgressionSummary = {
   economy?: MatchEconomyResult;
   club?: ClubContributionSummary;
   afk?: AfkMatchResult;
+  forfeited?: boolean;
 };
 
 export type Challenge = {
@@ -577,6 +593,10 @@ export type RankedMatchSummary = {
   placementComplete: boolean;
   promoted: boolean;
   demoted: boolean;
+  forfeited?: boolean;
+  mmrBefore?: number;
+  mmrAfter?: number;
+  delta?: number;
 };
 
 export type RankedQueueStatus = {
@@ -608,6 +628,7 @@ export type RankedProfileResponse = {
   competitiveByPlayers: RankedLadders;
   queue: RankedQueueStatus;
   displayRankSelection: DisplayRankSelection | null;
+  forfeitStatus?: ForfeitStatus;
   displayRankEmblem: DisplayRankEmblem | null;
   displayRankEmblemChoices: DisplayRankEmblemChoice[];
 };

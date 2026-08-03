@@ -39,7 +39,6 @@ import {
   autoplayTargetCueMs,
   normalizeAfkConfig,
   normalizeAfkPlayerState,
-  placementsWithAfkPenalty,
   recordAutomatedAfkWindow,
   recordHumanAfkAction,
   recordMissedAfkWindow,
@@ -52,6 +51,7 @@ import {
   publicCosmeticCatalog,
   publicUserProfile,
   purchaseCosmetic,
+  recordOnlineMatchForfeit,
   registerSocialMessage,
   xpNeededForLevel,
 } from './progression.js';
@@ -213,6 +213,15 @@ import {
   scheduleReleasePolicyChange,
   updateRequiredPayload,
 } from './releasePolicy.js';
+import {
+  normalizeForfeitConfig,
+  normalizeForfeitDiscipline,
+  placementsWithMatchPenalties,
+  publicForfeitStatus,
+  recordForfeitSettlement,
+  resetForfeitDiscipline,
+  setRankedForfeitRestriction,
+} from './forfeit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DATA_DIR = path.join(__dirname, 'data');
@@ -509,6 +518,7 @@ const catalogStore = normalizeCatalogStore({});
 const economyStore = normalizeEconomyConfigStore({});
 let availabilityStore = normalizeAvailabilityStore({});
 let afkConfigStore = normalizeAfkConfig({});
+let forfeitConfigStore = normalizeForfeitConfig({});
 let releasePolicyStore = normalizeReleasePolicyStore({});
 const postgresStore = createPostgresStore(DATABASE_URL);
 const googleOAuthClient = new OAuth2Client();
@@ -1105,6 +1115,7 @@ function normalizeUserRecord(user, now = Date.now()) {
   normalizeAuthProviders(user);
   normalizePushNotifications(user);
   normalizeUserAdminFields(user);
+  normalizeForfeitDiscipline(user);
   return user;
 }
 
@@ -1167,6 +1178,7 @@ function applyStoreState(parsed = {}) {
   Object.assign(economyStore, normalizeEconomyConfigStore(parsed.economyConfig || {}));
   availabilityStore = normalizeAvailabilityStore(parsed.availabilityConfig || {});
   afkConfigStore = normalizeAfkConfig(parsed.afkConfig || {});
+  forfeitConfigStore = normalizeForfeitConfig(parsed.forfeitConfig || {});
   releasePolicyStore = normalizeReleasePolicyStore(parsed.releasePolicy || {});
   normalizeAdminStore(Object.assign(adminStore, {
     admins: parsed.admins || [],
@@ -1225,6 +1237,7 @@ function storeSnapshot() {
     economyConfig: economyStore,
     availabilityConfig: availabilityStore,
     afkConfig: afkConfigStore,
+    forfeitConfig: forfeitConfigStore,
     releasePolicy: releasePolicyStore,
     catalog: catalogStore,
     clubs: [...clubs.values()],
@@ -1648,6 +1661,7 @@ function safeUser(user) {
     club: publicClubForUser(user),
     authProviders: publicAuthProviders(user),
     passwordSignIn: !!(user.passwordHash && user.salt),
+    forfeitStatus: publicForfeitStatus(user, rankedSeason, forfeitConfigStore),
   };
 }
 
@@ -1666,6 +1680,26 @@ function currentCatalog() {
 
 function cosmeticsFor(user) {
   return publicCosmeticCatalog(user, rankedSeason, currentCatalog(), rankedConfig());
+}
+
+function adminPlayerDetail(user) {
+  const detail = adminUserDetail(
+    user,
+    rankedSeason,
+    results,
+    adminCosmeticCatalogFor(user, rankedSeason, currentCatalog(), rankedConfig()),
+    publicEconomyCatalog(user, economyConfig()),
+    rankedConfig()
+  );
+  const discipline = normalizeForfeitDiscipline(user);
+  return {
+    ...detail,
+    forfeitDiscipline: {
+      ...publicForfeitStatus(user, rankedSeason, forfeitConfigStore),
+      events: discipline.events,
+      updatedAt: discipline.updatedAt,
+    },
+  };
 }
 
 function adminClubDetail(club) {
@@ -1873,6 +1907,7 @@ function activeRoomForUser(userId) {
     (room.status === 'lobby' || room.status === 'playing')
     && !room.game?.completed
     && room.players.some(player => player.userId === userId)
+    && !room.forfeits?.has(userId)
   ) || null;
 }
 
@@ -1882,7 +1917,17 @@ function activePlayingRoomForUser(userId) {
     && room.game
     && !room.game.completed
     && room.players.some(player => player.userId === userId)
+    && !room.forfeits?.has(userId)
   ) || null;
+}
+
+function pendingForfeitedRoomForUser(userId) {
+  return [...rooms.values()].find(room => (
+    room.status === 'playing'
+    && room.game
+    && !room.game.completed
+    && room.forfeits?.has(userId)
+  )) || null;
 }
 
 function refreshActivePlayingRoomForUser(userId) {
@@ -1910,6 +1955,21 @@ function activeRoomPayloadForUser(userId) {
 }
 
 function activeMatchConflictForUser(userId) {
+  const pendingForfeit = pendingForfeitedRoomForUser(userId);
+  if (pendingForfeit) {
+    const gameChanged = resolveRoomExpiredTimers(pendingForfeit);
+    if (gameChanged) {
+      recordCompletedGame(pendingForfeit);
+      pendingForfeit.updatedAt = Date.now();
+      broadcastRoom(pendingForfeit);
+    }
+    if (!pendingForfeit.game.completed) {
+      return {
+        error: 'Your forfeited match is still finishing. Online matchmaking unlocks when that match ends.',
+        pendingForfeit: true,
+      };
+    }
+  }
   const room = refreshActivePlayingRoomForUser(userId);
   if (!room) return null;
   return {
@@ -1922,6 +1982,17 @@ function blockActiveMatch(req, res) {
   const conflict = activeMatchConflictForUser(req.auth.user.userId);
   if (!conflict) return false;
   res.status(409).json(conflict);
+  return true;
+}
+
+function blockRankedForfeitRestriction(req, res) {
+  const status = publicForfeitStatus(req.auth.user, rankedSeason, forfeitConfigStore);
+  if (!status.ranked.restricted) return false;
+  const until = new Date(status.ranked.lockedUntil).toISOString();
+  res.status(423).json({
+    error: `Ranked matchmaking is restricted until ${until} because of repeated forfeits.`,
+    forfeitStatus: status,
+  });
   return true;
 }
 
@@ -2577,6 +2648,7 @@ function roomSummary(room) {
         ready: true,
         connected: room.connected.get(player.userId) || false,
         autoplayActive: afkPlayerState(room, player.userId).autoplayActive,
+        forfeited: room.forfeits?.has(player.userId) || false,
         isHost: player.userId === room.hostUserId,
       };
     }),
@@ -2665,6 +2737,7 @@ function gameViewFor(room, userId) {
       penaltyPending: playerAfk.penaltyPending,
       takeoverThreshold: afkConfigStore.takeoverMisses,
       penaltyThreshold: afkConfigStore.penaltyAutomatedWindows,
+      forfeited: room.forfeits?.has(userId) || false,
     },
   };
 }
@@ -2864,6 +2937,93 @@ function chooseTimedOutPendingDecision(game, heldCard, source) {
   const revealed = pending ? game.players[pending.playerIndex]?.grid?.[pending.r]?.[pending.c] : null;
   if (!revealed) return 'drawn';
   return cardValue(heldCard) <= cardValue(revealed) ? 'drawn' : 'revealed';
+}
+
+function settleHeldCardBeforeForfeit(room, userId) {
+  const idx = getRoomPlayerIndex(room, userId);
+  if (idx < 0 || room.game?.phase !== 'turn' || room.game.currentPlayerIndex !== idx) return false;
+  room.held ||= new Map();
+  room.heldSource ||= new Map();
+  room.heldMustReplace ||= new Map();
+  room.heldCanDiscard ||= new Map();
+  const heldCard = room.held.get(userId);
+  const beforeGame = room.game;
+  let result = null;
+  if (room.game.pendingDecision && !heldCard) {
+    result = resolvePendingGridDecisionWithoutHeld(room.game, idx);
+  } else if (heldCard && room.game.pendingDecision) {
+    result = resolvePendingGridDecision(
+      room.game,
+      idx,
+      heldCard,
+      chooseTimedOutPendingDecision(room.game, heldCard, room.heldSource.get(userId))
+    );
+  } else if (heldCard) {
+    const target = pickTarget(room.game.players[idx].grid, heldCard);
+    result = replaceGridCard(room.game, idx, target.r, target.c, heldCard);
+  }
+  if (!result || result.error) return false;
+  trackColumnClears(room, userId, countNewClearedColumns(beforeGame, result.state, idx));
+  room.game = result.state;
+  captureRoundProgress(room);
+  room.held.delete(userId);
+  room.heldSource.delete(userId);
+  room.heldMustReplace.delete(userId);
+  room.heldCanDiscard.delete(userId);
+  return true;
+}
+
+function detachUserFromGameRoom(room, userId) {
+  for (const socketId of userSockets.get(userId) || []) {
+    const userSocket = io.sockets.sockets.get(socketId);
+    const link = sockets.get(socketId);
+    if (link?.roomCode === room.code) sockets.delete(socketId);
+    userSocket?.leave(room.code);
+    userSocket?.leave(`${room.code}:${userId}`);
+  }
+  room.connected.set(userId, false);
+  room.foreground?.set(userId, false);
+}
+
+function forfeitOnlineMatch(room, userId) {
+  if (!room?.game || room.game.completed || room.status !== 'playing') {
+    return { error: 'This match is no longer active.' };
+  }
+  if (room.forfeits?.has(userId)) {
+    return { ok: true, duplicate: true, matchType: room.matchType, buyIn: room.economy?.buyIn || 0 };
+  }
+  const playerIndex = getRoomPlayerIndex(room, userId);
+  if (playerIndex < 0) return { error: 'You are not seated in this game.' };
+
+  room.forfeits ||= new Map();
+  const record = {
+    eventId: crypto.randomUUID(),
+    confirmedAt: Date.now(),
+    matchType: room.matchType,
+  };
+  room.forfeits.set(userId, record);
+  cancelAutoplaySchedule(room, userId);
+  settleHeldCardBeforeForfeit(room, userId);
+  const afk = afkPlayerState(room, userId);
+  setAfkPlayerState(room, userId, {
+    ...afk,
+    autoplayActive: true,
+    consecutiveMisses: Math.max(afk.consecutiveMisses, afkConfigStore.takeoverMisses),
+    penaltyPending: false,
+  });
+  room.roundSummaryAcks?.add(userId);
+  detachUserFromGameRoom(room, userId);
+  captureRoundProgress(room);
+  recordCompletedGame(room);
+  room.updatedAt = Date.now();
+  broadcastRoom(room);
+  saveStore();
+  return {
+    ok: true,
+    matchType: room.matchType,
+    buyIn: room.economy?.buyIn || 0,
+    pendingUntilMatchEnds: !room.game.completed,
+  };
 }
 
 function countFaceDownCards(grid) {
@@ -3202,6 +3362,7 @@ function makeRoom(hostUser, {
     afkStates: new Map(),
     afkProcessedWindows: new Set(),
     autoplaySchedules: new Map(),
+    forfeits: new Map(),
     chat: [],
     chatRate: new Map(),
     countdownEndsAt: null,
@@ -3222,6 +3383,7 @@ function activeRankedRoomForUser(userId) {
     && (room.status === 'lobby' || room.status === 'playing')
     && !room.game?.completed
     && room.players.some(player => player.userId === userId)
+    && !room.forfeits?.has(userId)
   ) || null;
 }
 
@@ -3357,7 +3519,9 @@ function chargeRoomBuyIns(room) {
 function applyEconomyPayouts(room, result) {
   const buyIn = Number(room.economy?.buyIn || 0);
   if (!buyIn || room.economy?.payoutRecorded) return new Map();
-  const payouts = calculatePayouts(result.players, buyIn);
+  const payouts = calculatePayouts(result.players, buyIn, {
+    ineligibleUserIds: result.players.filter(player => player.forfeited).map(player => player.userId),
+  });
   const payoutMap = new Map(payouts.map(item => [item.userId, item]));
 
   for (const payout of payouts) {
@@ -3377,6 +3541,7 @@ function applyClubContributions(room, result) {
   if (result.mode !== 'online' || !['casual', 'wager', 'ranked'].includes(result.matchType)) return;
   const byClub = new Map();
   for (const player of result.players) {
+    if (player.forfeited) continue;
     const user = users.get(player.userId);
     const club = user?.clubId ? clubs.get(user.clubId) : null;
     if (!club || !findClubMember(club, user.userId)) continue;
@@ -3447,6 +3612,7 @@ function startRoomGame(room, { requireReady = false } = {}) {
   room.afkStates = new Map();
   room.afkProcessedWindows = new Set();
   room.autoplaySchedules = new Map();
+  room.forfeits = new Map();
   room.game = createGameState(
     room.players.map(player => {
       const account = users.get(player.userId) || player;
@@ -3467,30 +3633,44 @@ function recordCompletedGame(room) {
   if (!room.game?.completed || room.resultRecorded) return;
   captureRoundProgress(room);
   const totals = room.game.totals || room.game.players.map(player => 0);
-  const winningTotal = Math.min(...totals);
   const matchType = room.matchType === 'ranked' ? 'ranked' : room.matchType === 'wager' ? 'wager' : 'casual';
-  const afkPenaltyFlags = room.game.players.map(player => afkPlayerState(room, player.userId).penaltyPending);
-  const rankedPlacements = placementsWithAfkPenalty(totals, afkPenaltyFlags);
+  const forfeitFlags = room.game.players.map(player => room.forfeits?.has(player.userId) || false);
+  const activeTotals = totals.filter((_total, index) => !forfeitFlags[index]);
+  const winningTotal = activeTotals.length ? Math.min(...activeTotals) : Number.NEGATIVE_INFINITY;
+  const afkPenaltyFlags = room.game.players.map((player, index) => (
+    !forfeitFlags[index] && afkPlayerState(room, player.userId).penaltyPending
+  ));
+  const rankedPlacements = placementsWithMatchPenalties(totals, afkPenaltyFlags, forfeitFlags);
+  const completedAt = Date.now();
   const result = {
     resultId: crypto.randomUUID(),
-    completedAt: Date.now(),
+    completedAt,
     roomCode: room.code,
     matchType,
     mode: 'online',
     round: room.game.round,
     totalRounds: room.game.totalRounds,
-    players: room.game.players.map((player, index) => ({
-      userId: player.userId,
-      displayName: player.name,
-      total: totals[index] || 0,
-      won: (totals[index] || 0) === winningTotal,
-      afk: {
-        automatedWindows: afkPlayerState(room, player.userId).automatedWindows,
-        penaltyApplied: afkPlayerState(room, player.userId).penaltyPending,
-        forcedRankedLast: matchType === 'ranked' && afkPlayerState(room, player.userId).penaltyPending,
-        coinPenalty: 0,
-      },
-    })),
+    players: room.game.players.map((player, index) => {
+      const forfeited = forfeitFlags[index];
+      const forfeit = room.forfeits?.get(player.userId) || null;
+      return {
+        userId: player.userId,
+        displayName: player.name,
+        total: totals[index] || 0,
+        won: !forfeited && (totals[index] || 0) === winningTotal,
+        forfeited,
+        forfeit: forfeited ? {
+          confirmedAt: forfeit?.confirmedAt || completedAt,
+          permanentAi: true,
+        } : null,
+        afk: {
+          automatedWindows: afkPlayerState(room, player.userId).automatedWindows,
+          penaltyApplied: afkPenaltyFlags[index],
+          forcedRankedLast: matchType === 'ranked' && afkPenaltyFlags[index],
+          coinPenalty: 0,
+        },
+      };
+    }),
   };
   const payoutMap = applyEconomyPayouts(room, result);
 
@@ -3505,15 +3685,17 @@ function recordCompletedGame(room) {
         pot: room.economy?.pot || ((room.economy?.buyIn || 0) * result.players.length),
       };
     }
-    player.progression = applyMatchProgression(user, {
-      mode: 'online',
-      total: player.total,
-      won: player.won,
-      totalRounds: room.game.totalRounds,
-      roundScores: telemetry.roundScores || room.game.lastRoundScores || [],
-      columnClears: telemetry.columnClears || 0,
-      coinScale: room.matchType === 'wager' || room.matchType === 'ranked' ? 0 : 1,
-    });
+    player.progression = player.forfeited
+      ? recordOnlineMatchForfeit(user, result.completedAt)
+      : applyMatchProgression(user, {
+        mode: 'online',
+        total: player.total,
+        won: player.won,
+        totalRounds: room.game.totalRounds,
+        roundScores: telemetry.roundScores || room.game.lastRoundScores || [],
+        columnClears: telemetry.columnClears || 0,
+        coinScale: room.matchType === 'wager' || room.matchType === 'ranked' ? 0 : 1,
+      });
     if (player.economy) player.progression.economy = player.economy;
     if (matchType === 'ranked') {
       const playerIndex = result.players.findIndex(item => item.userId === player.userId);
@@ -3533,9 +3715,22 @@ function recordCompletedGame(room) {
         total: player.total,
         opponentMmrs,
         columnClears: telemetry.columnClears || 0,
+        forfeited: player.forfeited,
       }, rankedSeason, result.completedAt, rankedConfig());
       player.ranked = ranked;
       player.progression.ranked = ranked;
+    }
+    if (player.forfeited) {
+      const settlement = recordForfeitSettlement(user, {
+        eventId: room.forfeits?.get(player.userId)?.eventId,
+        matchId: result.resultId,
+        roomCode: room.code,
+        matchType,
+        seasonId: matchType === 'ranked' ? (room.ranked?.seasonId || rankedSeason.id) : null,
+        confirmedAt: room.forfeits?.get(player.userId)?.confirmedAt,
+      }, rankedSeason, forfeitConfigStore, result.completedAt);
+      player.forfeit.restriction = settlement.status.ranked;
+      rankedQueue.delete(player.userId);
     }
     if (player.afk.penaltyApplied) {
       user.currency ||= { coins: 0 };
@@ -3545,7 +3740,9 @@ function recordCompletedGame(room) {
       player.progression.afk = player.afk;
     }
     const roomPlayer = room.players.find(item => item.userId === player.userId);
-    emitProgressionCelebrations(room, player.userId, player.displayName, roomPlayer?.avatarInitial, player.progression);
+    if (!player.forfeited) {
+      emitProgressionCelebrations(room, player.userId, player.displayName, roomPlayer?.avatarInitial, player.progression);
+    }
   }
 
   applyClubContributions(room, result);
@@ -4053,6 +4250,7 @@ app.get('/admin/api/live-ops', requireAdmin(adminStore, 'availability:read'), (_
     })),
     impact: liveOpsImpactSummary(),
     afkConfig: afkConfigStore,
+    forfeitConfig: forfeitConfigStore,
     releasePolicy: releasePolicyAdminView(releasePolicyStore),
   });
 });
@@ -4160,6 +4358,24 @@ app.post('/admin/api/live-ops/afk', requireAdmin(adminStore, 'availability:write
     });
     saveStore();
     return res.json({ ok: true, afkConfig: afkConfigStore });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/admin/api/live-ops/forfeit', requireAdmin(adminStore, 'availability:write'), (req, res) => {
+  try {
+    const reason = cleanAdminReason(req.body?.reason);
+    if (!reason) return res.status(400).json({ error: 'Reason is required.' });
+    const previous = forfeitConfigStore;
+    forfeitConfigStore = normalizeForfeitConfig(req.body?.config || {});
+    writeAudit(adminStore, req, req.admin.admin, 'admin.live_ops.forfeit.update', { scope: 'ranked_matchmaking' }, {
+      reason,
+      previous,
+      next: forfeitConfigStore,
+    });
+    saveStore();
+    return res.json({ ok: true, forfeitConfig: forfeitConfigStore });
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
@@ -4490,15 +4706,39 @@ app.get('/admin/api/users/:userId', requireAdmin(adminStore, 'users:read'), (req
   writeAudit(adminStore, req, req.admin.admin, 'admin.users.read', { userId: user.userId });
   saveStore();
   return res.json({
-    user: adminUserDetail(
-      user,
-      rankedSeason,
-      results,
-      adminCosmeticCatalogFor(user, rankedSeason, currentCatalog(), rankedConfig()),
-      publicEconomyCatalog(user, economyConfig()),
-      rankedConfig()
-    ),
+    user: adminPlayerDetail(user),
   });
+});
+
+app.post('/admin/api/users/:userId/forfeit-discipline', requireAdmin(adminStore, 'competitive:write'), (req, res) => {
+  const user = findUserByIdentifier(req.params.userId);
+  if (!user) return res.status(404).json({ error: 'Player not found.' });
+  const reason = cleanAdminReason(req.body?.reason);
+  if (!reason) return res.status(400).json({ error: 'Reason is required.' });
+  const action = String(req.body?.action || '');
+  const before = structuredClone(normalizeForfeitDiscipline(user));
+  if (action === 'lift') {
+    setRankedForfeitRestriction(user, null);
+  } else if (action === 'reset') {
+    resetForfeitDiscipline(user);
+  } else if (action === 'set') {
+    const durationHours = Math.trunc(Number(req.body?.durationHours));
+    if (!Number.isFinite(durationHours) || durationHours < 1 || durationHours > 24 * 365) {
+      return res.status(400).json({ error: 'Restriction duration must be between 1 and 8760 hours.' });
+    }
+    setRankedForfeitRestriction(user, Date.now() + (durationHours * 60 * 60 * 1000));
+  } else {
+    return res.status(400).json({ error: 'Choose lift, reset, or set.' });
+  }
+  rankedQueue.delete(user.userId);
+  const after = structuredClone(normalizeForfeitDiscipline(user));
+  writeAudit(adminStore, req, req.admin.admin, `admin.users.forfeit.${action}`, { userId: user.userId }, {
+    reason,
+    before,
+    after,
+  });
+  saveStore();
+  return res.json({ user: adminPlayerDetail(user) });
 });
 
 app.patch('/admin/api/users/:userId/profile', requireAdmin(adminStore, 'users:write'), (req, res) => {
@@ -4574,14 +4814,7 @@ app.post('/admin/api/users/:userId/archive', requireAdmin(adminStore, 'users:wri
   writeAudit(adminStore, req, req.admin.admin, 'admin.users.archive', { userId: user.userId }, { reason, wasArchived, revokedSessions });
   saveStore();
   return res.json({
-    user: adminUserDetail(
-      user,
-      rankedSeason,
-      results,
-      adminCosmeticCatalogFor(user, rankedSeason, currentCatalog(), rankedConfig()),
-      publicEconomyCatalog(user, economyConfig()),
-      rankedConfig()
-    ),
+    user: adminPlayerDetail(user),
     revokedSessions,
   });
 });
@@ -4601,14 +4834,7 @@ app.post('/admin/api/users/:userId/restore', requireAdmin(adminStore, 'users:wri
   writeAudit(adminStore, req, req.admin.admin, 'admin.users.restore', { userId: user.userId }, { reason, wasArchived });
   saveStore();
   return res.json({
-    user: adminUserDetail(
-      user,
-      rankedSeason,
-      results,
-      adminCosmeticCatalogFor(user, rankedSeason, currentCatalog(), rankedConfig()),
-      publicEconomyCatalog(user, economyConfig()),
-      rankedConfig()
-    ),
+    user: adminPlayerDetail(user),
   });
 });
 
@@ -6212,6 +6438,7 @@ app.get('/ranked/me', requireAuth, (req, res) => {
     displayRankEmblem: resolveDisplayRankEmblem(req.auth.user, rankedSeason, rankedConfig()),
     displayRankEmblemChoices: rankedDisplayEmblemChoices(req.auth.user, rankedSeason, rankedConfig()),
     queue: publicRankedQueueStatus(req.auth.user.userId),
+    forfeitStatus: publicForfeitStatus(req.auth.user, rankedSeason, forfeitConfigStore),
   });
 });
 
@@ -6229,6 +6456,7 @@ app.patch('/ranked/display-emblem', requireAuth, (req, res) => {
 
 app.post('/ranked/queue', requireAuth, requireFeature(req => rankedFeatureKey(req.body?.maxPlayers)), (req, res) => {
   rankedSeason = normalizeRankedSeason(rankedSeason, Date.now(), rankedConfig());
+  if (blockRankedForfeitRestriction(req, res)) return;
   if (blockActiveMatch(req, res)) return;
   const activeRoom = activeRankedRoomForUser(req.auth.user.userId);
   if (activeRoom) {
@@ -6639,6 +6867,7 @@ io.on('connection', (socket) => {
       'chat:send',
       'game:intent',
       'game:take-control',
+      'game:forfeit',
     ]);
     if (policy.enforcement === 'after_match'
       && activeRoomCode
@@ -6670,6 +6899,7 @@ io.on('connection', (socket) => {
     if (!room) return cb({ error: 'Room not found.' });
     const userId = socket.auth.user.userId;
     if (!room.players.some(player => player.userId === userId)) return cb({ error: 'You are not a member of this room.' });
+    if (room.forfeits?.has(userId)) return cb({ error: 'You forfeited this match and cannot rejoin it.' });
     if (room.status !== 'playing') {
       const unavailable = socketFeatureUnavailable(roomAvailabilityFeature(room), userId);
       if (unavailable) return cb(unavailable);
@@ -6744,10 +6974,18 @@ io.on('connection', (socket) => {
     return cb({ ok: true });
   });
 
+  socket.on('game:forfeit', ({ code }, cb = () => {}) => {
+    const room = rooms.get(String(code || '').toUpperCase());
+    const userId = socket.auth.user.userId;
+    if (!room || !room.players.some(player => player.userId === userId)) return cb({ error: 'Game not found.' });
+    return cb(forfeitOnlineMatch(room, userId));
+  });
+
   socket.on('presence:state', ({ code, foreground }, cb = () => {}) => {
     const room = rooms.get(String(code || '').toUpperCase());
     const userId = socket.auth.user.userId;
     if (!room || !room.players.some(player => player.userId === userId)) return cb({ error: 'Room not found.' });
+    if (room.forfeits?.has(userId)) return cb({ error: 'You forfeited this match.' });
     room.foreground ||= new Map();
     room.connected.set(userId, true);
     room.foreground.set(userId, foreground !== false);
@@ -6760,6 +6998,7 @@ io.on('connection', (socket) => {
     const room = rooms.get(String(code || '').toUpperCase());
     const userId = socket.auth.user.userId;
     if (!room || !room.players.some(player => player.userId === userId)) return cb({ error: 'Room not found.' });
+    if (room.forfeits?.has(userId)) return cb({ error: 'You forfeited this match.' });
     if (activeBansFor(adminStore, socket.auth.user).some(ban => ban.type === 'chat_mute')) return cb({ error: 'Chat is muted for this account.' });
     room.chatRate ||= new Map();
     const now = Date.now();
@@ -6835,6 +7074,7 @@ io.on('connection', (socket) => {
     const room = rooms.get(String(code || '').toUpperCase());
     const userId = socket.auth.user.userId;
     if (!room || !room.game) return cb({ error: 'Game not found.' });
+    if (room.forfeits?.has(userId)) return cb({ error: 'You forfeited this match.' });
     if (!isValidActionId(actionId)) return cb({ error: 'Invalid action id.' });
     if (!['peek', 'draw', 'takeDiscard', 'switchDiscardToDraw', 'reveal', 'replace', 'discard', 'continueRound'].includes(type)) return cb({ error: 'Unknown action.' });
     if ((type === 'peek' || type === 'reveal' || type === 'replace') && !isGridCoordinate(payload)) return cb({ error: 'Invalid grid coordinate.' });
@@ -6947,6 +7187,7 @@ io.on('connection', (socket) => {
     const room = rooms.get(String(code || '').toUpperCase());
     const userId = socket.auth.user.userId;
     if (!room?.game || room.game.completed || room.status !== 'playing') return cb({ error: 'Game not found.' });
+    if (room.forfeits?.has(userId)) return cb({ error: 'A forfeited seat remains under permanent autoplay.' });
     const playerIndex = getRoomPlayerIndex(room, userId);
     if (playerIndex < 0) return cb({ error: 'You are not seated in this game.' });
     const afk = afkPlayerState(room, userId);

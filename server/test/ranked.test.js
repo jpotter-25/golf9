@@ -176,6 +176,33 @@ test('ranked match result updates internal rating while returning only public ra
   assert.equal(result.leagueAfter.name, 'Unranked');
 });
 
+test('ranked forfeits cannot receive a softer rating loss than the ordinary base last-place result', () => {
+  const season = normalizeRankedSeason({ id: 's1', name: 'Season 1', startsAt: 1000, endsAt: 1000 + 90 * 24 * 60 * 60 * 1000 }, 2000);
+  const account = user();
+  const ladder = normalizeCompetitiveState(account, season);
+  Object.assign(ladder, {
+    mmr: 1000,
+    placementsPlayed: 5,
+    placementComplete: true,
+    hasCompletedInitialPlacement: true,
+    calibrationMatchesPlayed: 10,
+    calibrationMatchesRequired: 10,
+  });
+  const result = applyRankedMatchResult(account, {
+    matchId: 'forfeit-one',
+    roomCode: 'QUIT',
+    playerCount: 2,
+    placement: 2,
+    total: 99,
+    opponentMmrs: [5000],
+    forfeited: true,
+  }, season, 3000);
+
+  assert.equal(account.competitive.mmr, 976);
+  assert.equal(account.competitive.matchHistory[0].forfeited, true);
+  assert.equal(result.forfeited, true);
+});
+
 test('first placement stays unranked for four games and maps a perfect set to Gold I', () => {
   const season = normalizeRankedSeason({ id: 's1', name: 'Season 1', startsAt: 1000, endsAt: 1000 + 90 * 24 * 60 * 60 * 1000 }, 2000);
   const account = user();

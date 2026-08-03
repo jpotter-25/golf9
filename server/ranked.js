@@ -339,6 +339,7 @@ function publicMatchHistory(history = []) {
     rankAfter: publicRank(item.leagueAfter),
     promoted: Boolean(item.promoted),
     demoted: Boolean(item.demoted),
+    forfeited: Boolean(item.forfeited),
   }));
 }
 
@@ -563,6 +564,10 @@ export function applyRankedMatchResult(user, match, season = normalizeRankedSeas
       returningPlacement: before.returningPlacement,
       calibrationMatchesPlayed: before.calibrationMatchesPlayed,
     }, config);
+    if (match.forfeited) {
+      const ordinaryLastPlaceDelta = placementBaseDeltas(playerCount, config).at(-1) || 0;
+      delta = Math.min(delta, ordinaryLastPlaceDelta);
+    }
     mmrAfter = Math.max(0, mmrBefore + delta);
   }
 
@@ -614,6 +619,7 @@ export function applyRankedMatchResult(user, match, season = normalizeRankedSeas
       leagueAfter,
       promoted,
       demoted,
+      forfeited: match.forfeited === true,
     }, ...before.matchHistory].slice(0, 25),
   };
   next.confidenceStage = confidenceStage(next);
@@ -633,6 +639,7 @@ export function applyRankedMatchResult(user, match, season = normalizeRankedSeas
     placementComplete,
     promoted,
     demoted,
+    forfeited: match.forfeited === true,
   };
 }
 

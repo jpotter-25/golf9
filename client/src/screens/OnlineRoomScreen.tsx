@@ -92,6 +92,8 @@ export default function OnlineRoomScreen({ route, navigation }: Props) {
       mode: 'online',
       roomCode: room.code,
       online: true,
+      matchType: room.matchType,
+      buyIn: room.economy?.buyIn || 0,
     });
   }, [navigation, room]);
 
@@ -127,6 +129,8 @@ export default function OnlineRoomScreen({ route, navigation }: Props) {
           mode: 'online',
           roomCode: room.code,
           online: true,
+          matchType: room.matchType,
+          buyIn: room.economy?.buyIn || 0,
         });
       }
     }

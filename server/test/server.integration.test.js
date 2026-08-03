@@ -1489,6 +1489,61 @@ test('active playing matches force rejoin and block new tables', async () => {
   });
 });
 
+test('confirmed online forfeits leave the UI, permanently hand the seat to autoplay, and remain distinct from reconnects', async () => {
+  await withServer(async (baseUrl) => {
+    const one = await signup(baseUrl, `ForfeitOne${Date.now()}`);
+    const two = await signup(baseUrl, `ForfeitTwo${Date.now()}`);
+    const created = await json(await fetch(`${baseUrl}/rooms`, {
+      method: 'POST',
+      headers: authHeaders(one.token),
+      body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
+    }));
+    const code = created.room.code;
+    await json(await fetch(`${baseUrl}/rooms/${code}/join`, { method: 'POST', headers: authHeaders(two.token) }));
+
+    const socketOne = io(baseUrl, { transports: ['websocket'], auth: { token: one.token }, forceNew: true });
+    const socketTwo = io(baseUrl, { transports: ['websocket'], auth: { token: two.token }, forceNew: true });
+    await Promise.all([once(socketOne, 'connect'), once(socketTwo, 'connect')]);
+    try {
+      await emitAck(socketOne, 'room:join', { code });
+      await emitAck(socketTwo, 'room:join', { code });
+      assert.deepEqual(await emitAck(socketOne, 'room:start', { code }), { ok: true });
+
+      const forfeited = await emitAck(socketOne, 'game:forfeit', { code });
+      assert.equal(forfeited.ok, true);
+      assert.equal(forfeited.matchType, 'casual');
+      assert.equal(forfeited.pendingUntilMatchEnds, true);
+
+      const active = await json(await fetch(`${baseUrl}/rooms/active`, { headers: authHeaders(one.token) }));
+      assert.equal(active.active, false);
+      assert.equal(active.mustRejoin, false);
+
+      const opponentView = await emitAck(socketTwo, 'room:join', { code });
+      const forfeitedSeat = opponentView.room.players.find(player => player.userId === one.user.userId);
+      assert.equal(forfeitedSeat.forfeited, true);
+      assert.equal(forfeitedSeat.autoplayActive, true);
+      assert.equal(forfeitedSeat.connected, false);
+
+      const rejoin = await emitAck(socketOne, 'room:join', { code });
+      assert.equal(rejoin.error, 'You forfeited this match and cannot rejoin it.');
+      const reclaim = await emitAck(socketOne, 'game:take-control', { code });
+      assert.equal(reclaim.error, 'A forfeited seat remains under permanent autoplay.');
+
+      const newRoom = await fetch(`${baseUrl}/rooms`, {
+        method: 'POST',
+        headers: authHeaders(one.token),
+        body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
+      });
+      const conflict = await newRoom.json();
+      assert.equal(newRoom.status, 409);
+      assert.equal(conflict.pendingForfeit, true);
+    } finally {
+      socketOne.disconnect();
+      socketTwo.disconnect();
+    }
+  });
+});
+
 test('loads durable profile stats and completed results', async () => {
   const token = 'seed-token';
   const userId = 'seed-user';

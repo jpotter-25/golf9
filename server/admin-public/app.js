@@ -142,6 +142,7 @@ function bindConsoleActions() {
   });
   document.querySelector('#saveLiveOpsTesters').addEventListener('click', saveLiveOpsTesters);
   document.querySelector('#afkConfigEditor').addEventListener('submit', saveAfkConfig);
+  document.querySelector('#forfeitConfigEditor').addEventListener('submit', saveForfeitConfig);
   document.querySelector('#loadCompetitive').addEventListener('click', loadCompetitive);
   document.querySelector('#publishCompetitive').addEventListener('click', publishCompetitive);
   document.querySelector('#rollbackCompetitive').addEventListener('click', rollbackCompetitive);
@@ -451,6 +452,11 @@ function renderUserDetail(user) {
   const equipped = user.inventory?.equipped || {};
   const progression = user.progression || {};
   const cosmeticOptions = cosmeticSelectOptions(user);
+  const forfeitDiscipline = user.forfeitDiscipline || {};
+  const rankedForfeit = forfeitDiscipline.ranked || {};
+  const rankedLockLabel = rankedForfeit.restricted && rankedForfeit.lockedUntil
+    ? `Restricted until ${new Date(rankedForfeit.lockedUntil).toLocaleString()}`
+    : 'Ranked access clear';
   node.innerHTML = `
     <h2>${escapeHtml(user.displayName)}</h2>
     <p class="muted">${escapeHtml(user.userId)}</p>
@@ -498,6 +504,22 @@ function renderUserDetail(user) {
           <button type="submit" name="intent" value="revoke" class="danger">Revoke</button>
         </div>
       </form>
+      <form id="playerForfeitEditor" class="card compact">
+        <strong>Forfeit Discipline</strong>
+        <p class="muted">${escapeHtml(rankedLockLabel)} - ${Number(rankedForfeit.rollingCount || 0)} in the rolling window - ${Number(rankedForfeit.seasonCount || 0)} this season.</p>
+        <div class="row two">
+          <label>Manual restriction (hours) <input name="durationHours" type="number" min="1" max="8760" value="24" /></label>
+          <label>Reason <input name="reason" placeholder="Required audit reason" required /></label>
+        </div>
+        <div class="actions-inline">
+          <button type="submit" name="intent" value="set">Set Restriction</button>
+          <button type="submit" name="intent" value="lift" class="ghost">Lift Restriction</button>
+          <button type="submit" name="intent" value="reset" class="danger">Reset History</button>
+        </div>
+        <div class="list">
+          ${(forfeitDiscipline.events || []).slice(0, 6).map(item => `<p class="muted">${escapeHtml(String(item.matchType || 'match'))} - ${escapeHtml(new Date(item.settledAt).toLocaleString())} - ${escapeHtml(item.roomCode || 'no room')}</p>`).join('') || '<p class="muted">No recorded forfeits.</p>'}
+        </div>
+      </form>
     </div>
     <div class="card">
       <strong>Equipped</strong>
@@ -524,6 +546,7 @@ function renderUserDetail(user) {
   node.querySelector('#playerProgressionEditor')?.addEventListener('submit', adjustPlayerProgression);
   node.querySelector('#playerCoinsEditor')?.addEventListener('submit', adjustPlayerCoins);
   node.querySelector('#playerCosmeticEditor')?.addEventListener('submit', adjustPlayerCosmetic);
+  node.querySelector('#playerForfeitEditor')?.addEventListener('submit', managePlayerForfeit);
   node.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', () => runUserAction(button.dataset.action)));
 }
 
@@ -589,6 +612,26 @@ async function adjustPlayerCosmetic(event) {
     }),
   });
   status(`Cosmetic ${endpoint} complete.`, 'ok');
+  await loadUser(selectedUser.userId);
+}
+
+async function managePlayerForfeit(event) {
+  event.preventDefault();
+  if (!selectedUser) return;
+  const form = event.currentTarget;
+  const action = event.submitter?.value || 'lift';
+  const reason = form.elements.reason.value.trim();
+  if (!reason) return status('An administrative reason is required.', 'error');
+  if (action === 'reset' && !confirm('Reset this player\'s complete forfeit history and lift the current ranked restriction?')) return;
+  await api(`/users/${selectedUser.userId}/forfeit-discipline`, {
+    method: 'POST',
+    body: JSON.stringify({
+      action,
+      durationHours: action === 'set' ? Number(form.elements.durationHours.value) : undefined,
+      reason,
+    }),
+  });
+  status(action === 'reset' ? 'Forfeit history reset.' : action === 'set' ? 'Ranked restriction set.' : 'Ranked restriction lifted.', 'ok');
   await loadUser(selectedUser.userId);
 }
 
@@ -1246,6 +1289,7 @@ function renderLiveOps() {
   renderReleasePolicySchedules();
   renderReleasePolicyRevisions();
   populateAfkConfigEditor();
+  populateForfeitConfigEditor();
   applyLiveOpsPermissions();
 }
 
@@ -1515,6 +1559,50 @@ async function saveAfkConfig(event) {
   liveOpsData.afkConfig = result.afkConfig;
   status('Online AFK autoplay settings saved.', 'ok');
   populateAfkConfigEditor();
+}
+
+function populateForfeitConfigEditor() {
+  const form = document.querySelector('#forfeitConfigEditor');
+  const config = liveOpsData?.forfeitConfig || {};
+  form.elements.enabled.checked = config.enabled !== false;
+  form.elements.rankedRollingWindowHours.value = config.rankedRollingWindowHours ?? 24;
+  form.elements.rankedRollingLockMinutes.value = (config.rankedRollingLockMinutes || [15, 120, 1440]).join(', ');
+  form.elements.rankedSeasonLockSteps.value = JSON.stringify(config.rankedSeasonLockSteps || [], null, 2);
+  form.elements.reason.value = '';
+}
+
+async function saveForfeitConfig(event) {
+  event.preventDefault();
+  if (!liveOpsCanWrite) return;
+  const form = event.currentTarget;
+  const reason = form.elements.reason.value.trim();
+  if (!reason) return status('An administrative reason is required.', 'error');
+  let rankedSeasonLockSteps;
+  try {
+    rankedSeasonLockSteps = JSON.parse(form.elements.rankedSeasonLockSteps.value || '[]');
+  } catch {
+    return status('Season escalation steps must be valid JSON.', 'error');
+  }
+  const rankedRollingLockMinutes = form.elements.rankedRollingLockMinutes.value
+    .split(',')
+    .map(value => Number(value.trim()))
+    .filter(Number.isFinite);
+  if (!rankedRollingLockMinutes.length) return status('Enter at least one rolling lock duration.', 'error');
+  const result = await api('/live-ops/forfeit', {
+    method: 'POST',
+    body: JSON.stringify({
+      config: {
+        enabled: form.elements.enabled.checked,
+        rankedRollingWindowHours: Number(form.elements.rankedRollingWindowHours.value),
+        rankedRollingLockMinutes,
+        rankedSeasonLockSteps,
+      },
+      reason,
+    }),
+  });
+  liveOpsData.forfeitConfig = result.forfeitConfig;
+  status('Ranked forfeit settings saved.', 'ok');
+  populateForfeitConfigEditor();
 }
 
 function renderLiveOpsImpact() {
@@ -1795,6 +1883,9 @@ function applyLiveOpsPermissions() {
   document.querySelector('#saveLiveOpsTesters').disabled = !liveOpsCanWrite;
   document.querySelector('#liveOpsTesterReason').disabled = !liveOpsCanWrite;
   document.querySelector('#afkConfigEditor').querySelectorAll('input, button').forEach(control => {
+    control.disabled = !liveOpsCanWrite;
+  });
+  document.querySelector('#forfeitConfigEditor').querySelectorAll('input, textarea, button').forEach(control => {
     control.disabled = !liveOpsCanWrite;
   });
   const releaseEditor = document.querySelector('#releasePolicyEditor');

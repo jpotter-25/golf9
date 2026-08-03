@@ -94,6 +94,25 @@ export function leaveOnlineRoom(token: string, code: string): Promise<void> {
   });
 }
 
+export function forfeitOnlineMatch(token: string, code: string): Promise<{ matchType: 'casual' | 'wager' | 'ranked'; buyIn: number; pendingUntilMatchEnds: boolean }> {
+  const s = connect(token);
+  return new Promise((resolve, reject) => {
+    s.emit('game:forfeit', { code }, (res: {
+      error?: string;
+      matchType?: 'casual' | 'wager' | 'ranked';
+      buyIn?: number;
+      pendingUntilMatchEnds?: boolean;
+    }) => {
+      if (res.error) reject(new Error(res.error));
+      else resolve({
+        matchType: res.matchType || 'casual',
+        buyIn: res.buyIn || 0,
+        pendingUntilMatchEnds: res.pendingUntilMatchEnds !== false,
+      });
+    });
+  });
+}
+
 export function updateRoomPresence(token: string, code: string, foreground: boolean): Promise<void> {
   const s = connect(token);
   return new Promise((resolve, reject) => {

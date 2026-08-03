@@ -620,6 +620,20 @@ export function applyMatchProgression(user, match, now = Date.now()) {
   return progressionSummarySince(user, levelBefore, totalXpBefore, coinsBefore, achievementsUnlocked, challengesCompleted, now);
 }
 
+export function recordOnlineMatchForfeit(user, now = Date.now()) {
+  normalizeUserProgression(user, now);
+  const levelBefore = user.progression.level;
+  const totalXpBefore = user.progression.totalXp;
+  const coinsBefore = user.currency.coins;
+  user.statistics.gamesPlayed += 1;
+  user.statistics.losses += 1;
+  user.statistics.onlineGames += 1;
+  return {
+    ...progressionSummarySince(user, levelBefore, totalXpBefore, coinsBefore, [], [], now),
+    forfeited: true,
+  };
+}
+
 export function registerSocialMessage(user, now = Date.now()) {
   normalizeUserProgression(user, now);
   const levelBefore = user.progression.level;

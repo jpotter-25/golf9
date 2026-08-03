@@ -280,20 +280,30 @@ export function payoutSlotsFor(playerCount, buyIn) {
   return [pot - safeBuyIn, safeBuyIn, 0, 0];
 }
 
-export function calculatePayouts(players, buyIn) {
+export function calculatePayouts(players, buyIn, { ineligibleUserIds = [] } = {}) {
   const safeBuyIn = Math.max(0, safeInteger(buyIn, 0));
+  const ineligible = new Set(ineligibleUserIds);
   const ordered = players
-    .map(player => ({ ...player, total: safeInteger(player.total, 0) }))
-    .sort((a, b) => a.total - b.total || String(a.userId).localeCompare(String(b.userId)));
+    .map(player => ({ ...player, total: safeInteger(player.total, 0), ineligible: ineligible.has(player.userId) }))
+    .sort((a, b) => Number(a.ineligible) - Number(b.ineligible) || a.total - b.total || String(a.userId).localeCompare(String(b.userId)));
   const slots = payoutSlotsFor(ordered.length, safeBuyIn);
   const payouts = new Map(ordered.map(player => [player.userId, 0]));
+  let redirected = 0;
 
   let slotIndex = 0;
   while (slotIndex < ordered.length) {
-    const tied = ordered.filter(player => player.total === ordered[slotIndex].total);
+    const tied = ordered.filter(player => (
+      player.ineligible === ordered[slotIndex].ineligible
+      && player.total === ordered[slotIndex].total
+    ));
     const groupStart = slotIndex;
     const groupEnd = slotIndex + tied.length;
     const pool = slots.slice(groupStart, groupEnd).reduce((sum, value) => sum + value, 0);
+    if (ordered[slotIndex].ineligible) {
+      redirected += pool;
+      slotIndex = groupEnd;
+      continue;
+    }
     const share = tied.length ? Math.floor(pool / tied.length) : 0;
     let remainder = pool - (share * tied.length);
     for (const player of tied) {
@@ -304,9 +314,14 @@ export function calculatePayouts(players, buyIn) {
     slotIndex = groupEnd;
   }
 
+  const firstEligible = ordered.find(player => !player.ineligible);
+  if (firstEligible && redirected) {
+    payouts.set(firstEligible.userId, (payouts.get(firstEligible.userId) || 0) + redirected);
+  }
+
   return ordered.map((player, index) => ({
     userId: player.userId,
-    placement: index + 1,
+    placement: player.ineligible ? ordered.length : index + 1,
     buyIn: safeBuyIn,
     payout: payouts.get(player.userId) || 0,
     net: (payouts.get(player.userId) || 0) - safeBuyIn,

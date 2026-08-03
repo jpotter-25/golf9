@@ -31,6 +31,18 @@ test('payouts preserve the full pot and support ties', () => {
   assert.equal(tiedFirst.find(item => item.userId === 'b')?.payout, 200);
 });
 
+test('forfeited wager seats receive no payout and their prize stays in the active pot', () => {
+  const payouts = calculatePayouts([
+    { userId: 'active', total: 50 },
+    { userId: 'forfeit-a', total: -20 },
+    { userId: 'forfeit-b', total: -10 },
+  ], 100, { ineligibleUserIds: ['forfeit-a', 'forfeit-b'] });
+  assert.equal(payouts.find(item => item.userId === 'active')?.payout, 300);
+  assert.equal(payouts.find(item => item.userId === 'forfeit-a')?.payout, 0);
+  assert.equal(payouts.find(item => item.userId === 'forfeit-b')?.payout, 0);
+  assert.equal(payouts.reduce((sum, item) => sum + item.payout, 0), 300);
+});
+
 test('ranked entry fee is free across all MMR bands', () => {
   assert.equal(rankedBuyInForMmr(0), 0);
   assert.equal(rankedBuyInForMmr(999), 0);

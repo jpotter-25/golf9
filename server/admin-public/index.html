@@ -633,6 +633,27 @@
             <button type="submit">Save AFK Settings</button>
           </form>
 
+          <form id="forfeitConfigEditor" class="panel compact editor">
+            <div class="split-header">
+              <div>
+                <h3>Ranked Forfeit Restrictions</h3>
+                <p class="muted">Configure account-wide queue locks after deliberate ranked forfeits. MMR remains an ordinary last-place result and existing coins are never deducted.</p>
+              </div>
+              <span class="chip gold">All Ranked Ladders</span>
+            </div>
+            <label class="checkline"><input name="enabled" type="checkbox" /> Enable ranked forfeit restrictions</label>
+            <div class="row two">
+              <label>Rolling window (hours) <input name="rankedRollingWindowHours" type="number" min="1" max="2160" step="1" /></label>
+              <label>Locks by rolling forfeit count (minutes) <input name="rankedRollingLockMinutes" placeholder="15, 120, 1440" /></label>
+            </div>
+            <label>Season escalation steps (JSON)
+              <textarea name="rankedSeasonLockSteps" rows="5" spellcheck="false" placeholder='[{"count":5,"durationHours":72},{"count":12,"untilSeasonEnd":true}]'></textarea>
+            </label>
+            <p class="muted">Each rolling-list position is the lock for that forfeit count; later counts reuse the final value. A season step may use durationHours or untilSeasonEnd.</p>
+            <label>Administrative reason <input name="reason" maxlength="240" placeholder="Required for the audit trail" required /></label>
+            <button type="submit">Save Forfeit Settings</button>
+          </form>
+
           <div class="panel compact">
             <div class="split-header">
               <div>

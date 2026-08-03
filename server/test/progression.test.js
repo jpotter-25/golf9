@@ -7,6 +7,7 @@ import {
   normalizeUserProgression,
   publicCosmeticCatalog,
   purchaseCosmetic,
+  recordOnlineMatchForfeit,
   registerSocialMessage,
   xpNeededForLevel,
 } from '../progression.js';
@@ -79,6 +80,26 @@ test('match progression grants xp, currency, stats, and achievements once', () =
   assert.equal(first.challengesCompleted.some(item => item.templateId === 'daily_low_total'), true);
   assert.equal(account.achievements.filter(item => item.id === 'first_win').length, 1);
   assert.equal(account.achievements.filter(item => item.id === 'column_cleaner').length, 1);
+});
+
+test('online forfeits record a loss without XP, coins, challenge progress, or rewards', () => {
+  const account = user();
+  normalizeUserProgression(account, 1000);
+  const challengeProgress = account.challenges.daily.items.map(item => item.progress);
+  const coinsBefore = account.currency.coins;
+  const xpBefore = account.progression.totalXp;
+  const result = recordOnlineMatchForfeit(account, 2000);
+
+  assert.equal(result.xpGained, 0);
+  assert.equal(result.coinsGained, 0);
+  assert.equal(result.forfeited, true);
+  assert.equal(account.currency.coins, coinsBefore);
+  assert.equal(account.progression.totalXp, xpBefore);
+  assert.equal(account.statistics.gamesPlayed, 1);
+  assert.equal(account.statistics.losses, 1);
+  assert.equal(account.statistics.onlineGames, 1);
+  assert.deepEqual(account.challenges.daily.items.map(item => item.progress), challengeProgress);
+  assert.deepEqual(account.achievements, []);
 });
 
 test('challenge rewards can be claimed once', () => {

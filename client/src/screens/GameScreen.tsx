@@ -33,6 +33,7 @@ import { useOfflineSync, type LocalResultSyncOutcome } from '../context/OfflineS
 import * as api from '../services/api';
 import {
   connect,
+  forfeitOnlineMatch,
   joinRoomSocket,
   onChatHistory,
   onChatMessage,
@@ -193,7 +194,7 @@ function buildLocalPlayerIdentities({
 }
 
 export default function GameScreen({ route, navigation }: Props) {
-  const { players, mode, rounds, roomCode, aiDifficulty = 'easy', localPlayerNames } = route.params;
+  const { players, mode, rounds, roomCode, matchType: routeMatchType, buyIn: routeBuyIn = 0, aiDifficulty = 'easy', localPlayerNames } = route.params;
   const TOTAL_ROUNDS: number = rounds;
   const { token, user, refreshProfile } = useAuth();
   const availability = useAvailability();
@@ -249,6 +250,7 @@ export default function GameScreen({ route, navigation }: Props) {
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
   const [roomPlayers, setRoomPlayers] = useState<api.RoomPlayer[]>([]);
+  const [roomSummary, setRoomSummary] = useState<api.RoomSummary | null>(null);
   const [socialBursts, setSocialBursts] = useState<Record<string, SocialBurst>>({});
   const [avatarGifts, setAvatarGifts] = useState<Record<string, SocialBurst>>({});
   const [avatarHubUserId, setAvatarHubUserId] = useState<string | null>(null);
@@ -263,6 +265,8 @@ export default function GameScreen({ route, navigation }: Props) {
   const [matchProgression, setMatchProgression] = useState<api.MatchProgressionSummary | null>(null);
   const [autoplayCue, setAutoplayCue] = useState<AutoplayCue | null>(null);
   const [takingControl, setTakingControl] = useState(false);
+  const [quitPromptOpen, setQuitPromptOpen] = useState(false);
+  const [quittingMatch, setQuittingMatch] = useState(false);
 
   const [sweepActive, setSweepActive] = useState(false);
   const sweepStarter = useRef<number | null>(null);
@@ -289,6 +293,7 @@ export default function GameScreen({ route, navigation }: Props) {
   const localRoundScores = useRef<number[]>([]);
   const localColumnClears = useRef<number[]>(Array.from({ length: players }, () => 0));
   const autoplayCueTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const allowNavigationRef = useRef(false);
 
   const metrics = useBoardMetrics(state.players.length);
   const isSolo = mode === 'solo';
@@ -313,6 +318,22 @@ export default function GameScreen({ route, navigation }: Props) {
   const currentTurnUserId = currentTurnPlayer?.userId;
   const currentTurnName = currentTurnPlayer?.name ?? 'Player';
   const viewerAutoplayActive = isOnline && !!state.viewerAutoplay?.active;
+  const onlineMatchType = roomSummary?.matchType || routeMatchType || 'casual';
+  const onlineBuyIn = roomSummary?.economy?.buyIn || routeBuyIn || 0;
+  const quitPromptTitle = !isOnline
+    ? 'Quit this match?'
+    : onlineMatchType === 'ranked'
+      ? 'Forfeit ranked match?'
+      : onlineMatchType === 'wager'
+        ? 'Forfeit wager match?'
+        : 'Forfeit online match?';
+  const quitPromptBody = !isOnline
+    ? 'This unfinished match will end immediately. You will receive no XP, challenge progress, coins, statistics, or other rewards.'
+    : onlineMatchType === 'ranked'
+      ? 'You will receive a last-place ranked result and no XP, challenge progress, or other potential rewards from this match. Repeated forfeits result in ranked restrictions.'
+      : onlineMatchType === 'wager'
+        ? `Your ${onlineBuyIn.toLocaleString()} coin wager will not be returned. You will receive no XP, challenge progress, payout, or other potential rewards from this match.`
+        : 'Your seat will remain under permanent autoplay. You will receive no XP, challenge progress, coins, or other potential rewards from this match.';
   const sweepStarterName = state.sweepStarterIndex == null ? 'A player' : state.players[state.sweepStarterIndex]?.name ?? 'A player';
   const viewerCosmetics = user?.inventory?.equipped;
   // Table themes are a local viewing preference and never come from room or opponent cosmetics.
@@ -489,7 +510,10 @@ export default function GameScreen({ route, navigation }: Props) {
   }, [players, user?.userId]);
 
   const applyOnlineRoomSnapshot = useCallback((snapshot: { room?: api.RoomSummary | null; game?: GameState | null; chat?: ChatMessage[] | null }) => {
-    if (snapshot.room) setRoomPlayers(snapshot.room.players);
+    if (snapshot.room) {
+      setRoomPlayers(snapshot.room.players);
+      setRoomSummary(snapshot.room);
+    }
     if (snapshot.game) applyOnlineGameState(snapshot.game);
     if (snapshot.chat) setChatMessages(snapshot.chat);
   }, [applyOnlineGameState]);
@@ -535,7 +559,10 @@ export default function GameScreen({ route, navigation }: Props) {
     let cancelled = false;
     connect(token);
     const cleanupRoom = onRoomUpdate(room => {
-      if (!cancelled) setRoomPlayers(room.players);
+      if (!cancelled) {
+        setRoomPlayers(room.players);
+        setRoomSummary(room);
+      }
     });
     const cleanupConnect = onSocketConnect(() => {
       if (!cancelled) resyncOnlineRoom({ quiet: true });
@@ -585,24 +612,56 @@ export default function GameScreen({ route, navigation }: Props) {
     if (autoplayCueTimer.current) clearTimeout(autoplayCueTimer.current);
   }, []);
 
+  const requestQuitMatch = useCallback(() => {
+    setChatOpen(false);
+    setClubChatOpen(false);
+    setShopOpen(false);
+    setAvatarHubUserId(null);
+    setAlertSettingsOpen(false);
+    setQuitPromptOpen(true);
+  }, []);
+
+  const confirmQuitMatch = useCallback(async () => {
+    if (quittingMatch) return;
+    setQuittingMatch(true);
+    try {
+      if (isOnline) {
+        if (!token || !roomCode) throw new Error('Unable to identify this online match.');
+        await forfeitOnlineMatch(token, roomCode);
+        if (user?.userId) await clearCachedActiveMatch(user.userId);
+        await refreshProfile().catch(() => {});
+      }
+      allowNavigationRef.current = true;
+      setQuitPromptOpen(false);
+      navigation.replace('Lobby');
+    } catch (error) {
+      Alert.alert(
+        isOnline ? 'Unable to forfeit' : 'Unable to quit',
+        error instanceof Error ? error.message : 'Try again.'
+      );
+    } finally {
+      setQuittingMatch(false);
+    }
+  }, [isOnline, navigation, quittingMatch, refreshProfile, roomCode, token, user?.userId]);
+
   useEffect(() => {
-    if (!isOnline || state.completed) return;
-    const message = 'Finish this match before leaving the table.';
+    if (state.completed) return;
     const unsubscribe = navigation.addListener('beforeRemove', event => {
       const action = event.data.action as { type?: string; payload?: { name?: string } };
       if ((action.type === 'NAVIGATE' || action.type === 'PUSH') && action.payload?.name === 'PlayerProfile') return;
+      if (allowNavigationRef.current) return;
       event.preventDefault();
-      Alert.alert('Match in progress', message);
+      requestQuitMatch();
     });
     const backSubscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      Alert.alert('Match in progress', message);
+      requestQuitMatch();
       return true;
     });
     return () => {
       unsubscribe();
       backSubscription.remove();
     };
-  }, [isOnline, navigation, state.completed]);
+  }, [navigation, requestQuitMatch, state.completed]);
 
   useEffect(() => {
     if (!isOnline) return;
@@ -2120,6 +2179,44 @@ export default function GameScreen({ route, navigation }: Props) {
       {/* Feedback Layer */}
       <Modal
         transparent
+        visible={isFocused && quitPromptOpen}
+        animationType="fade"
+        onRequestClose={() => {
+          if (!quittingMatch) setQuitPromptOpen(false);
+        }}
+      >
+        <View style={styles.quitPromptScrim}>
+          <View style={styles.quitPromptCard}>
+            <Text style={styles.quitPromptTitle}>{quitPromptTitle}</Text>
+            <Text style={styles.quitPromptBody}>{quitPromptBody}</Text>
+            <View style={styles.quitPromptActions}>
+              <Pressable
+                style={[styles.quitPromptButton, styles.quitPromptReturnButton]}
+                disabled={quittingMatch}
+                onPress={() => setQuitPromptOpen(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Return to match"
+              >
+                <Text style={styles.quitPromptReturnText}>Return to Match</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.quitPromptButton, styles.quitPromptConfirmButton, quittingMatch && styles.quitPromptButtonDisabled]}
+                disabled={quittingMatch}
+                onPress={confirmQuitMatch}
+                accessibilityRole="button"
+                accessibilityLabel={isOnline ? 'Confirm forfeit' : 'Confirm quit'}
+              >
+                <Text style={styles.quitPromptConfirmText}>
+                  {quittingMatch ? 'Leaving...' : isOnline ? 'Confirm Forfeit' : 'Quit Match'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        transparent
         visible={isFocused && bottomAutoplayActive && bottomPlayer.userId === user?.userId}
         animationType="fade"
         onRequestClose={() => {}}
@@ -3158,6 +3255,38 @@ const styles = StyleSheet.create({
   giftCopy: { flex: 1, minWidth: 0 },
   giftChipText: { color: '#F7FAFC', fontSize: 11, fontWeight: '900' },
   giftPrice: { fontSize: 9, fontWeight: '900', marginTop: 2 },
+  quitPromptScrim: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.76)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  quitPromptCard: {
+    width: '100%',
+    maxWidth: 370,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: '#FF6B6B',
+    backgroundColor: '#243655',
+    paddingHorizontal: 20,
+    paddingVertical: 22,
+  },
+  quitPromptTitle: { color: '#F7FAFC', fontSize: 24, fontWeight: '900', textAlign: 'center' },
+  quitPromptBody: { color: '#D8E2F0', fontSize: 14, fontWeight: '800', textAlign: 'center', marginTop: 10, lineHeight: 21 },
+  quitPromptActions: { marginTop: 20, gap: 10 },
+  quitPromptButton: {
+    minHeight: 48,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  quitPromptReturnButton: { backgroundColor: '#67E0B0' },
+  quitPromptConfirmButton: { borderWidth: 1, borderColor: '#FF6B6B', backgroundColor: '#3A1723' },
+  quitPromptButtonDisabled: { opacity: 0.55 },
+  quitPromptReturnText: { color: '#1A2943', fontSize: 15, fontWeight: '900' },
+  quitPromptConfirmText: { color: '#FF9A9A', fontSize: 15, fontWeight: '900' },
   noticeScrim: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.68)',

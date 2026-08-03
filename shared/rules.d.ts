@@ -22,6 +22,7 @@ export type GameState = {
     penaltyPending: boolean;
     takeoverThreshold: number;
     penaltyThreshold: number;
+    forfeited?: boolean;
   };
 };
 export const ROWS: number;

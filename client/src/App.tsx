@@ -47,7 +47,7 @@ export type RootStackParamList = {
   OfflineMenu: undefined;
   OnlineRoom: { players: 2 | 3 | 4; rounds: 5 | 9; create?: boolean; joinCode?: string; quickPlay?: boolean; ranked?: boolean; wagerBuyIn?: number };
   RankedQueue: { players: 2 | 3 | 4 };
-  Game: { players: number; rounds: 5 | 9; mode: 'passplay' | 'solo' | 'online'; roomCode?: string; roomId?: string; online?: boolean; aiDifficulty?: 'easy' | 'hard'; localPlayerNames?: string[] };
+  Game: { players: number; rounds: 5 | 9; mode: 'passplay' | 'solo' | 'online'; roomCode?: string; roomId?: string; online?: boolean; matchType?: api.MatchType; buyIn?: number; aiDifficulty?: 'easy' | 'hard'; localPlayerNames?: string[] };
   Rules: undefined;
   Tutorial: undefined;
   Profile: undefined;
@@ -91,6 +91,8 @@ function gameRouteForRoom(room: api.RoomSummary): RootStackParamList['Game'] {
     mode: 'online',
     roomCode: room.code,
     online: true,
+    matchType: room.matchType,
+    buyIn: room.economy?.buyIn || 0,
   };
 }
 
