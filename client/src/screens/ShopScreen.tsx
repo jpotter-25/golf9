@@ -5,12 +5,12 @@ import React, { useCallback, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Coins, Gift, Lock, ShoppingBag } from 'lucide-react-native';
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Coins, Eye, Gift, Lock, ShoppingBag } from 'lucide-react-native';
 import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
 import { CoinClaimBurst, type CoinClaimBurstState } from '../components/CoinClaimBurst';
-import { getAvatarAccessoryVisual, getAvatarFrameVisual, getCardBackVisual, getTableThemeVisual } from '../theme/cosmetics';
+import { CosmeticPreviewModal, CosmeticThumbnail } from '../components/CosmeticPreview';
 import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Shop'>;
@@ -37,6 +37,7 @@ export function ShopContent({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openCategoryKeys, setOpenCategoryKeys] = useState<string[]>([]);
   const [coinBurst, setCoinBurst] = useState<CoinClaimBurstState>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
 
   const loadShop = useCallback(async () => {
     await refreshProfile().catch(() => {});
@@ -114,6 +115,20 @@ export function ShopContent({
     }
   };
 
+  const onEquip = async (item: api.CosmeticItem) => {
+    if (!token || busyId || !item.owned || item.equipped) return;
+    setBusyId(item.id);
+    try {
+      const response = await api.equipCosmetic(token, item.id);
+      setCosmetics(response.cosmetics);
+      await refreshProfile().catch(() => {});
+    } catch (error) {
+      Alert.alert('Cosmetic update failed', error instanceof Error ? error.message : 'Try again.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const toggleCategory = (categoryKey: string) => {
     setOpenCategoryKeys(current => (
       current.includes(categoryKey)
@@ -123,6 +138,11 @@ export function ShopContent({
   };
 
   const grouped = groupCosmeticsByType(sortCosmetics(cosmetics));
+  const previewItem = previewId ? cosmetics.find(item => item.id === previewId) ?? null : null;
+  const previewIdentity = {
+    name: user?.displayName ?? 'Player',
+    initial: user?.avatarInitial ?? '?',
+  };
 
   return (
     <View style={[styles.contentRoot, embedded && styles.embeddedContent]}>
@@ -130,7 +150,7 @@ export function ShopContent({
       <ScreenHeader
         eyebrow="Storefront"
         title="Shop"
-        subtitle="Buy cosmetics with coins. Equip owned items from your Profile locker."
+        subtitle="Preview every look, buy new cosmetics, and equip owned items instantly."
         right={<StatusBadge label={`${coinBalance} coins`} tone="gold" />}
       />
 
@@ -188,7 +208,10 @@ export function ShopContent({
                   key={item.id}
                   item={item}
                   busy={busyId === item.id}
-                  onPress={() => onPurchase(item)}
+                  equipped={user?.inventory.equipped}
+                  identity={previewIdentity}
+                  onPreview={() => setPreviewId(item.id)}
+                  onAction={() => (item.owned ? onEquip(item) : onPurchase(item))}
                 />
               ))}
             </View>
@@ -201,6 +224,16 @@ export function ShopContent({
       ) : null}
 
       <ActionButton label={backLabel} Icon={ChevronLeft} tone="ghost" onPress={onBack} style={styles.backButton} />
+      <CosmeticPreviewModal
+        item={previewItem}
+        equipped={user?.inventory.equipped}
+        identity={previewIdentity}
+        coinBalance={coinBalance}
+        busy={!!previewItem && busyId === previewItem.id}
+        onClose={() => setPreviewId(null)}
+        onEquip={onEquip}
+        onPurchase={onPurchase}
+      />
     </View>
   );
 }
@@ -233,74 +266,87 @@ function CatalogHeader({
   );
 }
 
-function ShopItemTile({ item, busy, onPress }: { item: api.CosmeticItem; busy: boolean; onPress: () => void }) {
-  const badge = cosmeticBadge(item);
+function ShopItemTile({
+  item,
+  busy,
+  equipped,
+  identity,
+  onPreview,
+  onAction,
+}: {
+  item: api.CosmeticItem;
+  busy: boolean;
+  equipped?: api.PlayerInventory['equipped'] | null;
+  identity: { name: string; initial: string };
+  onPreview: () => void;
+  onAction: () => void;
+}) {
   const owned = item.owned;
   const unlocked = item.eligible && !owned;
   const locked = !item.eligible && !owned;
   const label = owned
-    ? 'Owned'
+    ? item.equipped
+      ? 'Equipped'
+      : 'Equip'
     : locked
       ? 'Locked'
       : item.canAfford
-        ? `${item.price} coins`
+        ? `Buy ${item.price}`
         : 'Need Coins';
-  const disabled = busy || owned || locked || !item.canAfford;
+  const disabled = busy || item.equipped || locked || (!owned && !item.canAfford);
   return (
-    <Pressable
+    <View
       style={[
         styles.itemTile,
         owned && styles.itemTileOwned,
+        item.equipped && styles.itemTileEquipped,
         locked && styles.itemTileLocked,
         busy && styles.disabled,
       ]}
-      disabled={disabled}
-      onPress={onPress}
     >
-      <View style={styles.itemTileTop}>
-        <View style={[styles.itemBadge, badge.style]}>
-          {owned ? <Check size={20} color={ui.text.primary} strokeWidth={3} /> : locked ? <Lock size={18} color={ui.text.muted} strokeWidth={2.8} /> : <Text style={styles.itemBadgeText}>{badge.label}</Text>}
+      <Pressable
+        style={({ pressed }) => [styles.itemPreviewTarget, pressed && styles.itemPreviewPressed]}
+        onPress={onPreview}
+        accessibilityRole="button"
+        accessibilityLabel={`Preview ${item.name}`}
+      >
+        <View style={styles.itemTileTop}>
+          <CosmeticThumbnail item={item} equipped={equipped} identity={identity} />
+          <View style={[styles.sourceChip, item.shopCategory === 'ranked' && styles.sourceChipGold, item.shopCategory === 'club' && styles.sourceChipSky]}>
+            <Text style={styles.sourceChipText}>{categoryLabel(item.shopCategory)}</Text>
+          </View>
         </View>
-        <View style={[styles.sourceChip, item.shopCategory === 'ranked' && styles.sourceChipGold, item.shopCategory === 'club' && styles.sourceChipSky]}>
-          <Text style={styles.sourceChipText}>{categoryLabel(item.shopCategory)}</Text>
+        <Text style={styles.itemTitle} numberOfLines={1}>{item.name}</Text>
+        <Text style={styles.itemDescription} numberOfLines={2}>{item.description}</Text>
+        <View style={styles.previewCue}>
+          <Eye size={13} color={ui.palette.sky} strokeWidth={2.8} />
+          <Text style={styles.previewCueText}>Preview</Text>
         </View>
-      </View>
-      <Text style={styles.itemTitle} numberOfLines={1}>{item.name}</Text>
-      <Text style={styles.itemDescription} numberOfLines={2}>{item.description}</Text>
-      <Text style={[styles.itemMeta, unlocked && styles.itemMetaUnlocked]} numberOfLines={1}>
-        {owned ? 'Owned' : item.eligible ? 'Unlocked' : item.lockedReason ?? 'Locked'}
-      </Text>
-      <View style={[styles.tileAction, owned && styles.tileActionOwned, locked && styles.tileActionLocked, !owned && item.eligible && !item.canAfford && styles.tileActionLocked]}>
-        <Text style={[styles.tileActionText, (owned || locked || !item.canAfford) && styles.tileActionTextMuted]}>
-          {busy ? '...' : label}
+        <Text style={[styles.itemMeta, unlocked && styles.itemMetaUnlocked]} numberOfLines={1}>
+          {item.equipped ? 'Currently equipped' : owned ? 'Owned' : item.eligible ? 'Unlocked' : item.lockedReason ?? 'Locked'}
         </Text>
-      </View>
-    </Pressable>
+      </Pressable>
+      <Pressable
+        style={({ pressed }) => [
+          styles.tileAction,
+          owned && styles.tileActionOwned,
+          locked && styles.tileActionLocked,
+          !owned && item.eligible && !item.canAfford && styles.tileActionLocked,
+          disabled && styles.tileActionDisabled,
+          pressed && !disabled && styles.tileActionPressed,
+        ]}
+        disabled={disabled}
+        onPress={onAction}
+        accessibilityRole="button"
+        accessibilityLabel={`${label} ${item.name}`}
+      >
+        {item.equipped ? <Check size={15} color={ui.text.inverse} strokeWidth={3} /> : locked ? <Lock size={14} color={ui.text.primary} strokeWidth={2.8} /> : owned ? <Check size={15} color={ui.text.inverse} strokeWidth={3} /> : <Coins size={14} color={ui.text.inverse} strokeWidth={2.8} />}
+        <Text style={[styles.tileActionText, (locked || !item.canAfford) && styles.tileActionTextMuted]}>
+          {busy ? 'Working...' : label}
+        </Text>
+      </Pressable>
+    </View>
   );
-}
-
-function cosmeticBadge(item: api.CosmeticItem) {
-  const label = item.type === 'cardBack' ? 'CB' : item.type === 'avatarIcon' ? 'AI' : item.type === 'avatarFrame' ? 'AF' : item.type === 'avatarAccessory' ? 'AX' : item.type === 'tableTheme' ? 'TB' : 'T';
-  if (item.type === 'cardBack') {
-    const visual = getCardBackVisual(item.id);
-    return { label, style: { backgroundColor: visual.backgroundColor, borderColor: visual.borderColor } };
-  }
-  if (item.type === 'avatarFrame') {
-    const visual = getAvatarFrameVisual(item.id);
-    return { label, style: { backgroundColor: visual.backgroundColor, borderColor: visual.borderColor } };
-  }
-  if (item.type === 'avatarIcon') {
-    return { label, style: { backgroundColor: '#205E56', borderColor: '#67E0B0' } };
-  }
-  if (item.type === 'avatarAccessory') {
-    const visual = getAvatarAccessoryVisual(item.id);
-    return { label: visual.label || label, style: { backgroundColor: visual.backgroundColor, borderColor: visual.borderColor } };
-  }
-  if (item.type === 'tableTheme') {
-    const visual = getTableThemeVisual(item.id);
-    return { label, style: { backgroundColor: visual.panelColor, borderColor: visual.accentColor } };
-  }
-  return { label, style: null };
 }
 
 function sortCosmetics(items: api.CosmeticItem[]) {
@@ -437,53 +483,55 @@ const styles = StyleSheet.create({
   },
   itemTile: {
     width: '48.5%',
-    minHeight: 168,
+    minHeight: 238,
     borderRadius: ui.radius.lg,
     borderWidth: 1,
     borderColor: ui.border.soft,
     backgroundColor: ui.surface.glass,
-    padding: 10,
+    padding: 8,
   },
   itemTileOwned: { borderColor: ui.palette.emerald },
-  itemTileLocked: { opacity: 0.72 },
-  itemTileTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 },
-  itemBadge: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: ui.border.gold,
-    backgroundColor: 'rgba(255, 204, 102, 0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  itemBadgeText: { color: ui.palette.gold, fontSize: 12, fontWeight: '900' },
+  itemTileEquipped: { backgroundColor: 'rgba(39, 83, 91, 0.94)' },
+  itemTileLocked: { opacity: 0.78 },
+  itemPreviewTarget: { flex: 1 },
+  itemPreviewPressed: { opacity: 0.8 },
+  itemTileTop: { position: 'relative' },
   sourceChip: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
     minHeight: 22,
     borderRadius: 6,
     backgroundColor: ui.border.strong,
     paddingHorizontal: 6,
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 2,
   },
   sourceChipGold: { backgroundColor: ui.palette.gold },
   sourceChipSky: { backgroundColor: ui.palette.sky },
   sourceChipText: { color: ui.text.inverse, fontSize: 9, fontWeight: '900' },
   itemTitle: { color: ui.text.primary, fontSize: 13, fontWeight: '900', marginTop: 9 },
   itemDescription: { color: ui.text.secondary, fontSize: 11, fontWeight: '700', lineHeight: 15, marginTop: 4 },
+  previewCue: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 7 },
+  previewCueText: { color: ui.palette.sky, fontSize: 10, fontWeight: '900' },
   itemMeta: { color: ui.text.muted, fontSize: 10, fontWeight: '900', marginTop: 6 },
   itemMetaUnlocked: { color: ui.palette.emerald },
   tileAction: {
-    minHeight: 34,
+    minHeight: 38,
     borderRadius: ui.radius.md,
     backgroundColor: ui.palette.gold,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 5,
     marginTop: 'auto',
     paddingHorizontal: 8,
   },
   tileActionOwned: { backgroundColor: ui.palette.emerald },
   tileActionLocked: { backgroundColor: ui.border.strong },
+  tileActionDisabled: { opacity: 0.66 },
+  tileActionPressed: { opacity: 0.84, transform: [{ scale: 0.99 }] },
   tileActionText: { color: ui.text.inverse, fontSize: 11, fontWeight: '900' },
   tileActionTextMuted: { color: ui.text.primary },
   emptyText: {

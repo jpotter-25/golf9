@@ -18,6 +18,7 @@ import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
 import { ActionButton, PremiumPanel, ProgressBar, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
 import { CoinClaimBurst, type CoinClaimBurstState } from '../components/CoinClaimBurst';
+import { CosmeticPreviewModal, CosmeticThumbnail } from '../components/CosmeticPreview';
 import { PlayerAvatar } from '../components/PlayerAvatar';
 import { RankEmblem } from '../components/AvatarDecorations';
 
@@ -68,6 +69,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const [rankProfile, setRankProfile] = useState<api.RankedProfileResponse | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [coinBurst, setCoinBurst] = useState<CoinClaimBurstState>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
 
   useFocusEffect(useCallback(() => {
     refreshProfile().catch(() => {});
@@ -131,7 +133,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
     }
   };
 
-  const onCosmeticPress = async (item: api.CosmeticItem) => {
+  const onEquipCosmetic = async (item: api.CosmeticItem) => {
     if (!token || busyId || item.equipped || !item.owned) return;
     setBusyId(item.id);
     try {
@@ -165,6 +167,12 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
     } finally {
       setBusyId(null);
     }
+  };
+
+  const previewItem = previewId ? cosmetics.find(item => item.id === previewId) ?? null : null;
+  const previewIdentity = {
+    name: user?.displayName ?? 'Player',
+    initial: user?.avatarInitial ?? '?',
   };
 
   return (
@@ -318,7 +326,15 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
                 <Text style={styles.sectionMeta}>Equipped: {group.equipped}</Text>
                 <View style={styles.lockerGrid}>
                   {group.items.map(item => (
-                    <CosmeticTile key={item.id} item={item} busy={busyId === item.id} onPress={() => onCosmeticPress(item)} />
+                    <CosmeticTile
+                      key={item.id}
+                      item={item}
+                      busy={busyId === item.id}
+                      equipped={user?.inventory.equipped}
+                      identity={previewIdentity}
+                      onPreview={() => setPreviewId(item.id)}
+                      onEquip={() => onEquipCosmetic(item)}
+                    />
                   ))}
                 </View>
               </PremiumPanel>
@@ -342,6 +358,16 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
           <ActionButton label={user?.club ? 'Open Club' : 'Find A Club'} Icon={Trophy} tone="secondary" onPress={() => navigation.navigate('Club')} style={styles.socialButton} />
         </PremiumPanel>
       ) : null}
+
+      <CosmeticPreviewModal
+        item={previewItem}
+        equipped={user?.inventory.equipped}
+        identity={previewIdentity}
+        coinBalance={user?.currency.coins ?? 0}
+        busy={!!previewItem && busyId === previewItem.id}
+        onClose={() => setPreviewId(null)}
+        onEquip={onEquipCosmetic}
+      />
     </ScreenShell>
   );
 };
@@ -508,17 +534,57 @@ function ResultRow({ result, userId }: { result: api.GameResult; userId?: string
   );
 }
 
-function CosmeticTile({ item, busy, onPress }: { item: api.CosmeticItem; busy: boolean; onPress: () => void }) {
+function CosmeticTile({
+  item,
+  busy,
+  equipped,
+  identity,
+  onPreview,
+  onEquip,
+}: {
+  item: api.CosmeticItem;
+  busy: boolean;
+  equipped?: api.PlayerInventory['equipped'] | null;
+  identity: { name: string; initial: string };
+  onPreview: () => void;
+  onEquip: () => void;
+}) {
   return (
-    <Pressable style={[styles.cosmeticTile, item.equipped && styles.cosmeticTileEquipped, busy && styles.disabled]} disabled={item.equipped || busy} onPress={onPress}>
-      <View style={styles.cosmeticTileTop}>
-        <Text style={styles.cosmeticType}>{cosmeticTypeLabel(item.type)}</Text>
-        <StatusBadge label={item.equipped ? 'ON' : 'OWNED'} tone={item.equipped ? 'emerald' : 'muted'} />
-      </View>
-      <Text style={styles.cosmeticName} numberOfLines={1}>{item.name}</Text>
-      <Text style={styles.cosmeticMeta} numberOfLines={2}>{item.description}</Text>
-      <Text style={styles.cosmeticAction}>{item.equipped ? 'Equipped' : busy ? '...' : 'Equip'}</Text>
-    </Pressable>
+    <View style={[styles.cosmeticTile, item.equipped && styles.cosmeticTileEquipped, busy && styles.disabled]}>
+      <Pressable
+        style={({ pressed }) => [styles.cosmeticPreviewTarget, pressed && styles.cosmeticPreviewPressed]}
+        onPress={onPreview}
+        accessibilityRole="button"
+        accessibilityLabel={`Preview ${item.name}`}
+      >
+        <View style={styles.cosmeticTileTop}>
+          <Text style={styles.cosmeticType}>{cosmeticTypeLabel(item.type)}</Text>
+          <StatusBadge label={item.equipped ? 'ON' : 'OWNED'} tone={item.equipped ? 'emerald' : 'muted'} />
+        </View>
+        <View style={styles.cosmeticArtwork}>
+          <CosmeticThumbnail item={item} equipped={equipped} identity={identity} />
+        </View>
+        <Text style={styles.cosmeticName} numberOfLines={1}>{item.name}</Text>
+        <Text style={styles.cosmeticMeta} numberOfLines={2}>{item.description}</Text>
+        <Text style={styles.cosmeticPreviewLabel}>Preview look</Text>
+      </Pressable>
+      <Pressable
+        style={({ pressed }) => [
+          styles.cosmeticAction,
+          item.equipped && styles.cosmeticActionEquipped,
+          (item.equipped || busy) && styles.cosmeticActionDisabled,
+          pressed && !item.equipped && !busy && styles.cosmeticActionPressed,
+        ]}
+        disabled={item.equipped || busy}
+        onPress={onEquip}
+        accessibilityRole="button"
+        accessibilityLabel={`${item.equipped ? 'Equipped' : 'Equip'} ${item.name}`}
+      >
+        <Text style={[styles.cosmeticActionText, item.equipped && styles.cosmeticActionTextEquipped]}>
+          {item.equipped ? 'Equipped' : busy ? 'Equipping...' : 'Equip'}
+        </Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -749,13 +815,22 @@ const styles = StyleSheet.create({
   collectionValue: { color: ui.text.primary, fontSize: 14, fontWeight: '900', marginTop: 4, textTransform: 'capitalize' },
   shopButton: { marginBottom: 12 },
   lockerGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
-  cosmeticTile: { width: '48%', minHeight: 150, borderRadius: 8, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.glass, padding: 10 },
-  cosmeticTileEquipped: { borderColor: ui.palette.emerald },
+  cosmeticTile: { width: '48%', minHeight: 252, borderRadius: 12, borderWidth: 1, borderColor: ui.border.soft, backgroundColor: ui.surface.glass, padding: 8 },
+  cosmeticTileEquipped: { borderColor: ui.palette.emerald, backgroundColor: 'rgba(39, 83, 91, 0.94)' },
+  cosmeticPreviewTarget: { flex: 1 },
+  cosmeticPreviewPressed: { opacity: 0.8 },
   cosmeticTileTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 6 },
   cosmeticType: { color: ui.palette.gold, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
-  cosmeticName: { color: ui.text.primary, fontSize: 14, fontWeight: '900', marginTop: 10 },
+  cosmeticArtwork: { marginTop: 8 },
+  cosmeticName: { color: ui.text.primary, fontSize: 14, fontWeight: '900', marginTop: 8 },
   cosmeticMeta: { color: ui.text.secondary, fontSize: 11, fontWeight: '800', lineHeight: 16, marginTop: 4 },
-  cosmeticAction: { color: ui.palette.emerald, fontSize: 12, fontWeight: '900', marginTop: 'auto' },
+  cosmeticPreviewLabel: { color: ui.palette.sky, fontSize: 10, fontWeight: '900', marginTop: 6 },
+  cosmeticAction: { minHeight: 38, borderRadius: 9, backgroundColor: ui.palette.emerald, alignItems: 'center', justifyContent: 'center', marginTop: 8, paddingHorizontal: 8 },
+  cosmeticActionEquipped: { backgroundColor: 'rgba(103, 224, 176, 0.18)', borderWidth: 1, borderColor: ui.palette.emerald },
+  cosmeticActionDisabled: { opacity: 0.68 },
+  cosmeticActionPressed: { opacity: 0.84, transform: [{ scale: 0.99 }] },
+  cosmeticActionText: { color: ui.text.inverse, fontSize: 11, fontWeight: '900' },
+  cosmeticActionTextEquipped: { color: ui.palette.emerald },
   socialRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
   socialIcon: { width: 52, height: 52, borderRadius: 8, backgroundColor: ui.palette.feltLight, alignItems: 'center', justifyContent: 'center' },
   socialCopy: { flex: 1, minWidth: 0 },
