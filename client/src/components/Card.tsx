@@ -7,6 +7,7 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, View, Text, Pressable, StyleSheet } from 'react-native';
 import type { Card as GameCard } from '../game/types';
 import { getCardBackVisual } from '../theme/cosmetics';
+import { CardBackArtwork } from './CosmeticArt';
 
 export type CardProps = {
   card: GameCard | null;
@@ -111,18 +112,7 @@ const Card: React.FC<CardProps> = ({ card, onPress, width, height, margin, selec
             {card.suit}
           </Text>
         </View>
-      ) : (
-        <Text
-          allowFontScaling={false}
-          style={[
-            styles.rank,
-            styles.faceDownText,
-            { color: cardBack.textColor, fontSize: Math.max(10, Math.round(rankSize * 0.72)) },
-          ]}
-        >
-          {cardBack.mark}
-        </Text>
-      )}
+      ) : <CardBackArtwork cardBackId={cardBackId} />}
       </Animated.View>
     </Pressable>
   );
@@ -142,9 +132,6 @@ const styles = StyleSheet.create({
   },
   faceDown: {
     backgroundColor: '#435C7D',
-  },
-  faceDownText: {
-    letterSpacing: 0,
   },
   cleared: {
     borderColor: '#435C7D',
@@ -173,7 +160,9 @@ const styles = StyleSheet.create({
   },
   content: {
     alignItems: 'center',
+    height: '100%',
     justifyContent: 'center',
+    width: '100%',
   },
   faceContainer: {
     alignItems: 'center',

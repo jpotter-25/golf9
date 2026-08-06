@@ -467,10 +467,11 @@ export type CosmeticItem = {
   type: CosmeticType;
   name: string;
   description: string;
-  rarity: 'starter' | 'rare' | 'epic';
+  rarity: 'starter' | 'common' | 'rare' | 'epic' | 'legendary';
   price: number;
   shopCategory: 'starter' | 'coin' | 'ranked' | 'club' | 'event' | string;
   unlockRequirement: 'level' | 'achievement' | 'rank' | 'club' | 'event' | 'season' | null;
+  requiredLevel: number | null;
   requiredLeague: string | null;
   seasonId: string | null;
   eligible: boolean;

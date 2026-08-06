@@ -125,12 +125,12 @@ test('challenge rewards can be claimed once', () => {
 });
 
 test('currency shop purchases and equips owned cosmetics', () => {
-  const account = user({ currency: { coins: 1000, lifetimeCoins: 1000 } });
+  const account = user({ progression: { totalXp: 3000 }, currency: { coins: 1000, lifetimeCoins: 1000 } });
   normalizeUserProgression(account);
   const purchased = purchaseCosmetic(account, 'gold-trim-card-back');
   assert.equal(purchased.error, undefined);
   assert.equal(account.inventory.cosmetics.includes('gold-trim-card-back'), true);
-  assert.equal(account.currency.coins, 650);
+  assert.equal(account.currency.coins, 350);
 
   const equipped = equipCosmetic(account, 'gold-trim-card-back');
   assert.equal(equipped.error, undefined);
@@ -142,7 +142,7 @@ test('currency shop purchases and equips owned cosmetics', () => {
 });
 
 test('avatar icon cosmetics persist and equip safely for old users', () => {
-  const account = user({ currency: { coins: 1000, lifetimeCoins: 1000 } });
+  const account = user({ progression: { totalXp: 4000 }, currency: { coins: 1000, lifetimeCoins: 1000 } });
   normalizeUserProgression(account);
   assert.equal(account.inventory.equipped.avatarIcon, 'classic-avatar-icon');
 
@@ -157,7 +157,7 @@ test('avatar icon cosmetics persist and equip safely for old users', () => {
 });
 
 test('avatar accessory cosmetics default, expose, purchase, and equip safely', () => {
-  const account = user({ currency: { coins: 1000, lifetimeCoins: 1000 } });
+  const account = user({ progression: { totalXp: 21500 }, currency: { coins: 5000, lifetimeCoins: 5000 } });
   normalizeUserProgression(account);
   assert.equal(account.inventory.equipped.avatarAccessory, 'no-avatar-accessory');
 
@@ -172,6 +172,27 @@ test('avatar accessory cosmetics default, expose, purchase, and equip safely', (
   assert.equal(equipped.error, undefined);
   assert.equal(account.inventory.equipped.avatarAccessory, 'emerald-gem-accessory');
   assert.equal(publicCosmeticCatalog(account).find(item => item.id === 'emerald-gem-accessory')?.equipped, true);
+});
+
+test('level-gated cosmetics reveal gradually and owned items remain usable', () => {
+  const account = user({ currency: { coins: 20000, lifetimeCoins: 20000 } });
+  normalizeUserProgression(account);
+
+  const locked = publicCosmeticCatalog(account).find(item => item.id === 'gold-trim-card-back');
+  assert.equal(locked.eligible, false);
+  assert.equal(locked.requiredLevel, 4);
+  assert.match(locked.lockedReason, /Level 4/);
+  assert.match(purchaseCosmetic(account, 'gold-trim-card-back').error, /Level 4/);
+
+  account.progression.totalXp = 3000;
+  const purchased = purchaseCosmetic(account, 'gold-trim-card-back');
+  assert.equal(purchased.error, undefined);
+
+  account.progression.totalXp = 0;
+  normalizeUserProgression(account);
+  const owned = publicCosmeticCatalog(account).find(item => item.id === 'gold-trim-card-back');
+  assert.equal(owned.owned, true);
+  assert.equal(equipCosmetic(account, 'gold-trim-card-back').error, undefined);
 });
 
 test('ranked cosmetics require season-best eligibility and coins', () => {

@@ -24,6 +24,7 @@ function user(overrides = {}) {
     displayName: 'CatalogUser',
     salt: 'unused',
     passwordHash: 'unused',
+    progression: { totalXp: 3000 },
     ...overrides,
   };
 }
@@ -60,11 +61,11 @@ test('draft catalog edits do not affect purchases until published', () => {
   const draftItem = draftCatalog(store).find(item => item.id === 'gold-trim-card-back');
   const liveItem = liveCatalog(store).find(item => item.id === 'gold-trim-card-back');
   assert.equal(draftItem.price, 900);
-  assert.equal(liveItem.price, 350);
+  assert.equal(liveItem.price, 650);
 
   const purchasedBeforePublish = purchaseCosmetic(account, 'gold-trim-card-back', null, liveCatalog(store));
   assert.equal(purchasedBeforePublish.error, undefined);
-  assert.equal(account.currency.coins, 650);
+  assert.equal(account.currency.coins, 350);
 });
 
 test('published sale price changes public catalog and purchase cost', () => {
@@ -113,7 +114,7 @@ test('catalog versions can roll a draft back to a previous live snapshot', () =>
 
   const rollback = rollbackCatalog(store, versionId);
   assert.equal(rollback.error, undefined);
-  assert.equal(draftCatalog(store).find(item => item.id === 'gold-trim-card-back').name, 'Gold Trim');
+  assert.equal(draftCatalog(store).find(item => item.id === 'gold-trim-card-back').name, 'Gilded Flourish');
 });
 
 test('catalog items can be duplicated safely as disabled draft copies', () => {
@@ -124,6 +125,26 @@ test('catalog items can be duplicated safely as disabled draft copies', () => {
   assert.equal(result.error, undefined);
   assert.match(result.item.id, /^gold-trim-card-back-copy/);
   assert.equal(result.item.enabled, false);
+});
+
+test('catalog seed migrates untouched coin cosmetics into the paced level curve', () => {
+  const legacyItem = {
+    id: 'gold-trim-card-back',
+    type: 'cardBack',
+    name: 'Gold Trim',
+    description: 'A clean gold-edged card back.',
+    rarity: 'rare',
+    price: 350,
+    shopCategory: 'coin',
+  };
+  const store = normalizeCatalogStore({ live: [legacyItem], draft: [legacyItem] });
+  seedCatalogStore(store);
+
+  const migrated = liveCatalog(store).find(item => item.id === 'gold-trim-card-back');
+  assert.equal(migrated.name, 'Gilded Flourish');
+  assert.equal(migrated.price, 650);
+  assert.equal(migrated.unlockRequirement, 'level');
+  assert.equal(migrated.requiredLevel, 4);
 });
 
 test('catalog asset requirements expose exact upload constraints', () => {

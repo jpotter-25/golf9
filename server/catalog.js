@@ -57,6 +57,21 @@ const LEGACY_RANK_REQUIREMENTS = new Map([
   ['s1-platinum-table-theme', 3000],
   ['s1-master-card-back', 5000],
 ]);
+const LEGACY_LEVEL_COSMETICS = new Map([
+  ['gold-trim-card-back', { name: 'Gold Trim', price: 350 }],
+  ['emerald-card-back', { name: 'Emerald', price: 500 }],
+  ['neon-card-back', { name: 'Neon Grid', price: 800 }],
+  ['emerald-felt-table-theme', { name: 'Emerald Felt', price: 650 }],
+  ['carbon-table-theme', { name: 'Carbon Night', price: 1000 }],
+  ['emerald-avatar-frame', { name: 'Emerald Frame', price: 450 }],
+  ['gold-avatar-frame', { name: 'Gold Frame', price: 900 }],
+  ['spark-avatar-icon', { name: 'Spark', price: 500 }],
+  ['shield-avatar-icon', { name: 'Shield', price: 700 }],
+  ['trophy-avatar-icon', { name: 'Trophy', price: 1200 }],
+  ['emerald-gem-accessory', { name: 'Emerald Gem', price: 900 }],
+  ['column-cleaner-title', { name: 'Column Cleaner', price: 600 }],
+  ['table-shark-title', { name: 'Table Shark', price: 1200 }],
+]);
 
 function now() {
   return Date.now();
@@ -113,6 +128,9 @@ export function normalizeCatalogItem(input = {}, fallback = null, createdAt = no
     price: Math.max(0, Math.floor(Number(input.price ?? fallback?.price ?? 0) || 0)),
     shopCategory: VALID_CATEGORIES.has(input.shopCategory) ? input.shopCategory : VALID_CATEGORIES.has(fallback?.shopCategory) ? fallback.shopCategory : 'coin',
     unlockRequirement: VALID_UNLOCKS.has(unlockRequirement) && unlockRequirement !== 'none' ? unlockRequirement : null,
+    requiredLevel: numberOrNull(input.requiredLevel ?? fallback?.requiredLevel) == null
+      ? null
+      : Math.max(1, Math.floor(numberOrNull(input.requiredLevel ?? fallback?.requiredLevel))),
     requiredMmr: numberOrNull(input.requiredMmr ?? fallback?.requiredMmr),
     requiredLeague: cleanText(input.requiredLeague ?? fallback?.requiredLeague ?? '', 32) || null,
     seasonId: cleanText(input.seasonId ?? fallback?.seasonId ?? '', 48) || null,
@@ -165,6 +183,8 @@ export function seedCatalogStore(store) {
   }
   changed = migrateLegacyRankRequirements(store.live, seedById) || changed;
   changed = migrateLegacyRankRequirements(store.draft, seedById) || changed;
+  changed = migrateLegacyLevelCosmetics(store.live, seedById) || changed;
+  changed = migrateLegacyLevelCosmetics(store.draft, seedById) || changed;
   store.live.sort(compareCatalogItems);
   store.draft.sort(compareCatalogItems);
   return changed;
@@ -179,6 +199,30 @@ function migrateLegacyRankRequirements(items, seedById) {
     item.requiredMmr = seedItem.requiredMmr;
     item.requiredLeague = seedItem.requiredLeague;
     item.description = seedItem.description;
+    item.updatedAt = now();
+    changed = true;
+  }
+  return changed;
+}
+
+function migrateLegacyLevelCosmetics(items, seedById) {
+  let changed = false;
+  for (const item of items) {
+    const legacy = LEGACY_LEVEL_COSMETICS.get(item.id);
+    const seedItem = seedById.get(item.id);
+    if (!legacy || !seedItem) continue;
+    const untouchedLegacyItem = item.name === legacy.name
+      && item.price === legacy.price
+      && !item.unlockRequirement
+      && item.requiredLevel == null;
+    if (!untouchedLegacyItem) continue;
+    item.name = seedItem.name;
+    item.description = seedItem.description;
+    item.rarity = seedItem.rarity;
+    item.price = seedItem.price;
+    item.unlockRequirement = seedItem.unlockRequirement;
+    item.requiredLevel = seedItem.requiredLevel;
+    if (!item.sale) item.salePrice = seedItem.price;
     item.updatedAt = now();
     changed = true;
   }

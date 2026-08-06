@@ -5,12 +5,12 @@ import { Check, Coins, Eye, Lock, ShoppingBag, X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type * as api from '../services/api';
 import {
-  getCardBackVisual,
   getTableThemeVisual,
   type EquippedCosmetics,
 } from '../theme/cosmetics';
 import { gradients, ui } from '../ui/theme';
 import { AvatarCluster } from './AvatarDecorations';
+import { CardBackArtwork, TableSurfaceDecoration } from './CosmeticArt';
 
 type Equipped = api.PlayerInventory['equipped'];
 
@@ -122,6 +122,11 @@ export function CosmeticPreviewModal({
               <View style={styles.detailChip}>
                 <Text style={styles.detailChipText}>{sourceLabel(item.shopCategory)}</Text>
               </View>
+              {item.requiredLevel ? (
+                <View style={styles.detailChip}>
+                  <Text style={styles.detailChipText}>LEVEL {item.requiredLevel}</Text>
+                </View>
+              ) : null}
               {item.owned ? (
                 <View style={[styles.detailChip, styles.ownedChip]}>
                   <Text style={styles.ownedChipText}>{item.equipped ? 'IN USE' : 'OWNED'}</Text>
@@ -174,7 +179,6 @@ function CosmeticArtwork({
 }) {
   const preview = previewCosmetics(equipped, item);
   const table = getTableThemeVisual(preview.tableTheme);
-  const cardBack = getCardBackVisual(preview.cardBack);
   const isTablePreview = item.type === 'tableTheme' || item.type === 'cardBack';
 
   if (isTablePreview) {
@@ -186,6 +190,7 @@ function CosmeticArtwork({
           { backgroundColor: table.backgroundColor, borderColor: table.borderColor },
         ]}
       >
+        <TableSurfaceDecoration visual={table} />
         <View style={[styles.tableHeader, compact && styles.tableHeaderCompact, { backgroundColor: table.headerColor }]}>
           <View style={[styles.tableHeaderDot, { backgroundColor: table.accentColor }]} />
           {!compact ? <Text style={[styles.tableHeaderText, { color: table.accentColor }]}>MATCH TABLE</Text> : null}
@@ -198,12 +203,9 @@ function CosmeticArtwork({
                 style={[
                   styles.previewCard,
                   compact && styles.previewCardCompact,
-                  { backgroundColor: cardBack.backgroundColor, borderColor: cardBack.borderColor },
                 ]}
               >
-                <Text style={[styles.previewCardMark, compact && styles.previewCardMarkCompact, { color: cardBack.textColor }]}>
-                  {cardBack.mark}
-                </Text>
+                <CardBackArtwork cardBackId={preview.cardBack} />
               </View>
             ))}
           </View>
@@ -259,6 +261,7 @@ function CosmeticArtwork({
 }
 
 function rarityStyle(rarity: api.CosmeticItem['rarity']) {
+  if (rarity === 'legendary') return { borderColor: ui.palette.gold, backgroundColor: 'rgba(244, 201, 93, 0.18)' };
   if (rarity === 'epic') return { borderColor: ui.palette.violet, backgroundColor: 'rgba(183, 154, 247, 0.15)' };
   if (rarity === 'rare') return { borderColor: ui.palette.sky, backgroundColor: 'rgba(103, 183, 255, 0.15)' };
   return { borderColor: ui.border.strong, backgroundColor: 'rgba(169, 185, 205, 0.12)' };
@@ -344,10 +347,8 @@ const styles = StyleSheet.create({
   tableCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 12, gap: 18 },
   previewCardRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   previewCardRowCompact: { gap: 4 },
-  previewCard: { width: 48, height: 68, borderRadius: 7, borderWidth: 2, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-2deg' }] },
-  previewCardCompact: { width: 25, height: 36, borderRadius: 4, borderWidth: 1 },
-  previewCardMark: { fontSize: 15, fontWeight: '900' },
-  previewCardMarkCompact: { fontSize: 8 },
+  previewCard: { width: 48, height: 68, borderRadius: 7, overflow: 'hidden', transform: [{ rotate: '-2deg' }] },
+  previewCardCompact: { width: 25, height: 36, borderRadius: 4 },
   tablePlayerPlate: { minWidth: 190, maxWidth: '86%', minHeight: 62, borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
   tablePlayerCopy: { flex: 1, minWidth: 0 },
   tablePlayerName: { color: ui.text.primary, fontSize: 14, fontWeight: '900' },

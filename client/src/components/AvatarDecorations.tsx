@@ -1,8 +1,9 @@
-import React from 'react';
-import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { Animated, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Path, Polygon, Stop, Text as SvgText } from 'react-native-svg';
-import { Bot, Crown, Gem, Gift, Rocket, Watch, type LucideIcon } from 'lucide-react-native';
+import { Bot, Gift } from 'lucide-react-native';
 import { PlayerAvatar } from './PlayerAvatar';
+import { AvatarAccessoryArtwork } from './CosmeticArt';
 import { getAvatarAccessoryVisual, type EquippedCosmetics } from '../theme/cosmetics';
 
 export type RankEmblemVisual = {
@@ -20,13 +21,6 @@ export type RankEmblemVisual = {
 };
 
 type LeagueLike = { league?: string; division?: string | null; name?: string } | string | null | undefined;
-
-const ACCESSORY_ICONS: Record<string, LucideIcon> = {
-  watch: Watch,
-  gem: Gem,
-  rocket: Rocket,
-  crown: Crown,
-};
 
 function divisionPips(rawName: string, division?: string | null) {
   const value = (division || rawName.match(/\b(III|II|I|3|2|1)\b/i)?.[1] || '').toUpperCase();
@@ -324,8 +318,7 @@ export function AvatarCluster({
 }: AvatarClusterProps) {
   const accessory = getAvatarAccessoryVisual(cosmetics?.avatarAccessory);
   const hasAccessory = showAccessory && accessory.icon !== 'none';
-  const accessoryIconSize = Math.max(9, Math.round(size * 0.26));
-  const AccessoryIcon = ACCESSORY_ICONS[accessory.icon];
+  const accessoryMotion = useRef(new Animated.Value(0)).current;
   const badgeSize = Math.max(20, Math.round(size * 0.42));
   const giftSize = Math.max(20, Math.round(size * 0.42));
   const hasGiftItem = !!giftIcon;
@@ -347,6 +340,28 @@ export function AvatarCluster({
     connectionState === 'offline' ? '#FF6B6B' : connectionState === 'online' ? '#67E0B0' : null;
   const autoplayWidth = Math.max(34, Math.round(size * 0.78));
   const autoplayHeight = Math.max(18, Math.round(size * 0.36));
+
+  useEffect(() => {
+    accessoryMotion.stopAnimation();
+    accessoryMotion.setValue(0);
+    if (!hasAccessory || accessory.effect === 'none') return undefined;
+    const animation = Animated.loop(Animated.timing(accessoryMotion, {
+      toValue: 1,
+      duration: accessory.effect === 'orbit' ? 7000 : 2400,
+      useNativeDriver: true,
+    }));
+    animation.start();
+    return () => animation.stop();
+  }, [accessory.effect, accessoryMotion, hasAccessory]);
+
+  const accessoryMotionStyle = accessory.effect === 'orbit'
+    ? { transform: [{ rotate: accessoryMotion.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }) }] }
+    : accessory.effect === 'pulse'
+      ? {
+          opacity: accessoryMotion.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.72, 1, 0.72] }),
+          transform: [{ scale: accessoryMotion.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.94, 1.08, 0.94] }) }],
+        }
+      : null;
 
   return (
     <View style={[styles.cluster, { width: size + 12, height: size + 12 }]}>
@@ -397,7 +412,7 @@ export function AvatarCluster({
         </View>
       ) : null}
       {hasAccessory ? (
-        <View
+        <Animated.View
           pointerEvents="none"
           style={[
             styles.accessoryBadge,
@@ -410,11 +425,13 @@ export function AvatarCluster({
               borderColor: accessory.borderColor,
               backgroundColor: accessory.backgroundColor,
             },
+            accessoryMotionStyle,
           ]}
         >
-          {AccessoryIcon ? <AccessoryIcon color={accessory.color} size={accessoryIconSize} strokeWidth={3} /> : null}
-          {accessory.label ? <Text style={[styles.accessoryText, { color: accessory.color }]}>{accessory.label}</Text> : null}
-        </View>
+          <View style={styles.accessoryArtwork}>
+            <AvatarAccessoryArtwork accessoryId={cosmetics?.avatarAccessory} />
+          </View>
+        </Animated.View>
       ) : null}
       {showGift || hasGiftItem ? (
         onGiftPress ? (
@@ -482,12 +499,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 5,
   },
-  accessoryText: {
-    fontSize: 7,
-    lineHeight: 8,
-    fontWeight: '900',
-    marginTop: -1,
-  },
+  accessoryArtwork: { width: '82%', height: '82%' },
   giftButton: {
     position: 'absolute',
     borderWidth: 1.5,

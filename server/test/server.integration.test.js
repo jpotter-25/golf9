@@ -1761,7 +1761,41 @@ test('claims challenges and manages cosmetic inventory', async () => {
     assert.equal(claimed.challenge.claimedAt > 0, true);
 
     const catalog = await json(await fetch(`${baseUrl}/cosmetics/catalog`, { headers: authHeaders(account.token) }));
-    assert.ok(catalog.cosmetics.some(item => item.id === 'gold-trim-card-back' && !item.owned));
+    const lockedCardBack = catalog.cosmetics.find(item => item.id === 'gold-trim-card-back');
+    assert.equal(lockedCardBack?.owned, false);
+    assert.equal(lockedCardBack?.eligible, false);
+    assert.equal(lockedCardBack?.lockedReason, 'Reach Level 4.');
+
+    const lockedPurchase = await fetch(`${baseUrl}/cosmetics/purchase`, {
+      method: 'POST',
+      headers: authHeaders(account.token),
+      body: JSON.stringify({ cosmeticId: 'gold-trim-card-back' }),
+    });
+    assert.equal(lockedPurchase.status, 400);
+    assert.deepEqual(await lockedPurchase.json(), { error: 'Reach Level 4.' });
+
+    for (let index = 0; index < 3; index += 1) {
+      await json(await fetch(`${baseUrl}/results/local`, {
+        method: 'POST',
+        headers: authHeaders(account.token),
+        body: JSON.stringify({
+          clientResultId: `cosmetic-progression-${index}`,
+          mode: 'solo',
+          totalRounds: 5,
+          roundScores: [8, 12, 6, 10, 4],
+          columnClears: 1,
+          players: [
+            { displayName: 'Player 1', total: 40 },
+            { displayName: 'Player 2', total: 55 },
+          ],
+        }),
+      }));
+    }
+
+    const unlockedCatalog = await json(await fetch(`${baseUrl}/cosmetics/catalog`, { headers: authHeaders(account.token) }));
+    const unlockedCardBack = unlockedCatalog.cosmetics.find(item => item.id === 'gold-trim-card-back');
+    assert.equal(unlockedCardBack?.eligible, true);
+    assert.equal(unlockedCardBack?.requiredLevel, 4);
 
     const purchased = await json(await fetch(`${baseUrl}/cosmetics/purchase`, {
       method: 'POST',

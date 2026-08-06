@@ -24,6 +24,7 @@ import GridView from '../components/Grid';
 import Piles from '../components/Piles';
 import CardView from '../components/Card';
 import { AvatarCluster, rankEmblemForLeague } from '../components/AvatarDecorations';
+import { TableSurfaceDecoration } from '../components/CosmeticArt';
 import { PlayerAvatar } from '../components/PlayerAvatar';
 import { GAME_CONTENT_MAX_WIDTH, useBoardMetrics } from '../utils/scaling';
 import { useAuth } from '../context/AuthContext';
@@ -1959,6 +1960,7 @@ export default function GameScreen({ route, navigation }: Props) {
   };
   return (
     <LinearGradient colors={[tableTheme.backgroundColor, ui.palette.ink, ui.surface.base]} style={styles.container}>
+      <TableSurfaceDecoration visual={tableTheme} />
       {/* HUD Layer */}
       <View style={[styles.header, styles.gameFrame, {
         paddingTop: Math.max(14, insets.top + 8),

@@ -7,30 +7,41 @@ export type EquippedCosmetics = {
   tableTheme?: string;
 };
 
+export type CardBackPattern = 'heritage' | 'filigree' | 'vine' | 'circuit' | 'sunburst' | 'masterwork' | 'club' | 'champion' | 'celestial';
+
 export type CardBackVisual = {
   backgroundColor: string;
+  secondaryColor: string;
   borderColor: string;
+  accentColor: string;
   textColor: string;
-  mark: string;
+  pattern: CardBackPattern;
 };
 
 export type AvatarFrameVisual = {
   borderColor: string;
+  innerBorderColor: string;
+  accentColor: string;
   backgroundColor: string;
+  style: 'notched' | 'segmented' | 'halo' | 'bronze' | 'faceted' | 'club' | 'astral';
+  effect: 'none' | 'orbit' | 'pulse' | 'shimmer';
 };
 
 export type AvatarIconVisual = {
-  icon: 'user' | 'sparkles' | 'shield' | 'trophy';
+  icon: 'nine' | 'starforge' | 'shield' | 'trophy' | 'diamond' | 'phoenix';
   color: string;
+  secondaryColor: string;
   backgroundColor: string;
+  glowColor: string;
 };
 
 export type AvatarAccessoryVisual = {
-  icon: 'none' | 'watch' | 'gem' | 'rocket' | 'crown';
-  label: string;
+  icon: 'none' | 'watch' | 'gem' | 'rocket' | 'crown' | 'comet';
   color: string;
+  secondaryColor: string;
   backgroundColor: string;
   borderColor: string;
+  effect: 'none' | 'pulse' | 'orbit';
 };
 
 export type TableThemeVisual = {
@@ -40,192 +51,307 @@ export type TableThemeVisual = {
   activePanelColor: string;
   borderColor: string;
   accentColor: string;
+  secondaryAccentColor: string;
+  patternColor: string;
+  pattern: 'heritage' | 'constellation' | 'carbon' | 'faceted' | 'club' | 'aurora';
 };
 
 const CARD_BACKS: Record<string, CardBackVisual> = {
   'classic-card-back': {
-    backgroundColor: '#435C7D',
-    borderColor: '#F7FAFC',
+    backgroundColor: '#263A58',
+    secondaryColor: '#17263E',
+    borderColor: '#B8C7D8',
+    accentColor: '#6E89A8',
     textColor: '#F7FAFC',
-    mark: '?',
+    pattern: 'heritage',
   },
   'gold-trim-card-back': {
-    backgroundColor: '#251F10',
+    backgroundColor: '#251D0D',
+    secondaryColor: '#4B3513',
     borderColor: '#F4C95D',
-    textColor: '#F4C95D',
-    mark: 'G9',
+    accentColor: '#FFF0B8',
+    textColor: '#FFF0B8',
+    pattern: 'filigree',
   },
   'emerald-card-back': {
-    backgroundColor: '#205E56',
+    backgroundColor: '#123D38',
+    secondaryColor: '#1D6559',
     borderColor: '#67E0B0',
-    textColor: '#CFFBE8',
-    mark: '9',
+    accentColor: '#D7F9EA',
+    textColor: '#D7F9EA',
+    pattern: 'vine',
   },
   'neon-card-back': {
-    backgroundColor: '#111A3A',
-    borderColor: '#67B7FF',
-    textColor: '#BFD9FF',
-    mark: 'N',
+    backgroundColor: '#0A102B',
+    secondaryColor: '#17215A',
+    borderColor: '#58D6FF',
+    accentColor: '#D66BFF',
+    textColor: '#E8F8FF',
+    pattern: 'circuit',
+  },
+  'celestial-card-back': {
+    backgroundColor: '#100D2D',
+    secondaryColor: '#2D1E57',
+    borderColor: '#C8B8FF',
+    accentColor: '#74DCFF',
+    textColor: '#F4F0FF',
+    pattern: 'celestial',
   },
   's1-gold-card-back': {
-    backgroundColor: '#2A2111',
-    borderColor: '#F4C95D',
-    textColor: '#FFE6A3',
-    mark: 'S1',
+    backgroundColor: '#2A1F0A',
+    secondaryColor: '#6B4814',
+    borderColor: '#FFD76A',
+    accentColor: '#FFF1B7',
+    textColor: '#FFF1B7',
+    pattern: 'sunburst',
   },
   's1-master-card-back': {
-    backgroundColor: '#101225',
+    backgroundColor: '#0C1028',
+    secondaryColor: '#312153',
     borderColor: '#D9B8FF',
-    textColor: '#F0E3FF',
-    mark: 'M',
+    accentColor: '#77D9FF',
+    textColor: '#F4E9FF',
+    pattern: 'masterwork',
   },
   'club-crest-card-back': {
-    backgroundColor: '#294A68',
-    borderColor: '#67E0B0',
+    backgroundColor: '#17364E',
+    secondaryColor: '#285B70',
+    borderColor: '#81D9D0',
+    accentColor: '#E1FCF5',
     textColor: '#F7FAFC',
-    mark: 'C',
+    pattern: 'club',
   },
   'club-champion-card-back': {
-    backgroundColor: '#21162C',
+    backgroundColor: '#21132F',
+    secondaryColor: '#54305B',
     borderColor: '#F4C95D',
+    accentColor: '#D9B8FF',
     textColor: '#FFF0C2',
-    mark: 'CC',
+    pattern: 'champion',
   },
 };
 
 const AVATAR_FRAMES: Record<string, AvatarFrameVisual> = {
   'rookie-avatar-frame': {
-    borderColor: '#67E0B0',
-    backgroundColor: '#205E56',
+    borderColor: '#A9B9CD',
+    innerBorderColor: '#60799A',
+    accentColor: '#E5EDF5',
+    backgroundColor: '#243655',
+    style: 'notched',
+    effect: 'none',
   },
   'emerald-avatar-frame': {
-    borderColor: '#4DE0A0',
-    backgroundColor: '#0D3A35',
+    borderColor: '#67B7FF',
+    innerBorderColor: '#BFD9FF',
+    accentColor: '#F7FAFC',
+    backgroundColor: '#173B5B',
+    style: 'segmented',
+    effect: 'orbit',
   },
   'gold-avatar-frame': {
     borderColor: '#F4C95D',
-    backgroundColor: '#2B2515',
+    innerBorderColor: '#FFE7A0',
+    accentColor: '#FFF7D6',
+    backgroundColor: '#3A2C10',
+    style: 'halo',
+    effect: 'shimmer',
+  },
+  'astral-avatar-frame': {
+    borderColor: '#B79AF7',
+    innerBorderColor: '#74DCFF',
+    accentColor: '#F4F0FF',
+    backgroundColor: '#1A1743',
+    style: 'astral',
+    effect: 'orbit',
   },
   's1-bronze-frame': {
     borderColor: '#C58B5A',
-    backgroundColor: '#2B1D17',
+    innerBorderColor: '#F2C59E',
+    accentColor: '#FFE0B7',
+    backgroundColor: '#352117',
+    style: 'bronze',
+    effect: 'none',
   },
   's1-diamond-frame': {
     borderColor: '#9BE7FF',
-    backgroundColor: '#214D57',
+    innerBorderColor: '#E6FAFF',
+    accentColor: '#C8B8FF',
+    backgroundColor: '#183F55',
+    style: 'faceted',
+    effect: 'pulse',
   },
   'club-emerald-frame': {
-    borderColor: '#67E0B0',
-    backgroundColor: '#294A68',
+    borderColor: '#81D9D0',
+    innerBorderColor: '#F4C95D',
+    accentColor: '#E1FCF5',
+    backgroundColor: '#1E4258',
+    style: 'club',
+    effect: 'none',
   },
 };
 
 const AVATAR_ICONS: Record<string, AvatarIconVisual> = {
   'classic-avatar-icon': {
-    icon: 'user',
+    icon: 'nine',
     color: '#F7FAFC',
-    backgroundColor: '#205E56',
+    secondaryColor: '#9EC4E7',
+    backgroundColor: '#263A58',
+    glowColor: '#67B7FF',
   },
   'spark-avatar-icon': {
-    icon: 'sparkles',
-    color: '#F4C95D',
-    backgroundColor: '#182244',
+    icon: 'starforge',
+    color: '#FFE07A',
+    secondaryColor: '#FF9E64',
+    backgroundColor: '#282041',
+    glowColor: '#F4C95D',
   },
   'shield-avatar-icon': {
     icon: 'shield',
-    color: '#9BE7FF',
-    backgroundColor: '#214D57',
+    color: '#C9EEFF',
+    secondaryColor: '#67B7FF',
+    backgroundColor: '#173B5B',
+    glowColor: '#74DCFF',
   },
   'trophy-avatar-icon': {
     icon: 'trophy',
-    color: '#FFE6A3',
-    backgroundColor: '#2B2515',
+    color: '#FFF0B8',
+    secondaryColor: '#F4C95D',
+    backgroundColor: '#3A2C10',
+    glowColor: '#FFE07A',
   },
   's1-diamond-avatar-icon': {
-    icon: 'sparkles',
-    color: '#BDEBFF',
-    backgroundColor: '#214D57',
+    icon: 'diamond',
+    color: '#E6FAFF',
+    secondaryColor: '#88DFFF',
+    backgroundColor: '#183F55',
+    glowColor: '#C8B8FF',
+  },
+  'phoenix-avatar-icon': {
+    icon: 'phoenix',
+    color: '#FFF0B8',
+    secondaryColor: '#FF7F86',
+    backgroundColor: '#3A1733',
+    glowColor: '#FFB84D',
   },
 };
 
 const AVATAR_ACCESSORIES: Record<string, AvatarAccessoryVisual> = {
   'no-avatar-accessory': {
     icon: 'none',
-    label: '',
     color: '#A9B9CD',
+    secondaryColor: '#60799A',
     backgroundColor: 'transparent',
     borderColor: 'transparent',
+    effect: 'none',
   },
   'season-watch-accessory': {
     icon: 'watch',
-    label: 'S1',
-    color: '#BDEBFF',
-    backgroundColor: '#214D57',
+    color: '#E6FAFF',
+    secondaryColor: '#67B7FF',
+    backgroundColor: '#183F55',
     borderColor: '#9BE7FF',
+    effect: 'none',
   },
   'emerald-gem-accessory': {
     icon: 'gem',
-    label: 'G',
-    color: '#CFFBE8',
-    backgroundColor: '#205E56',
+    color: '#E1FCF5',
+    secondaryColor: '#45C892',
+    backgroundColor: '#12463D',
     borderColor: '#67E0B0',
+    effect: 'pulse',
   },
   'rocket-charm-accessory': {
     icon: 'rocket',
-    label: 'R',
-    color: '#FFE6A3',
-    backgroundColor: '#2B2515',
+    color: '#FFF0B8',
+    secondaryColor: '#FF7F86',
+    backgroundColor: '#3A2430',
     borderColor: '#F4C95D',
+    effect: 'none',
+  },
+  'comet-orbit-accessory': {
+    icon: 'comet',
+    color: '#E6FAFF',
+    secondaryColor: '#B79AF7',
+    backgroundColor: '#1A1743',
+    borderColor: '#74DCFF',
+    effect: 'orbit',
   },
   'legend-crown-accessory': {
     icon: 'crown',
-    label: 'L',
-    color: '#F0E3FF',
-    backgroundColor: '#21162C',
-    borderColor: '#D9B8FF',
+    color: '#FFF0B8',
+    secondaryColor: '#D9B8FF',
+    backgroundColor: '#251439',
+    borderColor: '#F4C95D',
+    effect: 'pulse',
   },
 };
 
 const TABLE_THEMES: Record<string, TableThemeVisual> = {
   'classic-table-theme': {
-    backgroundColor: '#1A2943',
+    backgroundColor: '#172943',
     headerColor: '#243655',
     panelColor: '#243655',
-    activePanelColor: '#263A5C',
-    borderColor: '#435C7D',
+    activePanelColor: '#2B4266',
+    borderColor: '#4B6788',
     accentColor: '#67B7FF',
+    secondaryAccentColor: '#A9B9CD',
+    patternColor: '#9EC4E7',
+    pattern: 'heritage',
   },
   'emerald-felt-table-theme': {
-    backgroundColor: '#174A45',
-    headerColor: '#205E56',
+    backgroundColor: '#123D38',
+    headerColor: '#194C46',
     panelColor: '#205E56',
-    activePanelColor: '#347F72',
+    activePanelColor: '#2F796D',
     borderColor: '#5BA18F',
     accentColor: '#67E0B0',
+    secondaryAccentColor: '#CFFBE8',
+    patternColor: '#8DE9C2',
+    pattern: 'constellation',
   },
   'carbon-table-theme': {
-    backgroundColor: '#25303E',
-    headerColor: '#313E50',
-    panelColor: '#39495E',
-    activePanelColor: '#465B73',
+    backgroundColor: '#171D27',
+    headerColor: '#232C39',
+    panelColor: '#303D4E',
+    activePanelColor: '#40536B',
     borderColor: '#677C94',
     accentColor: '#BFD9FF',
+    secondaryAccentColor: '#67B7FF',
+    patternColor: '#A9B9CD',
+    pattern: 'carbon',
+  },
+  'aurora-table-theme': {
+    backgroundColor: '#101633',
+    headerColor: '#1A2447',
+    panelColor: '#24345E',
+    activePanelColor: '#344D75',
+    borderColor: '#7898C7',
+    accentColor: '#74DCFF',
+    secondaryAccentColor: '#D79BFF',
+    patternColor: '#B7F1FF',
+    pattern: 'aurora',
   },
   's1-platinum-table-theme': {
-    backgroundColor: '#1B3449',
-    headerColor: '#24455F',
-    panelColor: '#2D5370',
-    activePanelColor: '#376685',
+    backgroundColor: '#152E43',
+    headerColor: '#20445F',
+    panelColor: '#2A526E',
+    activePanelColor: '#376B88',
     borderColor: '#8FB8D8',
-    accentColor: '#BDEBFF',
+    accentColor: '#D5F3FF',
+    secondaryAccentColor: '#B79AF7',
+    patternColor: '#BDEBFF',
+    pattern: 'faceted',
   },
   'club-felt-table-theme': {
-    backgroundColor: '#1B4644',
-    headerColor: '#245854',
-    panelColor: '#2C6761',
-    activePanelColor: '#347A70',
-    borderColor: '#62A991',
-    accentColor: '#67E0B0',
+    backgroundColor: '#153A40',
+    headerColor: '#1E4A50',
+    panelColor: '#285C60',
+    activePanelColor: '#347076',
+    borderColor: '#6AA8A1',
+    accentColor: '#81D9D0',
+    secondaryAccentColor: '#F4C95D',
+    patternColor: '#BDEDE5',
+    pattern: 'club',
   },
 };
 
