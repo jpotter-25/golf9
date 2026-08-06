@@ -1581,6 +1581,61 @@ test('loads durable profile stats and completed results', async () => {
   });
 });
 
+test('leaderboards expose weekly individual, club, and current-club member rankings', async () => {
+  const completedAt = Date.now() - 1000;
+  const clubId = 'leader-club';
+  const users = [
+    { userId: 'leader-one', displayName: 'Leader One', passwordHash: 'unused', salt: 'unused', clubId, stats: { gamesPlayed: 1, wins: 1 } },
+    { userId: 'leader-two', displayName: 'Leader Two', passwordHash: 'unused', salt: 'unused', clubId, stats: { gamesPlayed: 1, wins: 0 } },
+  ];
+  await withSeededServer({
+    users,
+    sessions: [{ token: 'leader-token', userId: 'leader-two', expiresAt: Date.now() + 60_000 }],
+    clubs: [{
+      clubId,
+      name: 'Leaderboard Club',
+      tag: 'LEAD',
+      createdAt: completedAt - 1000,
+      progression: { totalXp: 0 },
+      members: [
+        { userId: 'leader-one', role: 'owner', joinedAt: completedAt - 1000 },
+        { userId: 'leader-two', role: 'member', joinedAt: completedAt - 1000 },
+      ],
+    }],
+    results: [{
+      resultId: 'leader-result',
+      completedAt,
+      roomCode: 'LEAD',
+      matchType: 'ranked',
+      mode: 'online',
+      round: 9,
+      totalRounds: 9,
+      players: [
+        { userId: 'leader-one', displayName: 'Leader One', total: 10, won: true, progression: { club: { club: { clubId } } } },
+        { userId: 'leader-two', displayName: 'Leader Two', total: 50, won: false, progression: { club: { club: { clubId } } } },
+      ],
+    }],
+  }, async (baseUrl) => {
+    const individual = await json(await fetch(`${baseUrl}/leaderboards?scope=individual&period=weekly`, { headers: authHeaders('leader-token') }));
+    assert.equal(individual.entries[0].userId, 'leader-one');
+    assert.equal(individual.entries[0].score, 300);
+    assert.equal(individual.viewer.userId, 'leader-two');
+    assert.equal(individual.viewer.rank, 2);
+
+    const club = await json(await fetch(`${baseUrl}/leaderboards?scope=clubs&period=weekly`, { headers: authHeaders('leader-token') }));
+    assert.equal(club.entries[0].clubId, clubId);
+    assert.equal(club.entries[0].score, 460);
+    assert.equal(club.viewer.clubId, clubId);
+
+    const members = await json(await fetch(`${baseUrl}/leaderboards?scope=club_members&period=weekly`, { headers: authHeaders('leader-token') }));
+    assert.equal(members.subject.clubId, clubId);
+    assert.deepEqual(members.entries.map(entry => entry.userId), ['leader-one', 'leader-two']);
+
+    const invalid = await fetch(`${baseUrl}/leaderboards?scope=unknown&period=weekly`, { headers: authHeaders('leader-token') });
+    assert.equal(invalid.status, 400);
+  });
+});
+
 test('records local match progression and reward summary', async () => {
   await withServer(async (baseUrl) => {
     const account = await signup(baseUrl, `Local${Date.now()}`);

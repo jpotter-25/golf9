@@ -81,6 +81,7 @@ export type FeatureKey =
   | 'clubs.chat'
   | 'clubs.treasury'
   | 'clubs.management'
+  | 'leaderboards'
   | 'shop'
   | 'social'
   | 'inbox'
@@ -314,6 +315,7 @@ export type GameResult = {
     afk?: AfkMatchResult;
     forfeited?: boolean;
     forfeit?: { confirmedAt: number; permanentAi: boolean; restriction?: ForfeitStatus['ranked'] } | null;
+    leaderboard?: { points: number; clubId: string | null };
   }>;
 };
 
@@ -839,6 +841,69 @@ export type ClubContributionSummary = {
   club: ClubSummary;
 };
 
+export type LeaderboardScope = 'individual' | 'clubs' | 'club_members';
+export type LeaderboardPeriodKey = 'weekly' | 'seasonal' | 'all_time';
+export type LeaderboardPeriod = {
+  key: LeaderboardPeriodKey;
+  label: string;
+  startsAt: number | null;
+  endsAt: number | null;
+};
+export type LeaderboardScoring = {
+  label: string;
+  abbreviation: string;
+  onlineOnly: boolean;
+  rules: string[];
+};
+export type LeaderboardUserEntry = {
+  rank: number | null;
+  userId: string;
+  displayName: string;
+  avatarInitial: string;
+  score: number;
+  wins: number;
+  matches: number;
+  winRate: number;
+  averageTotal: number | null;
+  bestTotal: number | null;
+  club: { clubId: string; name: string; tag: string } | null;
+  role: ClubRole | null;
+};
+export type LeaderboardClubEntry = {
+  rank: number | null;
+  clubId: string;
+  name: string;
+  tag: string;
+  score: number;
+  wins: number;
+  matches: number;
+  winRate: number;
+  averageTotal: number | null;
+  bestTotal: number | null;
+  level: number;
+  memberCount: number;
+  branding: ClubBranding | null;
+};
+type LeaderboardResponseBase = {
+  period: LeaderboardPeriod;
+  season: { id: string; name: string; startsAt: number | null; endsAt: number | null } | null;
+  generatedAt: number;
+  scoring: LeaderboardScoring;
+};
+export type LeaderboardResponse =
+  | (LeaderboardResponseBase & {
+    scope: 'individual' | 'club_members';
+    subject: { clubId: string; name: string; tag: string; branding: ClubBranding | null } | null;
+    entries: LeaderboardUserEntry[];
+    viewer: LeaderboardUserEntry | null;
+  })
+  | (LeaderboardResponseBase & {
+    scope: 'clubs';
+    subject: null;
+    entries: LeaderboardClubEntry[];
+    viewer: LeaderboardClubEntry | null;
+  });
+
 const REQUEST_TIMEOUT_MS = 8000;
 
 export class ApiRequestError extends Error {
@@ -1008,6 +1073,11 @@ export function me(token: string): Promise<{ user: UserProfile }> {
 
 export function profile(token: string): Promise<{ user: UserProfile }> {
   return request<{ user: UserProfile }>('/profile/me', {}, token);
+}
+
+export function leaderboard(token: string, scope: LeaderboardScope, period: LeaderboardPeriodKey): Promise<LeaderboardResponse> {
+  const query = new URLSearchParams({ scope, period }).toString();
+  return request<LeaderboardResponse>(`/leaderboards?${query}`, {}, token);
 }
 
 export function registerPushToken(token: string, payload: PushTokenPayload): Promise<{ ok: boolean; pushTokenCount: number }> {

@@ -20,6 +20,7 @@ export const FEATURE_REGISTRY = Object.freeze([
   { key: 'clubs.chat', label: 'Club Chat', parent: 'clubs', group: 'Clubs', impact: 'Live club chat' },
   { key: 'clubs.treasury', label: 'Club Treasury', parent: 'clubs', group: 'Clubs', impact: 'Donations, goals, and prestige purchases' },
   { key: 'clubs.management', label: 'Club Management', parent: 'clubs', group: 'Clubs', impact: 'Club creation, requests, roles, and management' },
+  { key: 'leaderboards', label: 'Leaderboards', parent: 'global', group: 'Community', impact: 'Individual, club, and club-member rankings' },
   { key: 'shop', label: 'Shop', parent: 'global', group: 'Player', impact: 'Storefront and cosmetic purchases' },
   { key: 'social', label: 'Social', parent: 'global', group: 'Player', impact: 'Friends and social actions' },
   { key: 'inbox', label: 'Inbox', parent: 'global', group: 'Player', impact: 'Player mail (remains available during global maintenance)' },

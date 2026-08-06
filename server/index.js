@@ -128,6 +128,13 @@ import {
   syncClubRewards,
 } from './clubs.js';
 import {
+  buildLeaderboard,
+  leaderboardClubIdForPlayer,
+  leaderboardPointsForPlayer,
+  LEADERBOARD_PERIODS,
+  LEADERBOARD_SCOPES,
+} from './leaderboards.js';
+import {
   devTestAccountForDisplayName,
   ensureDevTestAccounts,
   shouldSeedDevTestAccounts,
@@ -3746,6 +3753,12 @@ function recordCompletedGame(room) {
   }
 
   applyClubContributions(room, result);
+  for (const player of result.players) {
+    player.leaderboard = {
+      points: leaderboardPointsForPlayer(result, player),
+      clubId: leaderboardClubIdForPlayer(player),
+    };
+  }
   results.push(result);
   room.resultRecorded = true;
   saveStore();
@@ -5840,6 +5853,24 @@ app.delete('/auth/account', requireAuth, accountDeletionRateLimit, async (req, r
 app.get('/auth/me', requireAuth, (req, res) => res.json({ user: safeUser(req.auth.user) }));
 
 app.get('/profile/me', requireAuth, requireFeature('profile'), (req, res) => res.json({ user: safeUser(req.auth.user) }));
+
+app.get('/leaderboards', requireAuth, requireFeature('leaderboards'), (req, res) => {
+  const scope = String(req.query.scope || 'individual');
+  const period = String(req.query.period || 'weekly');
+  if (!LEADERBOARD_SCOPES.includes(scope)) return res.status(400).json({ error: 'Choose a valid leaderboard.' });
+  if (!LEADERBOARD_PERIODS.includes(period)) return res.status(400).json({ error: 'Choose a valid leaderboard period.' });
+  return res.json(buildLeaderboard({
+    scope,
+    period,
+    users,
+    clubs,
+    results,
+    viewerUserId: req.auth.user.userId,
+    season: rankedSeason,
+    now: Date.now(),
+    isUserVisible: visiblePlayer,
+  }));
+});
 
 app.get('/mail/summary', requireAuth, requireFeature('inbox'), (req, res) => {
   return res.json({ summary: mailSummaryForUser(mailEntries, req.auth.user.userId) });
