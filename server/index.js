@@ -72,6 +72,7 @@ import {
   BASE_MMR,
   applyRankedMatchResult,
   claimSeasonRewards,
+  eligibleRankedEntriesForSeed,
   leagueForMmr,
   matchmakingRangeFor,
   normalizeCompetitiveState,
@@ -81,6 +82,7 @@ import {
   publicCompetitiveState,
   rankedDisplayEmblemChoices,
   resolveDisplayRankEmblem,
+  selectRankedMatchEntries,
   setDisplayRankEmblem,
 } from './ranked.js';
 import {
@@ -127,13 +129,7 @@ import {
   setClubTreasuryGoal,
   syncClubRewards,
 } from './clubs.js';
-import {
-  buildLeaderboard,
-  leaderboardClubIdForPlayer,
-  leaderboardPointsForPlayer,
-  LEADERBOARD_PERIODS,
-  LEADERBOARD_SCOPES,
-} from './leaderboards.js';
+import { buildClubStandings, CLUB_STANDING_PERIODS } from './clubStandings.js';
 import {
   devTestAccountForDisplayName,
   ensureDevTestAccounts,
@@ -1183,7 +1179,22 @@ function applyStoreState(parsed = {}) {
   normalizeCatalogStore(Object.assign(catalogStore, parsed.catalog || {}));
   seedCatalogStore(catalogStore);
   Object.assign(economyStore, normalizeEconomyConfigStore(parsed.economyConfig || {}));
-  availabilityStore = normalizeAvailabilityStore(parsed.availabilityConfig || {});
+  const storedAvailability = parsed.availabilityConfig || {};
+  availabilityStore = normalizeAvailabilityStore(storedAvailability);
+  if (storedAvailability?.entries?.leaderboards?.state !== 'hidden') {
+    availabilityStore = publishAvailabilityChange(availabilityStore, {
+      featureKey: 'leaderboards',
+      entry: {
+        state: 'hidden',
+        title: 'Leaderboard retired',
+        message: 'Update Nine Below to view the new Club Standings.',
+      },
+      actor: 'system',
+      reason: 'Retire the LP leaderboard during the Club Standings migration.',
+      now: Date.now(),
+    }).store;
+    storeMigrationPending = true;
+  }
   afkConfigStore = normalizeAfkConfig(parsed.afkConfig || {});
   forfeitConfigStore = normalizeForfeitConfig(parsed.forfeitConfig || {});
   releasePolicyStore = normalizeReleasePolicyStore(parsed.releasePolicy || {});
@@ -3410,6 +3421,22 @@ function rankedQueueEntry(user, options) {
   };
 }
 
+function rankedClubIdForUser(userId) {
+  const user = users.get(String(userId || ''));
+  const club = user?.clubId ? clubs.get(String(user.clubId)) : null;
+  return club && findClubMember(club, user.userId) ? club.clubId : null;
+}
+
+function liveRankedQueueEntry(entry) {
+  return { ...entry, clubId: rankedClubIdForUser(entry.userId) };
+}
+
+function liveRankedQueueGroup(key) {
+  return [...rankedQueue.values()]
+    .filter(item => item.key === key)
+    .map(liveRankedQueueEntry);
+}
+
 function publicRankedQueueStatus(userId) {
   const activeRoom = activeRankedRoomForUser(userId);
   if (activeRoom) {
@@ -3423,6 +3450,11 @@ function publicRankedQueueStatus(userId) {
 
   const entry = rankedQueue.get(userId);
   if (!entry) return { queued: false, matchedRoomCode: null, room: null, status: 'idle' };
+  const liveEntry = liveRankedQueueEntry(entry);
+  const eligiblePlayers = Math.min(
+    entry.maxPlayers,
+    eligibleRankedEntriesForSeed(liveEntry, liveRankedQueueGroup(entry.key), Date.now(), rankedConfig()).length,
+  );
   return {
     queued: true,
     matchedRoomCode: null,
@@ -3433,7 +3465,9 @@ function publicRankedQueueStatus(userId) {
     joinedAt: entry.joinedAt,
     buyIn: 0,
     pot: 0,
-    queuedPlayers: [...rankedQueue.values()].filter(item => item.key === entry.key).length,
+    queuedPlayers: eligiblePlayers,
+    eligiblePlayers,
+    clubSeparated: !!liveEntry.clubId,
   };
 }
 
@@ -3454,6 +3488,7 @@ function createRankedRoom(entries) {
   if (usersForRoom.length !== entries.length) return null;
   const averageMmr = Math.round(entries.reduce((sum, entry) => sum + entry.mmr, 0) / entries.length);
   const mmrSnapshot = Object.fromEntries(entries.map(entry => [entry.userId, entry.mmr]));
+  const clubSnapshot = Object.fromEntries(entries.map(entry => [entry.userId, entry.clubId || null]));
   const room = makeRoom(usersForRoom[0], {
     maxPlayers: entries[0].maxPlayers,
     rounds: entries[0].rounds,
@@ -3465,6 +3500,7 @@ function createRankedRoom(entries) {
       averageMmr,
       playerCount: entries[0].maxPlayers,
       mmrSnapshot,
+      clubSnapshot,
     },
   });
 
@@ -3485,16 +3521,13 @@ function tryMatchRankedQueue(now = Date.now()) {
 
   const matchedRooms = [];
   for (const entries of groups.values()) {
-    entries.sort((a, b) => a.joinedAt - b.joinedAt);
-    for (const seed of entries) {
+    const liveEntries = entries.map(liveRankedQueueEntry).sort((a, b) => a.joinedAt - b.joinedAt);
+    for (const seed of liveEntries) {
       if (!rankedQueue.has(seed.userId)) continue;
-      const seedRange = matchmakingRangeFor(seed.joinedAt, now, rankedConfig());
-      const compatible = entries
-        .filter(entry => rankedQueue.has(entry.userId))
-        .filter(entry => Math.abs(entry.mmr - seed.mmr) <= Math.min(seedRange, matchmakingRangeFor(entry.joinedAt, now, rankedConfig())))
-        .sort((a, b) => a.joinedAt - b.joinedAt);
-      if (compatible.length < seed.maxPlayers) continue;
-      const room = createRankedRoom(compatible.slice(0, seed.maxPlayers));
+      const available = liveEntries.filter(entry => rankedQueue.has(entry.userId));
+      const selected = selectRankedMatchEntries(seed, available, now, rankedConfig());
+      if (selected.length < seed.maxPlayers) continue;
+      const room = createRankedRoom(selected);
       if (room) matchedRooms.push(room);
     }
   }
@@ -3663,6 +3696,7 @@ function recordCompletedGame(room) {
       return {
         userId: player.userId,
         displayName: player.name,
+        clubIdAtMatchStart: room.ranked?.clubSnapshot?.[player.userId] || null,
         total: totals[index] || 0,
         won: !forfeited && (totals[index] || 0) === winningTotal,
         forfeited,
@@ -3753,12 +3787,6 @@ function recordCompletedGame(room) {
   }
 
   applyClubContributions(room, result);
-  for (const player of result.players) {
-    player.leaderboard = {
-      points: leaderboardPointsForPlayer(result, player),
-      clubId: leaderboardClubIdForPlayer(player),
-    };
-  }
   results.push(result);
   room.resultRecorded = true;
   saveStore();
@@ -5854,23 +5882,23 @@ app.get('/auth/me', requireAuth, (req, res) => res.json({ user: safeUser(req.aut
 
 app.get('/profile/me', requireAuth, requireFeature('profile'), (req, res) => res.json({ user: safeUser(req.auth.user) }));
 
-app.get('/leaderboards', requireAuth, requireFeature('leaderboards'), (req, res) => {
-  const scope = String(req.query.scope || 'individual');
+app.get('/clubs/standings', requireAuth, requireFeature('clubs.standings'), (req, res) => {
   const period = String(req.query.period || 'weekly');
-  if (!LEADERBOARD_SCOPES.includes(scope)) return res.status(400).json({ error: 'Choose a valid leaderboard.' });
-  if (!LEADERBOARD_PERIODS.includes(period)) return res.status(400).json({ error: 'Choose a valid leaderboard period.' });
-  return res.json(buildLeaderboard({
-    scope,
+  if (!CLUB_STANDING_PERIODS.includes(period)) return res.status(400).json({ error: 'Choose a valid club-standing period.' });
+  return res.json(buildClubStandings({
     period,
-    users,
     clubs,
     results,
-    viewerUserId: req.auth.user.userId,
+    viewerClubId: req.auth.user.clubId || null,
     season: rankedSeason,
     now: Date.now(),
-    isUserVisible: visiblePlayer,
   }));
 });
+
+app.get('/leaderboards', requireAuth, (_req, res) => res.status(410).json({
+  error: 'This leaderboard has retired. Update Nine Below to view Club Standings.',
+  code: 'LEADERBOARD_RETIRED',
+}));
 
 app.get('/mail/summary', requireAuth, requireFeature('inbox'), (req, res) => {
   return res.json({ summary: mailSummaryForUser(mailEntries, req.auth.user.userId) });

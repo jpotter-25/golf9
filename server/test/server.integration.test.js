@@ -1581,7 +1581,7 @@ test('loads durable profile stats and completed results', async () => {
   });
 });
 
-test('leaderboards expose weekly individual, club, and current-club member rankings', async () => {
+test('Club Standings expose per-member Ranked victories and retire LP leaderboards', async () => {
   const completedAt = Date.now() - 1000;
   const clubId = 'leader-club';
   const users = [
@@ -1611,28 +1611,25 @@ test('leaderboards expose weekly individual, club, and current-club member ranki
       round: 9,
       totalRounds: 9,
       players: [
-        { userId: 'leader-one', displayName: 'Leader One', total: 10, won: true, progression: { club: { club: { clubId } } } },
-        { userId: 'leader-two', displayName: 'Leader Two', total: 50, won: false, progression: { club: { club: { clubId } } } },
+        { userId: 'leader-one', displayName: 'Leader One', total: 10, won: true, clubIdAtMatchStart: clubId },
+        { userId: 'leader-two', displayName: 'Leader Two', total: 50, won: false, clubIdAtMatchStart: clubId },
       ],
     }],
   }, async (baseUrl) => {
-    const individual = await json(await fetch(`${baseUrl}/leaderboards?scope=individual&period=weekly`, { headers: authHeaders('leader-token') }));
-    assert.equal(individual.entries[0].userId, 'leader-one');
-    assert.equal(individual.entries[0].score, 300);
-    assert.equal(individual.viewer.userId, 'leader-two');
-    assert.equal(individual.viewer.rank, 2);
+    const standings = await json(await fetch(`${baseUrl}/clubs/standings?period=weekly`, { headers: authHeaders('leader-token') }));
+    assert.equal(standings.entries[0].clubId, clubId);
+    assert.equal(standings.entries[0].victories, 1);
+    assert.equal(standings.entries[0].rankedResults, 2);
+    assert.equal(standings.entries[0].losses, 1);
+    assert.equal(standings.viewer.clubId, clubId);
+    assert.equal(standings.criteria.key, 'ranked_victories');
+    assert.equal(Object.hasOwn(standings.entries[0], 'score'), false);
 
-    const club = await json(await fetch(`${baseUrl}/leaderboards?scope=clubs&period=weekly`, { headers: authHeaders('leader-token') }));
-    assert.equal(club.entries[0].clubId, clubId);
-    assert.equal(club.entries[0].score, 460);
-    assert.equal(club.viewer.clubId, clubId);
-
-    const members = await json(await fetch(`${baseUrl}/leaderboards?scope=club_members&period=weekly`, { headers: authHeaders('leader-token') }));
-    assert.equal(members.subject.clubId, clubId);
-    assert.deepEqual(members.entries.map(entry => entry.userId), ['leader-one', 'leader-two']);
-
-    const invalid = await fetch(`${baseUrl}/leaderboards?scope=unknown&period=weekly`, { headers: authHeaders('leader-token') });
+    const invalid = await fetch(`${baseUrl}/clubs/standings?period=unknown`, { headers: authHeaders('leader-token') });
     assert.equal(invalid.status, 400);
+
+    const legacy = await fetch(`${baseUrl}/leaderboards?scope=clubs&period=weekly`, { headers: authHeaders('leader-token') });
+    assert.equal(legacy.status, 410);
   });
 });
 
@@ -2353,6 +2350,59 @@ test('ranked queue creates a human-only ranked room and starts automatically', a
       socketTwo.disconnect();
     }
   }, { ROOM_COUNTDOWN_MS: '50' });
+});
+
+test('ranked queue keeps clubmates separate and reports only eligible opponents', async () => {
+  const expiresAt = Date.now() + 60_000;
+  const users = [
+    { userId: 'club-seed', displayName: 'ClubSeed', passwordHash: 'unused', salt: 'unused', clubId: 'club-a' },
+    { userId: 'club-mate', displayName: 'ClubMate', passwordHash: 'unused', salt: 'unused', clubId: 'club-a' },
+    { userId: 'club-rival', displayName: 'ClubRival', passwordHash: 'unused', salt: 'unused', clubId: 'club-b' },
+  ];
+  await withSeededServer({
+    users,
+    sessions: [
+      { token: 'club-seed-token', userId: 'club-seed', expiresAt },
+      { token: 'club-mate-token', userId: 'club-mate', expiresAt },
+      { token: 'club-rival-token', userId: 'club-rival', expiresAt },
+    ],
+    clubs: [
+      {
+        clubId: 'club-a', name: 'Club A', tag: 'A', createdAt: Date.now() - 1000, progression: { totalXp: 0 },
+        members: [{ userId: 'club-seed', role: 'owner' }, { userId: 'club-mate', role: 'member' }],
+      },
+      {
+        clubId: 'club-b', name: 'Club B', tag: 'B', createdAt: Date.now() - 1000, progression: { totalXp: 0 },
+        members: [{ userId: 'club-rival', role: 'owner' }],
+      },
+    ],
+  }, async (baseUrl) => {
+    const enqueue = async token => json(await fetch(`${baseUrl}/ranked/queue`, {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify({ maxPlayers: 2 }),
+    }));
+
+    const first = await enqueue('club-seed-token');
+    assert.equal(first.queue.queued, true);
+    assert.equal(first.queue.eligiblePlayers, 1);
+    assert.equal(first.queue.clubSeparated, true);
+
+    const clubmate = await enqueue('club-mate-token');
+    assert.equal(clubmate.queue.queued, true);
+    assert.equal(clubmate.queue.matchedRoomCode, null);
+    assert.equal(clubmate.queue.eligiblePlayers, 1);
+
+    const rival = await enqueue('club-rival-token');
+    assert.equal(rival.queue.queued, false);
+    assert.equal(typeof rival.queue.matchedRoomCode, 'string');
+
+    const seedStatus = await json(await fetch(`${baseUrl}/ranked/queue`, { headers: authHeaders('club-seed-token') }));
+    const clubmateStatus = await json(await fetch(`${baseUrl}/ranked/queue`, { headers: authHeaders('club-mate-token') }));
+    assert.equal(seedStatus.queue.matchedRoomCode, rival.queue.matchedRoomCode);
+    assert.equal(clubmateStatus.queue.queued, true);
+    assert.equal(clubmateStatus.queue.eligiblePlayers, 1);
+  });
 });
 
 test('ranked endpoints do not retain the obsolete ranked-only build lock', async () => {

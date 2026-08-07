@@ -27,7 +27,7 @@ import {
   ClubScreen,
   ShopScreen,
   InboxScreen,
-  LeaderboardsScreen,
+  ClubStandingsScreen,
 } from './screens';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ClubRealtimeProvider } from './context/ClubRealtimeContext';
@@ -56,7 +56,7 @@ export type RootStackParamList = {
   Inbox: undefined;
   Social: undefined;
   Club: undefined;
-  Leaderboards: undefined;
+  ClubStandings: undefined;
   PlayerProfile: { userId: string; fromActiveMatchRoomCode?: string };
   Settings: undefined;
 };
@@ -380,8 +380,8 @@ function ClubRoute(props: React.ComponentProps<typeof ClubScreen>) {
   return <AvailabilityRoute featureKey="clubs"><ClubScreen {...props} /></AvailabilityRoute>;
 }
 
-function LeaderboardsRoute(props: React.ComponentProps<typeof LeaderboardsScreen>) {
-  return <AvailabilityRoute featureKey="leaderboards"><LeaderboardsScreen {...props} /></AvailabilityRoute>;
+function ClubStandingsRoute(props: React.ComponentProps<typeof ClubStandingsScreen>) {
+  return <AvailabilityRoute featureKey="clubs.standings"><ClubStandingsScreen {...props} /></AvailabilityRoute>;
 }
 
 function PlayerProfileRoute(props: React.ComponentProps<typeof PlayerProfileScreen>) {
@@ -609,7 +609,7 @@ function AppNavigator() {
             <Stack.Screen name="Inbox" component={InboxRoute} />
             <Stack.Screen name="Social" component={SocialRoute} />
             <Stack.Screen name="Club" component={ClubRoute} />
-            <Stack.Screen name="Leaderboards" component={LeaderboardsRoute} />
+            <Stack.Screen name="ClubStandings" component={ClubStandingsRoute} />
             <Stack.Screen name="PlayerProfile" component={PlayerProfileRoute} />
             <Stack.Screen name="Settings" component={SettingsScreen} />
           </>

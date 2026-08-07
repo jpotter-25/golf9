@@ -14,13 +14,14 @@ import {
   updateAvailabilityTesters,
 } from '../availability.js';
 
-test('availability migration defaults every registered feature to live', () => {
+test('availability migration defaults active features to live and retired leaderboards to hidden', () => {
   const store = normalizeAvailabilityStore();
 
   assert.equal(Object.keys(store.entries).length, FEATURE_REGISTRY.length);
   for (const feature of FEATURE_REGISTRY) {
-    assert.equal(store.entries[feature.key].state, 'live');
+    assert.equal(store.entries[feature.key].state, feature.retired ? 'hidden' : 'live');
   }
+  assert.equal(store.entries['clubs.standings'].state, 'live');
   assert.equal(store.revision, 0);
   assert.deepEqual(store.schedules, []);
 });
@@ -86,6 +87,16 @@ test('hidden features resolve as hidden and named testers receive a visible prev
   assert.equal(publicPolicy.features.shop.previewState, 'hidden');
   assert.equal('testerUserIds' in publicPolicy, false);
   assert.equal(JSON.stringify(publicPolicy).includes('tester-1'), false);
+});
+
+test('retired LP leaderboards remain hidden even for configured testers', () => {
+  const testers = updateAvailabilityTesters(normalizeAvailabilityStore(), ['tester-1'], {
+    actor: 'Operator',
+    reason: 'Verify retired features stay retired.',
+    now: 2_000,
+  });
+  assert.equal(resolveFeatureAvailability(testers.store, 'leaderboards', 'tester-1').state, 'hidden');
+  assert.equal(resolveFeatureAvailability(testers.store, 'leaderboards', 'tester-1').testerPreview, false);
 });
 
 test('global maintenance blocks non-essential features while inbox remains live', () => {

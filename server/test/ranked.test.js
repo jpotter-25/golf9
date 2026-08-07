@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   applyRankedMatchResult,
   claimSeasonRewards,
+  eligibleRankedEntriesForSeed,
   leagueForMmr,
   matchmakingRangeFor,
   normalizeCompetitiveState,
@@ -12,6 +13,7 @@ import {
   publicCompetitiveState,
   rankedDisplayEmblemChoices,
   resolveDisplayRankEmblem,
+  selectRankedMatchEntries,
   setDisplayRankEmblem,
 } from '../ranked.js';
 
@@ -374,6 +376,46 @@ test('matchmaking range expands with queue time', () => {
   assert.equal(matchmakingRangeFor(1000, 1000 + 45_000), 200);
   assert.equal(matchmakingRangeFor(1000, 1000 + 90_000), 400);
   assert.equal(matchmakingRangeFor(1000, 1000 + 10 * 60_000), 800);
+});
+
+test('ranked matching never pairs clubmates even after maximum search expansion', () => {
+  const joinedAt = 1_000;
+  const seed = { userId: 'one', clubId: 'club-a', mmr: 1000, joinedAt, maxPlayers: 2 };
+  const clubmate = { userId: 'two', clubId: 'club-a', mmr: 1000, joinedAt: joinedAt + 1, maxPlayers: 2 };
+  const now = joinedAt + (10 * 60_000);
+  assert.deepEqual(selectRankedMatchEntries(seed, [seed, clubmate], now), []);
+  assert.equal(eligibleRankedEntriesForSeed(seed, [seed, clubmate], now).length, 1);
+});
+
+test('ranked matching preserves queue order while selecting distinct clubs', () => {
+  const joinedAt = 1_000;
+  const seed = { userId: 'seed', clubId: 'club-a', mmr: 1000, joinedAt, maxPlayers: 3 };
+  const olderClubmate = { userId: 'clubmate', clubId: 'club-a', mmr: 1000, joinedAt: joinedAt + 1, maxPlayers: 3 };
+  const firstOpponent = { userId: 'opponent-b', clubId: 'club-b', mmr: 1000, joinedAt: joinedAt + 2, maxPlayers: 3 };
+  const secondOpponent = { userId: 'opponent-c', clubId: 'club-c', mmr: 1000, joinedAt: joinedAt + 3, maxPlayers: 3 };
+  const selected = selectRankedMatchEntries(seed, [seed, olderClubmate, firstOpponent, secondOpponent], joinedAt + 5_000);
+  assert.deepEqual(selected.map(entry => entry.userId), ['seed', 'opponent-b', 'opponent-c']);
+});
+
+test('clubless players remain unrestricted in four-player Ranked selection', () => {
+  const joinedAt = 1_000;
+  const entries = [
+    { userId: 'seed', clubId: 'club-a', mmr: 1000, joinedAt, maxPlayers: 4 },
+    { userId: 'free-one', clubId: null, mmr: 1000, joinedAt: joinedAt + 1, maxPlayers: 4 },
+    { userId: 'free-two', clubId: null, mmr: 1000, joinedAt: joinedAt + 2, maxPlayers: 4 },
+    { userId: 'opponent', clubId: 'club-b', mmr: 1000, joinedAt: joinedAt + 3, maxPlayers: 4 },
+  ];
+  assert.deepEqual(selectRankedMatchEntries(entries[0], entries, joinedAt + 5_000).map(entry => entry.userId), [
+    'seed', 'free-one', 'free-two', 'opponent',
+  ]);
+});
+
+test('club separation remains strict while normal MMR expansion admits opponent clubs', () => {
+  const joinedAt = 1_000;
+  const seed = { userId: 'seed', clubId: 'club-a', mmr: 1000, joinedAt, maxPlayers: 2 };
+  const distantOpponent = { userId: 'opponent', clubId: 'club-b', mmr: 1350, joinedAt, maxPlayers: 2 };
+  assert.deepEqual(selectRankedMatchEntries(seed, [seed, distantOpponent], joinedAt + 20_000), []);
+  assert.deepEqual(selectRankedMatchEntries(seed, [seed, distantOpponent], joinedAt + 90_000).map(entry => entry.userId), ['seed', 'opponent']);
 });
 
 test('season reward claim unlocks ranked shop eligibility without granting cosmetics', () => {

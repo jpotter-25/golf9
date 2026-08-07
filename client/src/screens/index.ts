@@ -19,4 +19,4 @@ export { default as SocialScreen } from './SocialScreen';
 export { default as PlayerProfileScreen } from './PlayerProfileScreen';
 export { default as ClubScreen } from './ClubScreen';
 export { default as InboxScreen } from './InboxScreen';
-export { default as LeaderboardsScreen } from './LeaderboardsScreen';
+export { default as ClubStandingsScreen } from './ClubStandingsScreen';

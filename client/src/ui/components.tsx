@@ -115,7 +115,7 @@ function GlobalTopBar() {
     if (isAvailable('clubs')) navigation.navigate('Club');
     else showUnavailable('clubs');
   };
-  const openFeature = (featureKey: 'profile' | 'shop' | 'inbox' | 'leaderboards' | 'rules' | 'tutorial', routeName: string) => {
+  const openFeature = (featureKey: 'profile' | 'shop' | 'inbox' | 'clubs.standings' | 'rules' | 'tutorial', routeName: string) => {
     if (isAvailable(featureKey)) navigation.navigate(routeName);
     else showUnavailable(featureKey);
   };
@@ -166,12 +166,12 @@ function GlobalTopBar() {
           </Pressable>
         ) : null}
 
-        {isVisible('leaderboards') ? (
+        {isVisible('clubs.standings') ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Open leaderboards"
-            style={[styles.topIconButton, !isAvailable('leaderboards') && styles.featureLocked]}
-            onPress={() => openFeature('leaderboards', 'Leaderboards')}
+            accessibilityLabel="Open Club Standings"
+            style={[styles.topIconButton, !isAvailable('clubs.standings') && styles.featureLocked]}
+            onPress={() => openFeature('clubs.standings', 'ClubStandings')}
           >
             <Medal size={19} color={ui.palette.violet} strokeWidth={2.8} />
           </Pressable>

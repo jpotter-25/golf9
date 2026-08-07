@@ -123,9 +123,9 @@ export default function RankedQueueScreen({ route, navigation }: Props) {
       <PremiumPanel>
         <MetricRow Icon={Users} label="Queue" value={`${players} players - 9 rounds`} />
         <MetricRow Icon={Trophy} label="Entry" value="Free ladder match" />
-        <MetricRow Icon={Radar} label="Search" value="League-based" />
+        <MetricRow Icon={Radar} label="Search" value={queue?.clubSeparated ? 'League + club protected' : 'League-based'} />
         <MetricRow Icon={Sparkles} label="Waiting" value={`${waitedSeconds}s`} />
-        <MetricRow Icon={Users} label="Found" value={`${queue?.queuedPlayers ?? 1}/${players}`} />
+        <MetricRow Icon={Users} label="Eligible" value={`${queue?.eligiblePlayers ?? queue?.queuedPlayers ?? 1}/${players}`} />
       </PremiumPanel>
 
       <PremiumPanel tone="felt">
@@ -135,6 +135,9 @@ export default function RankedQueueScreen({ route, navigation }: Props) {
             ? `${placementsRemaining} placement match${placementsRemaining === 1 ? '' : 'es'} remaining.`
             : `Season best: ${competitive?.seasonBestLeague.name ?? league}.`}
         </Text>
+        {queue?.clubSeparated ? (
+          <Text style={styles.clubProtectionText}>Clubmates are kept at separate Ranked tables. The rating search keeps expanding, but club separation never relaxes.</Text>
+        ) : null}
       </PremiumPanel>
 
       <PremiumPanel>
@@ -195,6 +198,7 @@ const styles = StyleSheet.create({
   metricValue: { color: ui.text.primary, fontWeight: '900' },
   statusTitle: { color: ui.palette.emerald, fontWeight: '900', fontSize: 20, textAlign: 'center' },
   statusText: { color: ui.text.secondary, fontWeight: '800', textAlign: 'center', marginTop: 8, lineHeight: 20 },
+  clubProtectionText: { color: ui.palette.gold, fontSize: 11, fontWeight: '800', textAlign: 'center', marginTop: 9, lineHeight: 17 },
   rewardHeader: {
     flexDirection: 'row',
     alignItems: 'center',

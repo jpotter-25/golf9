@@ -20,7 +20,8 @@ export const FEATURE_REGISTRY = Object.freeze([
   { key: 'clubs.chat', label: 'Club Chat', parent: 'clubs', group: 'Clubs', impact: 'Live club chat' },
   { key: 'clubs.treasury', label: 'Club Treasury', parent: 'clubs', group: 'Clubs', impact: 'Donations, goals, and prestige purchases' },
   { key: 'clubs.management', label: 'Club Management', parent: 'clubs', group: 'Clubs', impact: 'Club creation, requests, roles, and management' },
-  { key: 'leaderboards', label: 'Leaderboards', parent: 'global', group: 'Community', impact: 'Individual, club, and club-member rankings' },
+  { key: 'clubs.standings', label: 'Club Standings', parent: 'clubs', group: 'Clubs', impact: 'Ranked club victory standings' },
+  { key: 'leaderboards', label: 'Legacy Leaderboards', parent: 'global', group: 'Retired', impact: 'Retired LP leaderboards', retired: true },
   { key: 'shop', label: 'Shop', parent: 'global', group: 'Player', impact: 'Storefront and cosmetic purchases' },
   { key: 'social', label: 'Social', parent: 'global', group: 'Player', impact: 'Friends and social actions' },
   { key: 'inbox', label: 'Inbox', parent: 'global', group: 'Player', impact: 'Player mail (remains available during global maintenance)' },
@@ -68,7 +69,9 @@ export function featureDefinition(featureKey) {
 
 export function normalizeAvailabilityEntry(featureKey, value = {}) {
   if (!isFeatureKey(featureKey)) throw new Error('Unknown feature key.');
-  const state = AVAILABILITY_STATES.includes(value?.state) ? value.state : 'live';
+  const state = featureDefinition(featureKey)?.retired
+    ? 'hidden'
+    : AVAILABILITY_STATES.includes(value?.state) ? value.state : 'live';
   return {
     featureKey,
     state,
@@ -179,6 +182,9 @@ function configuredResolution(store, featureKey) {
 export function resolveFeatureAvailability(storeValue, featureKey, userId = null) {
   const store = normalizeAvailabilityStore(storeValue);
   const configured = configuredResolution(store, featureKey);
+  if (featureDefinition(featureKey)?.retired) {
+    return { ...configured, state: 'hidden', configuredState: 'hidden', testerPreview: false, previewState: null, previewTitle: '', previewMessage: '' };
+  }
   const tester = !!userId && store.testerUserIds.includes(String(userId));
   if (tester && configured.state !== 'live') {
     return {
