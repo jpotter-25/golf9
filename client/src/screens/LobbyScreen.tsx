@@ -3,7 +3,7 @@
 
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { BookOpen, ChevronRight, Gamepad2, LockKeyhole, Medal, Search, Trophy, Users, Wifi, WifiOff } from 'lucide-react-native';
+import { BookOpen, ChevronRight, Gamepad2, LockKeyhole, Search, Trophy, Users, Wifi, WifiOff } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
@@ -73,23 +73,6 @@ export default function LobbyScreen({ navigation }: Props) {
           onPress={() => openFeature('offline', () => navigation.navigate('OfflineMenu'))}
         /> : null}
       </View>
-
-      {isVisible('leaderboards') ? <View style={styles.sectionHeading}>
-        <Text style={styles.sectionEyebrow}>Competition</Text>
-        <Text style={styles.sectionHint}>Players and clubs</Text>
-      </View> : null}
-
-      {isVisible('leaderboards') ? <DestinationCard
-        title="Leaderboards"
-        subtitle="Weekly, seasonal, and all-time standings for players, clubs, and your club members."
-        Icon={Medal}
-        color={ui.palette.violet}
-        disabled={!isOnline}
-        locked={!isAvailable('leaderboards')}
-        testerPreview={entry('leaderboards').testerPreview}
-        status={!isOnline ? 'Internet needed' : entry('leaderboards').testerPreview ? 'Tester Preview' : !isAvailable('leaderboards') ? entry('leaderboards').title : 'Online standings'}
-        onPress={() => openFeature('leaderboards', () => navigation.navigate('Leaderboards'))}
-      /> : null}
 
       {isVisible('clubs') ? <View style={styles.sectionHeading}>
         <Text style={styles.sectionEyebrow}>Club</Text>

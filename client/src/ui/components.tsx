@@ -13,7 +13,7 @@ import {
   ViewStyle,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Bell, BookOpen, ChevronRight, Coins, GraduationCap, Home, Mail, Music2, Settings, Users, Volume2, X, Zap } from 'lucide-react-native';
+import { Bell, BookOpen, ChevronRight, Coins, GraduationCap, Home, Mail, Medal, Music2, Settings, Users, Volume2, X, Zap } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { useNavigation, useRoute, type NavigationProp, type ParamListBase } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -115,7 +115,7 @@ function GlobalTopBar() {
     if (isAvailable('clubs')) navigation.navigate('Club');
     else showUnavailable('clubs');
   };
-  const openFeature = (featureKey: 'profile' | 'shop' | 'inbox' | 'rules' | 'tutorial', routeName: string) => {
+  const openFeature = (featureKey: 'profile' | 'shop' | 'inbox' | 'leaderboards' | 'rules' | 'tutorial', routeName: string) => {
     if (isAvailable(featureKey)) navigation.navigate(routeName);
     else showUnavailable(featureKey);
   };
@@ -163,6 +163,17 @@ function GlobalTopBar() {
                 <Text style={styles.topIconBadgeText}>{Math.min(99, mailSummary?.attention ?? 0)}</Text>
               </View>
             ) : null}
+          </Pressable>
+        ) : null}
+
+        {isVisible('leaderboards') ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open leaderboards"
+            style={[styles.topIconButton, !isAvailable('leaderboards') && styles.featureLocked]}
+            onPress={() => openFeature('leaderboards', 'Leaderboards')}
+          >
+            <Medal size={19} color={ui.palette.violet} strokeWidth={2.8} />
           </Pressable>
         ) : null}
 
