@@ -234,3 +234,128 @@ test('hard solo AI can trigger final turn when holding the lowest score', () => 
   assert.deepEqual(move.target, { playerIndex: 0, r: 2, c: 2 });
   assert.equal(move.discardDrawn, false);
 });
+
+test('easy solo AI reveals a hidden card and keeps its lower value instead of blindly replacing it', () => {
+  const state = baseState({
+    aiGrid: [
+      row(card('K', false), card('8', false), card('6', false)),
+      row(card('7', false), card('3', false), card('4', false)),
+      row(card('2', false), card('9', false), card('A', false)),
+    ],
+    drawRank: 'Q',
+    discardRank: '9',
+  });
+
+  const move = chooseAiMove(state, 0, 'easy');
+  assert.equal(move.source, 'draw');
+  assert.equal(move.revealThenDecide, true);
+
+  const next = aiPlayTurn(state, 0, 'easy');
+  assert.equal(next.players[0].grid[0][0].rank, 'K');
+  assert.equal(next.players[0].grid[0][0].faceUp, true);
+  assert.equal(next.topDiscard.rank, 'Q');
+});
+
+test('hard solo AI prioritizes a hidden card over a one-point visible improvement late in a round', () => {
+  const state = baseState({
+    aiGrid: [
+      row(card('9'), card('K'), card('2', false)),
+      row(card('4'), card('3'), card('7')),
+      row(card('6'), card('5'), card('A', false)),
+    ],
+    drawRank: '8',
+    discardRank: 'Q',
+  });
+
+  const move = chooseAiMove(state, 0, 'hard');
+
+  assert.equal(move.source, 'draw');
+  assert.equal(move.revealThenDecide, true);
+  assert.notDeepEqual(move.target, { playerIndex: 0, r: 0, c: 0 });
+  assert.equal(state.players[0].grid[move.target.r][move.target.c].faceUp, false);
+});
+
+test('hard solo AI does not replace a visible 9 with a discard 6 while hidden cards remain', () => {
+  const state = baseState({
+    aiGrid: [
+      row(card('9'), card('K'), card('2', false)),
+      row(card('4'), card('3'), card('7')),
+      row(card('6'), card('5'), card('A', false)),
+    ],
+    drawRank: '4',
+    discardRank: '6',
+  });
+
+  assert.equal(chooseAiMove(state, 0, 'hard').source, 'draw');
+});
+
+test('a later hard AI seat treats every opponent as competition without sacrificing its own score', () => {
+  const state = baseState({
+    aiGrid: [
+      row(card('6', false), card('K'), card('2', false)),
+      row(card('9'), card('5'), card('K')),
+      row(card('8'), card('4'), card('5')),
+    ],
+    drawRank: 'Q',
+    discardRank: '9',
+    sweepActive: true,
+  });
+  const ai = state.players[0];
+  const queenThreat = {
+    ...state.players[1],
+    userId: 'queen-threat',
+    grid: [
+      row(card('Q'), card('3'), card('4')),
+      row(card('Q'), card('2'), card('5')),
+      row(card('7', false), card('8'), card('9')),
+    ],
+  };
+  const leader = {
+    ...state.players[1],
+    userId: 'leader',
+    grid: Array.from({ length: 3 }, () => row(card('5'), card('5'), card('5'))),
+  };
+  const fourth = {
+    ...state.players[1],
+    userId: 'fourth',
+    grid: Array.from({ length: 3 }, () => row(card('3'), card('4'), card('7', false))),
+  };
+  state.players = [queenThreat, leader, ai, fourth];
+  state.currentPlayerIndex = 2;
+  state.sweepStarterIndex = 0;
+  state.totals = [0, 0, 0, 0];
+
+  const move = chooseAiMove(state, 2, 'hard');
+  assert.equal(move.source, 'draw');
+  assert.equal(move.revealThenDecide, true);
+  assert.deepEqual(move.target, { playerIndex: 2, r: 0, c: 0 });
+
+  const next = aiPlayTurn(state, 2, 'hard');
+  assert.equal(next.players[2].grid[0][0].rank, '6');
+  assert.equal(next.players[2].grid[0][0].faceUp, true);
+  assert.equal(next.topDiscard.rank, 'Q');
+});
+
+test('hard solo AI reveals its last hidden card during the final sweep instead of worsening a King', () => {
+  const state = baseState({
+    aiGrid: [
+      row(card('6', false), card('5'), card('K')),
+      row(card('5'), card('K'), card('5')),
+      row(card('K'), card('5'), card('5')),
+    ],
+    opponentGrid: Array.from({ length: 3 }, () => row(card('5'), card('5'), card('5'))),
+    drawRank: 'Q',
+    discardRank: '9',
+    sweepActive: true,
+  });
+  state.sweepStarterIndex = 1;
+
+  const move = chooseAiMove(state, 0, 'hard');
+  assert.equal(move.revealThenDecide, true);
+  assert.deepEqual(move.target, { playerIndex: 0, r: 0, c: 0 });
+
+  const next = aiPlayTurn(state, 0, 'hard');
+  assert.equal(next.players[0].grid[0][0].rank, '6');
+  assert.equal(next.players[0].grid[1][1].rank, 'K');
+  assert.equal(next.topDiscard.rank, 'Q');
+});

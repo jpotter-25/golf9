@@ -14,7 +14,7 @@ import {
 const HARD_DIRECT_KEEP_MAX = 2;
 const HARD_SETUP_MAX = 7;
 const HARD_REVEAL_MAX = 7;
-const HARD_BIG_IMPROVEMENT = 3;
+const HARD_HIDDEN_BYPASS_IMPROVEMENT = 5;
 
 export function chooseAiMove(state, playerIndex, difficulty = 'easy') {
   return difficulty === 'hard'
@@ -49,14 +49,26 @@ function playEasyTurn(state, playerIndex) {
     if (taken.error || !taken.drawn) return working;
     working = taken.state;
     const target = chooseEasyTarget(working.players[playerIndex].grid, taken.drawn);
-    return replaceGridCard(working, playerIndex, target.r, target.c, taken.drawn).state;
+    return playEasyCardAtTarget(working, playerIndex, taken.drawn, target);
   }
 
   const drawn = drawFromDeck(working);
   if (drawn.error || !drawn.drawn) return working;
   working = drawn.state;
   const target = chooseEasyTarget(working.players[playerIndex].grid, drawn.drawn);
-  return replaceGridCard(working, playerIndex, target.r, target.c, drawn.drawn).state;
+  return playEasyCardAtTarget(working, playerIndex, drawn.drawn, target);
+}
+
+function playEasyCardAtTarget(state, playerIndex, drawn, target) {
+  const grid = state.players[playerIndex]?.grid;
+  if (canRevealForDecision(grid, target?.r, target?.c)) {
+    const revealed = revealGridCardForDecision(state, playerIndex, target.r, target.c);
+    if (!revealed.error) {
+      const choice = chooseLowerValueRevealDecision(revealed.state, playerIndex, drawn, target);
+      return resolvePendingGridDecision(revealed.state, playerIndex, drawn, choice).state;
+    }
+  }
+  return replaceGridCard(state, playerIndex, target.r, target.c, drawn).state;
 }
 
 function playHardTurn(state, playerIndex) {
@@ -101,12 +113,16 @@ function chooseEasyAiMove(state, playerIndex) {
   const card = source === 'discard' ? state.topDiscard : peekDrawCard(state);
   const grid = state.players[playerIndex]?.grid;
   const target = card && grid ? chooseEasyTarget(grid, card) : null;
+  const revealThenDecide = !!target && canRevealForDecision(grid, target.r, target.c);
   return {
     source,
     card,
     target: target ? { playerIndex, r: target.r, c: target.c } : null,
     discardDrawn: false,
-    intent: source === 'discard' ? 'take-obvious-discard' : 'simple-draw-replace',
+    revealThenDecide,
+    intent: revealThenDecide
+      ? 'simple-reveal-before-commit'
+      : source === 'discard' ? 'take-obvious-discard' : 'simple-draw-replace',
   };
 }
 
@@ -170,8 +186,8 @@ function chooseHardSource(state, playerIndex) {
   if (avoidFinalHidden && (!worst || topValue >= worst.score)) return 'draw';
   if (topValue <= HARD_DIRECT_KEEP_MAX) return 'discard';
   if (setup && !targetIsFinalHidden(grid, setup, avoidFinalHidden) && topValue <= HARD_SETUP_MAX) return 'discard';
-  if (worst && topValue <= worst.score - HARD_BIG_IMPROVEMENT) return 'discard';
-  if (hiddenCount <= 2 && worst && topValue < worst.score) return 'discard';
+  if (hiddenCount > 0 && worst && topValue <= worst.score - HARD_HIDDEN_BYPASS_IMPROVEMENT) return 'discard';
+  if (hiddenCount === 0 && worst && topValue < worst.score) return 'discard';
   return 'draw';
 }
 
@@ -210,7 +226,7 @@ function shouldDiscardDrawnHard(state, playerIndex, card) {
   if (completion && !targetIsFinalHidden(grid, completion, avoidFinalHidden)) return false;
   if (setup && !targetIsFinalHidden(grid, setup, avoidFinalHidden) && incomingValue <= HARD_SETUP_MAX) return false;
   if (avoidFinalHidden && (!worst || incomingValue >= worst.score)) {
-    return cardDangerToOpponents(state, playerIndex, card) < 7;
+    return true;
   }
   if (incomingValue <= HARD_REVEAL_MAX) return false;
   if (worst && incomingValue <= worst.score - 1) return false;
@@ -238,13 +254,14 @@ function chooseHardTargetForDraw(state, playerIndex, card) {
   }
 
   const hidden = bestHiddenTarget(grid, card);
-  if (hidden && !targetIsFinalHidden(grid, hidden, avoidFinalHidden) && (hiddenCount >= 3 || incomingValue <= HARD_REVEAL_MAX)) {
+  const worst = worstFaceUp(grid);
+  const canUseHidden = hidden && !targetIsFinalHidden(grid, hidden, avoidFinalHidden);
+  if (canUseHidden) {
+    if (hiddenCount >= 3 || hiddenCount === 1) return hidden;
+    if (worst && incomingValue <= worst.score - HARD_HIDDEN_BYPASS_IMPROVEMENT) return { r: worst.r, c: worst.c };
     return hidden;
   }
-
-  const worst = worstFaceUp(grid);
-  if (worst && incomingValue <= worst.score - 1) return { r: worst.r, c: worst.c };
-  if (hidden && !targetIsFinalHidden(grid, hidden, avoidFinalHidden)) return hidden;
+  if (worst && incomingValue < worst.score) return { r: worst.r, c: worst.c };
   if (worst) return { r: worst.r, c: worst.c };
   return legacyPickTarget(grid, card);
 }
@@ -272,7 +289,9 @@ function chooseDirectTargetForKeptCard(grid, card, options = {}) {
 
 function shouldAvoidFinalHiddenTarget(state, playerIndex) {
   const grid = state.players[playerIndex]?.grid;
-  return countFaceDownCards(grid) === 1 && !hasLowestRoundScore(state, playerIndex);
+  return !state.sweepActive
+    && countFaceDownCards(grid) === 1
+    && !hasLowestRoundScore(state, playerIndex);
 }
 
 function targetIsFinalHidden(grid, target, shouldAvoid) {
@@ -327,13 +346,20 @@ function chooseRevealDecision(state, playerIndex, drawn, target) {
 
   const drawnValue = cardValue(drawn);
   const revealedValue = cardValue(revealed);
+  if (drawnValue < revealedValue) return 'drawn';
+  if (revealedValue < drawnValue) return 'revealed';
+
   const drawnDanger = cardDangerToOpponents(state, playerIndex, drawn);
   const revealedDanger = cardDangerToOpponents(state, playerIndex, revealed);
 
-  if (drawnDanger > revealedDanger && drawnValue <= revealedValue + 4) return 'drawn';
-  if (revealedDanger > drawnDanger && revealedValue <= drawnValue + 4) return 'revealed';
-  if (drawnValue <= revealedValue - 2) return 'drawn';
-  return revealedValue <= drawnValue ? 'revealed' : 'drawn';
+  if (drawnDanger > revealedDanger) return 'drawn';
+  return 'revealed';
+}
+
+function chooseLowerValueRevealDecision(state, playerIndex, drawn, target) {
+  const revealed = state.players[playerIndex]?.grid?.[target.r]?.[target.c];
+  if (!revealed) return 'drawn';
+  return cardValue(drawn) < cardValue(revealed) ? 'drawn' : 'revealed';
 }
 
 function visibleColumnCompletionTarget(grid, incoming) {
