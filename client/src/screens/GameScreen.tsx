@@ -1438,13 +1438,14 @@ export default function GameScreen({ route, navigation }: Props) {
       : isSolo
         ? state.currentPlayerIndex === 0
         : true;
-    if (viewerIsCurrent) return;
     // Solo has one human viewer, so the final-sweep announcement is acknowledged once
     // for the whole table instead of repeating as each AI seat takes its turn.
     const viewerKey = isOnline || isSolo ? 'announcement' : `turn:${state.currentPlayerIndex}`;
     const key = `${state.id}:${state.round ?? round}:${state.sweepStarterIndex}:${viewerKey}`;
     if (lastSweepAlertKey.current === key) return;
     lastSweepAlertKey.current = key;
+    // The normal turn notice already tells the viewer this is their final turn.
+    if (viewerIsCurrent) return;
     showGameplayNotice({
       id: `sweep:${key}`,
       title: 'Final Go-Around',
