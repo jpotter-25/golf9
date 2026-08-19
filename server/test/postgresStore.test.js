@@ -124,3 +124,36 @@ test('postgres delivery claims use row locking and return campaign context', asy
   assert.equal(claimed.signup.signupId, 'signup-1');
   assert.ok(queries.some(query => /FOR UPDATE SKIP LOCKED/.test(query.sql)));
 });
+
+test('postgres queue completion updates only lifecycle fields on a still-consented signup', async () => {
+  const queries = [];
+  const client = {
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      return { rows: [] };
+    },
+    release() {},
+  };
+  const store = new PostgresStore({ connect: async () => client });
+  await store.saveEarlyAccessQueueContext({
+    delivery: { deliveryId: 'delivery-1', updatedAt: 10 },
+    campaign: { campaignId: 'campaign-1', updatedAt: 10 },
+    signup: {
+      emailHash: 'hash-1',
+      testerStage: 'invited',
+      invitedAt: 10,
+      updatedAt: 10,
+      consentStatus: 'confirmed',
+      contactEncrypted: 'must-not-be-written-by-the-queue',
+    },
+  });
+
+  const signupUpdate = queries.find(query => /UPDATE golf9_early_access_signups/.test(query.sql));
+  assert.ok(signupUpdate);
+  assert.match(signupUpdate.sql, /consentStatus/);
+  assert.match(signupUpdate.sql, /erasedAt/);
+  const written = JSON.parse(signupUpdate.params[1]);
+  assert.equal(written.testerStage, 'invited');
+  assert.equal('contactEncrypted' in written, false);
+  assert.equal('consentStatus' in written, false);
+});

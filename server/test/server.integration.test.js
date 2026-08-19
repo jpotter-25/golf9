@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -214,7 +214,7 @@ async function fnWithServer(dataDir, serverPort, fn, extraEnv = {}) {
   const baseUrl = `http://127.0.0.1:${serverPort}`;
   try {
     await waitForHealth(baseUrl);
-    await fn(baseUrl);
+    await fn(baseUrl, dataDir);
   } finally {
     child.kill('SIGTERM');
     await Promise.race([once(child, 'exit'), new Promise(resolve => setTimeout(resolve, 1000))]);
@@ -321,7 +321,7 @@ test('public support returns a private tracking link and queues both email copie
 });
 
 test('early-access website confirms consent, onboards a controlled wave, sends access, and records activation', async () => {
-  await withServer(async (baseUrl) => {
+  await withServer(async (baseUrl, dataDir) => {
     const home = await (await fetch(baseUrl)).text();
     assert.match(home, /Join Early Access/);
     const page = await fetch(`${baseUrl}/early-access`);
@@ -403,7 +403,23 @@ test('early-access website confirms consent, onboards a controlled wave, sends a
     assert.ok(supportMe.admin.permissions.includes('earlyAccess:write'));
     assert.equal(supportMe.admin.permissions.includes('earlyAccess:send'), false);
     assert.equal((await fetch(`${baseUrl}/admin/api/early-access/summary`, { headers: adminHeaders(support) })).status, 200);
-    assert.equal((await fetch(`${baseUrl}/admin/api/early-access/signups`, { headers: adminHeaders(support) })).status, 200);
+    const supportSignupsResponse = await fetch(`${baseUrl}/admin/api/early-access/signups`, { headers: adminHeaders(support) });
+    assert.equal(supportSignupsResponse.status, 200);
+    const supportSignups = await json(supportSignupsResponse);
+    assert.match(supportSignups.signups[0].email, /^ea\*+@example\.com$/);
+    assert.equal(supportSignups.signups[0].firstName, '');
+    assert.equal(supportSignups.signups[0].platformEmail, '');
+    const supportUpdate = await json(await fetch(`${baseUrl}/admin/api/early-access/signups/${signups.signups[0].signupId}`, {
+      method: 'PATCH',
+      headers: adminHeaders(support),
+      body: JSON.stringify({ reason: 'Record support review without revealing contact data.', tags: ['support-reviewed'] }),
+    }));
+    assert.match(supportUpdate.signup.email, /^ea\*+@example\.com$/);
+    assert.equal(supportUpdate.signup.firstName, '');
+    assert.equal(supportUpdate.signup.platformEmail, '');
+    assert.equal((await fetch(`${baseUrl}/admin/api/early-access/signups/${signups.signups[0].signupId}/erase`, {
+      method: 'POST', headers: adminHeaders(support), body: JSON.stringify({ reason: 'Support must not erase PII.' }),
+    })).status, 403);
     assert.equal((await fetch(`${baseUrl}/admin/api/early-access/campaigns`, { headers: adminHeaders(support) })).status, 403);
     assert.equal((await fetch(`${baseUrl}/admin/api/early-access/export.csv`, { headers: adminHeaders(support) })).status, 403);
 
@@ -456,6 +472,26 @@ test('early-access website confirms consent, onboards a controlled wave, sends a
       }),
     }));
     assert.match(feedback.reference, /^NB-/);
+    const protectedSnapshot = JSON.parse(await readFile(path.join(dataDir, 'auth-store.json'), 'utf8'));
+    const storedFeedback = protectedSnapshot.supportTickets.find(ticket => ticket.publicReference === feedback.reference);
+    assert.match(storedFeedback.protectedPayloadEncrypted, /^v1\./);
+    assert.equal(storedFeedback.earlyAccessSignupId, signups.signups[0].signupId);
+    assert.equal(storedFeedback.contactEmail, '');
+    const protectedText = JSON.stringify(protectedSnapshot);
+    assert.equal(protectedText.includes('early-access@example.com'), false);
+    assert.equal(protectedText.includes('early-access@gmail.com'), false);
+    assert.equal(protectedText.includes('Pixel integration test'), false);
+    assert.equal(protectedText.includes('The test feedback path correctly created a support case.'), false);
+    assert.equal(protectedText.includes(admin.token), false);
+    const supportTickets = await json(await fetch(`${baseUrl}/admin/api/support/tickets`, { headers: adminHeaders(support) }));
+    const supportVisibleFeedback = supportTickets.tickets.find(ticket => ticket.publicReference === feedback.reference);
+    assert.equal(supportVisibleFeedback.contactName, 'Early access tester');
+    assert.equal(supportVisibleFeedback.contactEmail, null);
+    assert.match(supportVisibleFeedback.message, /correctly created a support case/);
+
+    const ownerTickets = await json(await fetch(`${baseUrl}/admin/api/support/tickets`, { headers: adminHeaders(admin) }));
+    const ownerVisibleFeedback = ownerTickets.tickets.find(ticket => ticket.publicReference === feedback.reference);
+    assert.equal(ownerVisibleFeedback.contactEmail, 'early-access@example.com');
 
     const accessCampaign = await json(await fetch(`${baseUrl}/admin/api/early-access/campaigns`, {
       method: 'POST',
@@ -494,7 +530,26 @@ test('early-access website confirms consent, onboards a controlled wave, sends a
 
     const googlePlayExport = await fetch(`${baseUrl}/admin/api/early-access/export.csv?format=google-play`, { headers: adminHeaders(admin) });
     assert.equal(googlePlayExport.status, 200);
+    assert.match(googlePlayExport.headers.get('cache-control') || '', /no-store/);
     assert.match(await googlePlayExport.text(), /early-access@gmail\.com/);
+    const finalSnapshot = await readFile(path.join(dataDir, 'auth-store.json'), 'utf8');
+    assert.equal(finalSnapshot.includes(activatedPlayer.token), false);
+    assert.equal(finalSnapshot.includes(inviteCode), false);
+
+    const trackingToken = new URLSearchParams(new URL(feedback.trackingUrl).hash.slice(1)).get('token');
+    assert.ok(trackingToken);
+    assert.equal((await fetch(`${baseUrl}/support/public/${feedback.reference}?token=${encodeURIComponent(trackingToken)}`)).status, 200);
+    await json(await fetch(`${baseUrl}/admin/api/early-access/signups/${signups.signups[0].signupId}/erase`, {
+      method: 'POST',
+      headers: adminHeaders(admin),
+      body: JSON.stringify({ reason: 'Verify linked early-access feedback erasure.' }),
+    }));
+    assert.equal((await fetch(`${baseUrl}/support/public/${feedback.reference}?token=${encodeURIComponent(trackingToken)}`)).status, 404);
+    const erasedSnapshot = JSON.parse(await readFile(path.join(dataDir, 'auth-store.json'), 'utf8'));
+    const erasedFeedback = erasedSnapshot.supportTickets.find(ticket => ticket.publicReference === feedback.reference);
+    assert.equal(erasedFeedback.protectedPayloadEncrypted, '');
+    assert.equal(erasedFeedback.publicAccessTokenHash, null);
+    assert.equal(erasedFeedback.contactEmail, '');
   }, {
     SEED_ADMIN_ACCOUNT: '1',
     ADMIN_BOOTSTRAP_EMAIL: 'owner@example.com',
@@ -907,7 +962,7 @@ test('signup enforces compact player names', async () => {
 });
 
 test('pre-alpha invite gate blocks open signup and consumes admin-created invites once', async () => {
-  await withServer(async (baseUrl) => {
+  await withServer(async (baseUrl, dataDir) => {
     const config = await json(await fetch(`${baseUrl}/auth/config`));
     assert.equal(config.inviteRequired, true);
 
@@ -942,6 +997,13 @@ test('pre-alpha invite gate blocks open signup and consumes admin-created invite
     const invites = await json(await fetch(`${baseUrl}/admin/api/invites`, { headers: adminHeaders(admin) }));
     assert.equal(invites.invites[0].uses.length, 1);
     assert.equal(invites.invites[0].status, 'exhausted');
+    assert.equal(invites.invites[0].code, null);
+    assert.equal(invites.invites[0].codePreview, 'PHA1');
+
+    const persisted = await readFile(path.join(dataDir, 'auth-store.json'), 'utf8');
+    assert.equal(persisted.includes('ALPHA1'), false);
+    assert.equal(persisted.includes(admin.token), false);
+    assert.equal(persisted.includes(accepted.token), false);
 
     const exhausted = await fetch(`${baseUrl}/auth/signup`, {
       method: 'POST',

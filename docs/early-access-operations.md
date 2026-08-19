@@ -66,7 +66,7 @@ Before any wave:
 2. Confirm the installation or opt-in URL works with a staff account.
 3. Confirm `REQUIRE_INVITE_CODE=1` in Railway before an **access** campaign. Access-wave preflight will refuse to send if the game invite gate is disabled.
 4. Confirm the admin Early Access readiness panel is green for SMTP, encryption keys, token signing, postal address, and campaign delivery.
-5. Confirm the Potterwell mailing address and reply-to address are current.
+5. Confirm the Potterwell mailing address is current and the reply-to remains the intentionally unmonitored `donotreply@potterwell.com` address.
 6. Keep the wave small enough for the team to support and observe.
 7. Preview the recipient count and message.
 8. Send a test message to Potterwell staff and inspect both the HTML and plain-text versions, links, start date, sender details, and unsubscribe information.
@@ -126,13 +126,13 @@ Important behavior:
 
 ## Feedback and support
 
-Access emails contain a signed feedback link. The form collects category, build, severity, reproduction steps, expected result, actual result, and optional device information. Submissions create Early Access-tagged tickets in the existing Support Inbox. File uploads are not included in the first version.
+Access emails contain a signed feedback link. The form collects category, build, severity, reproduction steps, expected result, actual result, and optional device information. Submissions create Early Access-tagged tickets in the existing Support Inbox. Their contact and feedback payload is encrypted at rest and linked to the signup so participant erasure also removes the protected ticket payload and public access link. File uploads are not included in the first version.
 
-Support staff may view participants and help with stages or consent, but cannot export participant data or manage campaigns. Admins may read, manage, export, and send. Owners have unrestricted control.
+Support staff may view masked participant records and help with stages or consent, but cannot reveal participant PII, erase records, export participant data, or manage campaigns. Admins may read PII, manage, erase, export, and send. Owners have unrestricted control.
 
 ## Privacy, exports, and retention
 
-Email addresses, optional first names, and platform-account email addresses are encrypted in PostgreSQL. Case-insensitive duplicate detection uses a keyed value instead of searchable plaintext. Verification and preference tokens are random, stored only as hashes, expire, and are single-use.
+Email addresses, optional first names, platform-account email addresses, device details, and early-access feedback payloads are encrypted before PostgreSQL persistence. Case-insensitive duplicate detection uses a keyed value instead of searchable plaintext. Confirmation tokens are random, purpose-keyed, expire after 48 hours, and are single-use. Management tokens are purpose-keyed, expire after 90 days, and rotate during re-consent and access delivery. Email unsubscribe links use separate action-scoped signed tokens rather than the broader management credential.
 
 Treat every participant export as sensitive personal information:
 
@@ -158,13 +158,16 @@ The NineBelow service uses these early-access variables:
 | --- | --- | --- |
 | `EARLY_ACCESS_PII_KEY` | Encrypts participant personal information | Stable secret of at least 32 characters |
 | `EARLY_ACCESS_TOKEN_SECRET` | Signs and hashes early-access tokens | Different stable secret of at least 32 characters |
+| `SERVER_TOKEN_SECRET` | Signs persisted session, invite, and support-link verifiers | Third independent stable secret of at least 32 characters |
 | `EARLY_ACCESS_CAMPAIGN_EMAIL_ENABLED` | Master campaign-delivery switch | `0` while only collecting signups; `1` only when waves are ready |
 | `EARLY_ACCESS_POSTAL_ADDRESS` | Mailing address shown in campaign email footers | Current Potterwell mailing address |
-| `EARLY_ACCESS_REPLY_TO` | Reply address for early-access messages | Monitored Potterwell address |
+| `EARLY_ACCESS_REPLY_TO` | Reply address for early-access messages | `donotreply@potterwell.com` (intentionally unmonitored) |
 | `EARLY_ACCESS_EMAILS_PER_MINUTE` | Campaign throttle | `60` unless deliberately changed |
 | `REQUIRE_INVITE_CODE` | Requires a valid game invitation during signup | `1` before any access wave |
 
-SMTP uses the existing `ADMIN_SMTP_*` variables. Production readiness also requires the public/admin URLs and database configuration already used by the service.
+SMTP uses the existing `ADMIN_SMTP_*` variables. In production, both `ADMIN_SMTP_USER` and `ADMIN_SMTP_FROM` should be `donotreply@potterwell.com`, backed by that mailbox's unique password. `SUPPORT_INBOX_EMAIL` remains the monitored `app-developer@potterwell.com` destination for support submissions; it is not the public sender. Production readiness also requires the public/admin URLs and database configuration already used by the service.
+
+The no-reply address makes expectations clear and separates the public sending credential from the support inbox. It does not replace mailbox access controls, a unique SMTP password, SPF, DKIM, or DMARC.
 
 Never rotate or remove `EARLY_ACCESS_PII_KEY` after participant records exist unless engineering performs a planned data migration. Losing or changing it makes existing encrypted personal information unreadable. Rotating `EARLY_ACCESS_TOKEN_SECRET` invalidates outstanding signed links and token lookups. Store both values only in Railway or another approved secret manager; never place them in source control, documentation, screenshots, chat, or exported files.
 
@@ -184,7 +187,7 @@ At least weekly while registration is open:
 - Check failed email deliveries and retry only understood temporary failures.
 - Review Early Access tickets in the Support Inbox.
 - Confirm public signup and verification links still use HTTPS and work on mobile.
-- Confirm the reply-to mailbox is monitored.
+- Confirm the reply-to still uses the intentionally unmonitored `donotreply@potterwell.com` address and that support submissions continue to reach the monitored Support Inbox.
 - Confirm no participant exports remain on personal devices unnecessarily.
 
 Before each wave:
@@ -203,4 +206,3 @@ After each wave:
 - Confirm invite activation is updating participant stages.
 - Triage feedback tickets and communicate known issues.
 - Pause the next wave if infrastructure, build stability, or support capacity is not ready.
-

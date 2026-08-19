@@ -13,6 +13,10 @@ import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import { createPostgresStore } from './postgresStore.js';
 import {
+  normalizeCredentialVerifier,
+  persistentCredentialVerifier,
+} from './securityTokens.js';
+import {
   cardValue,
   continueAfterRoundSummary,
   createGameState,
@@ -236,11 +240,13 @@ import {
   completeEarlyAccessOnboarding,
   confirmEarlyAccessSignup,
   createEarlyAccessCampaign,
+  decryptEarlyAccessContact,
   earlyAccessConfirmationEmail,
   earlyAccessCsv,
   earlyAccessPreferences,
   earlyAccessSecurityStatus,
   earlyAccessSummary,
+  encryptEarlyAccessContact,
   eraseEarlyAccessSignup,
   failEarlyAccessDelivery,
   markEarlyAccessActivated,
@@ -248,6 +254,7 @@ import {
   previewEarlyAccessCampaign,
   previewEarlyAccessCampaignEmail,
   publicEarlyAccessConfig,
+  redactEarlyAccessError,
   renderEarlyAccessCampaignEmail,
   retryEarlyAccessCampaignFailures,
   scheduleEarlyAccessCampaign,
@@ -436,6 +443,7 @@ function normalizeAdminPublicUrl(value, publicApiUrl) {
 }
 
 const app = express();
+if (IS_PRODUCTION) app.set('trust proxy', Math.max(1, Number(process.env.TRUST_PROXY_HOPS || 1)));
 app.use(cors({
   origin(origin, callback) {
     if (!origin || CLIENT_ORIGINS.includes('*') || PUBLIC_WEB_ORIGINS.has(origin)) {
@@ -451,11 +459,14 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (IS_PRODUCTION) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   return next();
 });
 
 const adminRequestWindow = new Map();
 app.use('/admin/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, private');
+  res.setHeader('Pragma', 'no-cache');
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
   const bucket = `${ip}:${Math.floor(Date.now() / 60000)}`;
   const count = (adminRequestWindow.get(bucket) || 0) + 1;
@@ -527,7 +538,7 @@ const earlyAccessRequestWindow = new Map();
 function earlyAccessRateLimit(req, res, next) {
   const currentWindow = Math.floor(Date.now() / (15 * 60 * 1000));
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
-  const bucket = `${ip}:${currentWindow}`;
+  const bucket = `${req.path}:${ip}:${currentWindow}`;
   const count = (earlyAccessRequestWindow.get(bucket) || 0) + 1;
   earlyAccessRequestWindow.set(bucket, count);
   if (earlyAccessRequestWindow.size > 2000) {
@@ -536,6 +547,26 @@ function earlyAccessRateLimit(req, res, next) {
     }
   }
   if (count > 12) return res.status(429).json({ error: 'Too many early-access requests. Wait a few minutes and try again.' });
+  return next();
+}
+
+const playerLoginRequestWindow = new Map();
+function playerLoginRateLimit(req, res, next) {
+  const currentWindow = Math.floor(Date.now() / (15 * 60 * 1000));
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const accountKey = crypto.createHash('sha256')
+    .update(String(req.body?.displayName || '').trim().toLowerCase())
+    .digest('hex')
+    .slice(0, 20);
+  const buckets = [`ip:${ip}:${currentWindow}`, `account:${accountKey}:${currentWindow}`];
+  const blocked = buckets.some(bucket => (playerLoginRequestWindow.get(bucket) || 0) >= 10);
+  if (blocked) return res.status(429).json({ error: 'Too many login attempts. Wait a few minutes and try again.' });
+  for (const bucket of buckets) playerLoginRequestWindow.set(bucket, (playerLoginRequestWindow.get(bucket) || 0) + 1);
+  if (playerLoginRequestWindow.size > 4000) {
+    for (const key of playerLoginRequestWindow.keys()) {
+      if (!key.endsWith(`:${currentWindow}`)) playerLoginRequestWindow.delete(key);
+    }
+  }
   return next();
 }
 
@@ -848,6 +879,7 @@ function adminEmailTransport() {
     host: ADMIN_SMTP_HOST,
     port: ADMIN_SMTP_PORT,
     secure: ADMIN_SMTP_SECURE,
+    requireTLS: !ADMIN_SMTP_SECURE,
     auth,
     pool: true,
     maxConnections: 2,
@@ -920,12 +952,67 @@ function supportTrackingUrl(ticket, accessToken) {
   return `${PUBLIC_API_URL}/support/ticket?reference=${reference}#token=${token}`;
 }
 
+function hydrateEarlyAccessSupportTicket(ticket, options = {}) {
+  if (!ticket?.earlyAccessSignupId) return ticket;
+  const stored = adminStore.supportTickets.find(item => item.ticketId === ticket.ticketId);
+  const payload = decryptEarlyAccessContact(stored?.protectedPayloadEncrypted, process.env);
+  if (!payload) return ticket;
+  const includePii = options.includePii !== false;
+  return {
+    ...ticket,
+    displayName: includePii ? (payload.displayName || payload.contactName || 'Early access tester') : 'Early access tester',
+    contactName: includePii ? (payload.contactName || 'Early access tester') : 'Early access tester',
+    contactEmail: includePii ? (payload.contactEmail || null) : null,
+    website: includePii ? (payload.website || ticket.website) : '',
+    message: payload.message || ticket.message,
+  };
+}
+
+function protectEarlyAccessFeedbackTicket(ticket, signupId) {
+  const stored = adminStore.supportTickets.find(item => item.ticketId === ticket.ticketId);
+  if (!stored) return;
+  stored.earlyAccessSignupId = String(signupId || '');
+  stored.protectedPayloadEncrypted = encryptEarlyAccessContact({
+    displayName: ticket.displayName,
+    contactName: ticket.contactName,
+    contactEmail: ticket.contactEmail,
+    website: ticket.website,
+    message: ticket.message,
+  }, process.env);
+  stored.displayName = 'Early access tester';
+  stored.contactName = 'Early access tester';
+  stored.contactEmail = '';
+  stored.website = '';
+  stored.message = 'Protected early-access feedback. Authorized staff can view this case in the admin console.';
+}
+
+function eraseLinkedEarlyAccessFeedback(signupIds, at = Date.now()) {
+  const targets = new Set((signupIds || []).map(String).filter(Boolean));
+  if (!targets.size) return 0;
+  let erased = 0;
+  for (const ticket of adminStore.supportTickets) {
+    if (!targets.has(String(ticket.earlyAccessSignupId || ''))) continue;
+    ticket.displayName = 'Erased early-access participant';
+    ticket.contactName = 'Erased early-access participant';
+    ticket.contactEmail = '';
+    ticket.website = '';
+    ticket.message = 'Early-access feedback removed under the participant erasure policy.';
+    ticket.protectedPayloadEncrypted = '';
+    ticket.publicAccessTokenHash = null;
+    ticket.notes = [];
+    ticket.status = 'closed';
+    ticket.updatedAt = at;
+    erased += 1;
+  }
+  return erased;
+}
+
 async function sendSupportEmailQuietly(message, metadata = {}) {
   try {
     await sendTransactionalEmail(message, metadata);
     return true;
   } catch (error) {
-    console.error('Support email delivery failed:', error?.message || error);
+    console.error('Support email delivery failed:', redactEarlyAccessError(error?.message || error));
     return false;
   }
 }
@@ -974,7 +1061,7 @@ function queueSupportEmail(label, task) {
   setImmediate(() => {
     Promise.resolve()
       .then(task)
-      .catch(error => console.error(`${label} failed:`, error?.message || error));
+      .catch(error => console.error(`${label} failed:`, redactEarlyAccessError(error?.message || error)));
   });
 }
 
@@ -1031,7 +1118,10 @@ async function sendEarlyAccessConfirmation(result) {
 function mergeEarlyAccessRecord(collection, record, key) {
   if (!record?.[key]) return null;
   const existing = collection.find(item => item[key] === record[key]);
-  if (existing) return Object.assign(existing, record);
+  if (existing) {
+    if (Number(existing.updatedAt || 0) > Number(record.updatedAt || 0)) return existing;
+    return Object.assign(existing, record);
+  }
   collection.push(record);
   return record;
 }
@@ -1069,6 +1159,19 @@ async function processEarlyAccessEmailQueue() {
     }
     lastEarlyAccessDeliveryAt = Date.now();
     try {
+      if (postgresStore) {
+        const currentSignup = await postgresStore.getEarlyAccessSignup(claimed.signup.signupId);
+        if (!currentSignup || currentSignup.consentStatus !== 'confirmed' || currentSignup.erasedAt) {
+          claimed.delivery.status = 'skipped';
+          claimed.delivery.leaseExpiresAt = null;
+          claimed.delivery.lastError = 'Recipient is not subscribed.';
+          claimed.delivery.updatedAt = Date.now();
+          claimed.signup = currentSignup || claimed.signup;
+          await postgresStore.saveEarlyAccessQueueContext(claimed);
+          return;
+        }
+        claimed.signup = mergeEarlyAccessRecord(earlyAccessStore.signups, currentSignup, 'signupId');
+      }
       const message = renderEarlyAccessCampaignEmail(claimed.campaign, claimed.signup, claimed.delivery, {
         env: process.env,
         baseUrl: PUBLIC_API_URL,
@@ -1088,12 +1191,12 @@ async function processEarlyAccessEmailQueue() {
     } catch (error) {
       const responseCode = Number(error?.responseCode || 0);
       failEarlyAccessDelivery(earlyAccessStore, claimed.delivery.deliveryId, error, { permanent: responseCode >= 500 && responseCode < 600 });
-      console.error('Early-access email delivery failed:', error?.message || error);
+      console.error('Early-access email delivery failed:', redactEarlyAccessError(error?.message || error));
     }
     if (postgresStore) await postgresStore.saveEarlyAccessQueueContext(claimed);
     else saveStore();
   } catch (error) {
-    console.error('Early-access queue processing failed:', error?.message || error);
+    console.error('Early-access queue processing failed:', redactEarlyAccessError(error?.message || error));
   } finally {
     earlyAccessDeliveryRunning = false;
   }
@@ -1402,7 +1505,10 @@ function applyStoreState(parsed = {}) {
   }
   for (const user of parsed.users || []) users.set(user.userId, normalizeUserRecord(user));
   for (const session of parsed.sessions || []) {
-    if (session.expiresAt > Date.now()) sessions.set(session.token, session);
+    if (session.expiresAt > Date.now()) {
+      const token = normalizeCredentialVerifier(session.token, 'player-session');
+      sessions.set(token, { ...session, token });
+    }
   }
   results.push(...(parsed.results || []));
   mailEntries.push(...normalizeMailEntries(parsed.mailEntries || []));
@@ -2657,10 +2763,11 @@ function userResults(userId) {
 
 function createSession(userId) {
   const token = crypto.randomBytes(32).toString('hex');
-  const session = { token, userId, expiresAt: Date.now() + SESSION_TTL_MS };
-  sessions.set(token, session);
+  const storedToken = persistentCredentialVerifier(token, 'player-session');
+  const session = { token: storedToken, userId, expiresAt: Date.now() + SESSION_TTL_MS };
+  sessions.set(storedToken, session);
   saveStore();
-  return session;
+  return { ...session, token };
 }
 
 function visiblePlayer(user) {
@@ -2684,9 +2791,10 @@ function revokeUserSessions(userId) {
 
 function authenticateToken(token) {
   if (!token) return null;
-  const session = sessions.get(token);
+  const storedToken = persistentCredentialVerifier(token, 'player-session');
+  const session = sessions.get(storedToken);
   if (!session || session.expiresAt <= Date.now()) {
-    if (session) sessions.delete(token);
+    if (session) sessions.delete(storedToken);
     return null;
   }
   const user = users.get(session.userId);
@@ -4423,7 +4531,7 @@ app.post('/admin/api/auth/login', (req, res) => {
   const result = loginAdmin(adminStore, req, req.body?.displayName, req.body?.password);
   if (result.changed) saveStore();
   if (result.error) return res.status(result.status || 401).json({ error: result.error });
-  setAdminCookie(res, result.sessionToken);
+  setAdminCookie(res, result.sessionToken, { secure: IS_PRODUCTION });
   saveStore();
   return res.json(result);
 });
@@ -4467,7 +4575,7 @@ app.post('/admin/api/auth/mfa/enroll/confirm', (req, res) => {
 app.post('/admin/api/auth/logout', requireAdmin(adminStore), (req, res) => {
   adminStore.adminSessions = adminStore.adminSessions.filter(session => session.token !== req.admin.session.token);
   writeAudit(adminStore, req, req.admin.admin, 'admin.logout', { adminId: req.admin.admin.adminId });
-  clearAdminCookie(res);
+  clearAdminCookie(res, { secure: IS_PRODUCTION });
   saveStore();
   return res.json({ ok: true });
 });
@@ -5260,11 +5368,20 @@ app.post('/admin/api/users/:userId/moderation', requireAdmin(adminStore, 'modera
   return res.json({ user: safeUser(user), bans: activeBansFor(adminStore, user, deviceHash) });
 });
 
-app.get('/admin/api/support/tickets', requireAdmin(adminStore, 'support:read'), (req, res) => res.json({ tickets: adminTickets(adminStore, req.query.status) }));
+app.get('/admin/api/support/tickets', requireAdmin(adminStore, 'support:read'), (req, res) => {
+  const includePii = adminHasPermission(req.admin.admin, 'earlyAccess:piiRead');
+  return res.json({
+    tickets: adminTickets(adminStore, req.query.status).map(ticket => hydrateEarlyAccessSupportTicket(ticket, { includePii })),
+  });
+});
 
 app.patch('/admin/api/support/tickets/:ticketId', requireAdmin(adminStore, 'support:write'), async (req, res) => {
   const result = updateSupportTicket(adminStore, req.params.ticketId, req.body || {});
   if (result.error) return res.status(404).json({ error: result.error });
+  const notificationTicket = hydrateEarlyAccessSupportTicket(result.ticket);
+  result.ticket = hydrateEarlyAccessSupportTicket(result.ticket, {
+    includePii: adminHasPermission(req.admin.admin, 'earlyAccess:piiRead'),
+  });
   writeAudit(adminStore, req, req.admin.admin, 'admin.support.ticket.update', { ticketId: req.params.ticketId }, req.body || {});
   saveStore();
   if (result.previousStatus !== result.ticket.status && result.ticket.publicAccessEnabled) {
@@ -5273,7 +5390,7 @@ app.patch('/admin/api/support/tickets/:ticketId', requireAdmin(adminStore, 'supp
       : result.ticket.status === 'closed'
         ? 'Your support case has been closed. This message is your closure receipt.'
         : `Your support case is now ${String(result.ticket.status).replaceAll('_', ' ')}.`;
-    await sendSupportRequesterUpdate(result.ticket, statusMessage, result.ticket.status);
+    await sendSupportRequesterUpdate(notificationTicket, statusMessage, result.ticket.status);
   }
   return res.json(result);
 });
@@ -5282,10 +5399,14 @@ app.post('/admin/api/support/tickets/:ticketId/notes', requireAdmin(adminStore, 
   const isPublic = req.body?.public === true;
   const result = addSupportNote(adminStore, req.params.ticketId, req.admin.admin, req.body?.note, { public: isPublic });
   if (result.error) return res.status(400).json({ error: result.error });
+  const notificationTicket = hydrateEarlyAccessSupportTicket(result.ticket);
+  result.ticket = hydrateEarlyAccessSupportTicket(result.ticket, {
+    includePii: adminHasPermission(req.admin.admin, 'earlyAccess:piiRead'),
+  });
   writeAudit(adminStore, req, req.admin.admin, 'admin.support.ticket.note', { ticketId: req.params.ticketId }, { public: isPublic });
   saveStore();
   if (isPublic && result.ticket.publicAccessEnabled) {
-    await sendSupportRequesterUpdate(result.ticket, req.body?.note, result.ticket.status);
+    await sendSupportRequesterUpdate(notificationTicket, req.body?.note, result.ticket.status);
   }
   return res.json(result);
 });
@@ -5874,13 +5995,21 @@ app.patch('/admin/api/early-access/config', requireAdmin(adminStore, 'earlyAcces
 });
 
 app.get('/admin/api/early-access/signups', requireAdmin(adminStore, 'earlyAccess:read'), (req, res) => {
-  return res.json({ signups: adminEarlyAccessSignups(earlyAccessStore, req.query, { env: process.env }) });
+  return res.json({
+    signups: adminEarlyAccessSignups(earlyAccessStore, req.query, {
+      env: process.env,
+      includePii: adminHasPermission(req.admin.admin, 'earlyAccess:piiRead'),
+    }),
+  });
 });
 
-app.patch('/admin/api/early-access/signups/:signupId', requireAdmin(adminStore, 'earlyAccess:write'), (req, res) => {
+app.patch('/admin/api/early-access/signups/:signupId', requireAdmin(adminStore, 'earlyAccess:write'), async (req, res) => {
   const reason = cleanAdminReason(req.body?.reason);
   if (!reason) return res.status(400).json({ error: 'Audit reason is required.' });
-  const result = updateEarlyAccessSignup(earlyAccessStore, req.params.signupId, req.body || {}, req.admin.admin, { env: process.env });
+  const result = updateEarlyAccessSignup(earlyAccessStore, req.params.signupId, req.body || {}, req.admin.admin, {
+    env: process.env,
+    includePii: adminHasPermission(req.admin.admin, 'earlyAccess:piiRead'),
+  });
   if (result.error) return res.status(400).json({ error: result.error });
   writeAudit(adminStore, req, req.admin.admin, 'admin.early_access.signup.update', { signupId: req.params.signupId }, {
     reason,
@@ -5888,16 +6017,19 @@ app.patch('/admin/api/early-access/signups/:signupId', requireAdmin(adminStore, 
     tags: result.signup.tags,
   });
   saveStore();
+  if (postgresStore) await postgresStore.saveEarlyAccessSignup(earlyAccessStore.signups.find(item => item.signupId === req.params.signupId));
   return res.json(result);
 });
 
-app.post('/admin/api/early-access/signups/:signupId/erase', requireAdmin(adminStore, 'earlyAccess:write'), (req, res) => {
+app.post('/admin/api/early-access/signups/:signupId/erase', requireAdmin(adminStore, 'earlyAccess:erase'), async (req, res) => {
   const reason = cleanAdminReason(req.body?.reason);
   if (!reason) return res.status(400).json({ error: 'Audit reason is required.' });
   const result = eraseEarlyAccessSignup(earlyAccessStore, req.params.signupId, { env: process.env });
   if (result.error) return res.status(404).json({ error: result.error });
-  writeAudit(adminStore, req, req.admin.admin, 'admin.early_access.signup.erase', { signupId: req.params.signupId }, { reason });
+  const linkedTicketsErased = eraseLinkedEarlyAccessFeedback([req.params.signupId]);
+  writeAudit(adminStore, req, req.admin.admin, 'admin.early_access.signup.erase', { signupId: req.params.signupId }, { reason, linkedTicketsErased });
   saveStore();
+  if (postgresStore) await postgresStore.saveEarlyAccessSignup(earlyAccessStore.signups.find(item => item.signupId === req.params.signupId));
   return res.json(result);
 });
 
@@ -6037,7 +6169,7 @@ app.post('/admin/api/invites', requireAdmin(adminStore, 'invites:write'), (req, 
   if (!reason) return res.status(400).json({ error: 'Reason is required.' });
   const result = createInviteCode(adminStore, req.admin.admin, req.body || {});
   if (result.error) return res.status(400).json({ error: result.error });
-  writeAudit(adminStore, req, req.admin.admin, 'admin.invites.create', { inviteId: result.invite.inviteId, code: result.invite.code }, { reason });
+  writeAudit(adminStore, req, req.admin.admin, 'admin.invites.create', { inviteId: result.invite.inviteId }, { reason, codePreview: result.invite.codePreview });
   saveStore();
   return res.json(result);
 });
@@ -6047,7 +6179,7 @@ app.post('/admin/api/invites/:inviteId/disable', requireAdmin(adminStore, 'invit
   if (!reason) return res.status(400).json({ error: 'Reason is required.' });
   const result = disableInviteCode(adminStore, req.params.inviteId, reason);
   if (result.error) return res.status(404).json({ error: result.error });
-  writeAudit(adminStore, req, req.admin.admin, 'admin.invites.disable', { inviteId: result.invite.inviteId, code: result.invite.code }, { reason });
+  writeAudit(adminStore, req, req.admin.admin, 'admin.invites.disable', { inviteId: result.invite.inviteId }, { reason, codePreview: result.invite.codePreview });
   saveStore();
   return res.json(result);
 });
@@ -6081,7 +6213,7 @@ app.post('/support/public', publicSupportRateLimit, (req, res) => {
 });
 
 app.get('/support/public/:reference', (req, res) => {
-  const result = publicSupportTicket(adminStore, req.params.reference, req.query.token);
+  const result = publicSupportTicket(adminStore, req.params.reference, req.query.token, { hydrate: hydrateEarlyAccessSupportTicket });
   if (result.error) return res.status(404).json({ error: result.error });
   return res.json(result);
 });
@@ -6090,6 +6222,7 @@ app.post('/support/public/:reference/replies', publicSupportRateLimit, (req, res
   if (publicSupportHoneypotFilled(req.body)) return res.status(202).json({ ok: true });
   const result = addRequesterSupportReply(adminStore, req.params.reference, req.body?.accessToken, req.body || {});
   if (result.error) return res.status(result.error.includes('closed') ? 409 : 404).json({ error: result.error });
+  result.ticket = hydrateEarlyAccessSupportTicket(result.ticket);
   writeAudit(adminStore, req, null, 'support.ticket.requester_reply', { ticketId: result.ticket.ticketId });
   saveStore();
   res.json({
@@ -6126,26 +6259,24 @@ app.post('/early-access/signups', earlyAccessRateLimit, async (req, res) => {
       referrerHost: earlyAccessReferrerHost(req, req.body || {}),
     });
   } catch (error) {
-    console.error('Early-access signup security configuration failed:', error?.message || error);
+    console.error('Early-access signup security configuration failed:', redactEarlyAccessError(error?.message || error));
     return res.status(503).json({ error: 'Early-access registration is not available yet.' });
   }
   if (result.error) return res.status(result.status || 400).json({ error: result.error });
   saveStore();
+  if (postgresStore) await postgresStore.saveEarlyAccessSignup(result.signup);
   if (result.queued) {
-    try {
-      await sendEarlyAccessConfirmation(result);
-    } catch (error) {
-      console.error('Early-access confirmation delivery failed:', error?.message || error);
-    }
+    queueSupportEmail('Early-access confirmation delivery', () => sendEarlyAccessConfirmation(result));
   }
   return res.status(202).json({ ok: true, message: 'Check your email to confirm your signup.' });
 });
 
-app.post('/early-access/confirm', earlyAccessRateLimit, (req, res) => {
+app.post('/early-access/confirm', earlyAccessRateLimit, async (req, res) => {
   const result = confirmEarlyAccessSignup(earlyAccessStore, req.body?.token, { env: process.env });
   if (result.error) return res.status(400).json({ error: result.error });
   writeAudit(adminStore, req, null, 'early_access.consent.confirmed', { signupId: result.signup.signupId });
   saveStore();
+  if (postgresStore) await postgresStore.saveEarlyAccessSignup(result.signup);
   return res.json({ ok: true, message: 'Your Nine Below early-access signup is confirmed.' });
 });
 
@@ -6158,21 +6289,29 @@ app.post('/early-access/preferences', earlyAccessRateLimit, (req, res) => {
 app.get('/early-access/unsubscribe', (req, res) => {
   const token = String(req.query.token || '');
   if (!token) return res.redirect(302, '/early-access');
+  if (token.startsWith('u1.')) {
+    res.setHeader('Cache-Control', 'no-store, private');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+    const action = `/early-access/unsubscribe?token=${encodeURIComponent(token)}`;
+    return res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Unsubscribe from Nine Below</title><style>body{font-family:Arial,sans-serif;background:#07182a;color:#eef6f3;padding:32px}main{max-width:520px;margin:auto;background:#10223d;padding:28px;border-radius:10px}button{background:#57dda8;color:#061421;border:0;border-radius:6px;padding:14px 20px;font-weight:700}</style></head><body><main><h1>Unsubscribe from Nine Below early access?</h1><p>This will stop early-access email for this signup. You can join again later with a fresh confirmation.</p><form method="post" action="${escapeHtml(action)}"><button type="submit">Confirm unsubscribe</button></form></main></body></html>`);
+  }
   return res.redirect(302, `/early-access/preferences#token=${encodeURIComponent(token)}`);
 });
 
-app.post('/early-access/unsubscribe', earlyAccessRateLimit, (req, res) => {
+app.post('/early-access/unsubscribe', earlyAccessRateLimit, async (req, res) => {
   const result = unsubscribeEarlyAccess(earlyAccessStore, req.body?.token || req.query.token, { env: process.env });
   if (result.signup) writeAudit(adminStore, req, null, 'early_access.consent.unsubscribed', { signupId: result.signup.signupId });
   saveStore();
+  if (postgresStore && result.signup) await postgresStore.saveEarlyAccessSignup(result.signup);
   return res.json({ ok: true, message: 'You have been unsubscribed from Nine Below early-access email.' });
 });
 
-app.post('/early-access/onboarding', earlyAccessRateLimit, (req, res) => {
+app.post('/early-access/onboarding', earlyAccessRateLimit, async (req, res) => {
   const result = completeEarlyAccessOnboarding(earlyAccessStore, req.body?.token, req.body || {}, { env: process.env });
   if (result.error) return res.status(400).json({ error: result.error });
   writeAudit(adminStore, req, null, 'early_access.onboarding.completed', { signupId: result.signup.signupId });
   saveStore();
+  if (postgresStore) await postgresStore.saveEarlyAccessSignup(result.signup);
   return res.json({ ok: true, message: 'Tester setup is complete.' });
 });
 
@@ -6200,6 +6339,7 @@ app.post('/early-access/feedback', earlyAccessRateLimit, (req, res) => {
     ].join('\n'),
   });
   if (result.error) return res.status(400).json({ error: result.error });
+  protectEarlyAccessFeedbackTicket(result.ticket, feedback.signupId);
   writeAudit(adminStore, req, null, 'early_access.feedback.created', { signupId: feedback.signupId, ticketId: result.ticket.ticketId });
   saveStore();
   res.status(201).json({
@@ -6241,13 +6381,13 @@ app.post('/auth/signup', (req, res) => {
   const session = createSession(userId);
   if (invite) {
     if (invite.earlyAccessSignupId) markEarlyAccessActivated(earlyAccessStore, invite.earlyAccessSignupId, userId);
-    writeAudit(adminStore, req, null, 'auth.signup.invite_used', { userId, inviteId: invite.inviteId, code: invite.code, earlyAccessSignupId: invite.earlyAccessSignupId || null });
+    writeAudit(adminStore, req, null, 'auth.signup.invite_used', { userId, inviteId: invite.inviteId, earlyAccessSignupId: invite.earlyAccessSignupId || null }, { codePreview: invite.codePreview || null });
   }
   saveStore();
   return res.json({ token: session.token, user: safeUser(user) });
 });
 
-app.post('/auth/login', (req, res) => {
+app.post('/auth/login', playerLoginRateLimit, (req, res) => {
   const displayName = String(req.body.displayName || '').trim();
   const rawPassword = String(req.body.password || '');
   const password = rawPassword.trim();
@@ -6321,7 +6461,7 @@ app.post('/auth/social/login', async (req, res) => {
   writeAudit(adminStore, req, null, 'auth.signup.social', { userId: user.userId, provider });
   if (invite) {
     if (invite.earlyAccessSignupId) markEarlyAccessActivated(earlyAccessStore, invite.earlyAccessSignupId, user.userId);
-    writeAudit(adminStore, req, null, 'auth.signup.invite_used', { userId: user.userId, inviteId: invite.inviteId, code: invite.code, earlyAccessSignupId: invite.earlyAccessSignupId || null });
+    writeAudit(adminStore, req, null, 'auth.signup.invite_used', { userId: user.userId, inviteId: invite.inviteId, earlyAccessSignupId: invite.earlyAccessSignupId || null }, { codePreview: invite.codePreview || null });
   }
   saveStore();
   return res.json({ token: session.token, user: safeUser(user) });
@@ -7789,7 +7929,7 @@ io.on('connection', (socket) => {
   });
 });
 
-setInterval(() => {
+setInterval(async () => {
   if (!storeReady) return;
   const now = Date.now();
   const scheduleResult = processAvailabilitySchedules(availabilityStore, { now });
@@ -7811,10 +7951,24 @@ setInterval(() => {
   if (now - lastEarlyAccessRetentionAt >= 24 * 60 * 60 * 1000) {
     lastEarlyAccessRetentionAt = now;
     const retention = applyEarlyAccessRetention(earlyAccessStore, { now, env: process.env });
-    if (retention.changed) saveStore();
+    const linkedTicketsErased = eraseLinkedEarlyAccessFeedback([
+      ...retention.erasedSignupIds,
+      ...retention.removedSignupIds,
+    ], now);
+    if (retention.changed || linkedTicketsErased) saveStore();
+    if (postgresStore && retention.erasedSignupIds.length) {
+      for (const signupId of retention.erasedSignupIds) {
+        const signup = earlyAccessStore.signups.find(item => item.signupId === signupId);
+        if (signup) await postgresStore.saveEarlyAccessSignup(signup);
+      }
+    }
     if (postgresStore && retention.removedSignupIds.length) {
-      void postgresStore.deleteEarlyAccessSignups(retention.removedSignupIds)
-        .catch(error => console.error('Early-access retention deletion failed:', error?.message || error));
+      try {
+        await postgresStore.deleteEarlyAccessSignups(retention.removedSignupIds);
+      } catch (error) {
+        console.error('Early-access retention deletion failed:', redactEarlyAccessError(error?.message || error));
+        return;
+      }
     }
     for (const reconfirmation of retention.reconfirmations) {
       queueSupportEmail('Early-access reconfirmation email', () => sendEarlyAccessConfirmation(reconfirmation));

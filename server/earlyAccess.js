@@ -9,6 +9,8 @@ export const EARLY_ACCESS_DELIVERY_STATUSES = ['queued', 'sending', 'sent', 'fai
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CONFIRMATION_TTL_MS = 48 * 60 * 60 * 1000;
 const CONFIRMATION_COOLDOWN_MS = 15 * 60 * 1000;
+const MANAGE_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const UNSUBSCRIBE_TOKEN_TTL_MS = 120 * 24 * 60 * 60 * 1000;
 const CONSENT_TTL_MS = 730 * 24 * 60 * 60 * 1000;
 const PENDING_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const UNSUBSCRIBED_PII_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -31,6 +33,12 @@ export function safeEarlyAccessText(value, maxLength = 160) {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, maxLength);
+}
+
+export function redactEarlyAccessError(value, maxLength = 300) {
+  return safeEarlyAccessText(value, maxLength)
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted-email]')
+    .replace(/\b(token|code)=[A-Za-z0-9._~-]{16,}/gi, '$1=[redacted]');
 }
 
 export function normalizeEarlyAccessEmail(value) {
@@ -60,10 +68,15 @@ function normalizeConfig(value = {}) {
 
 function deriveSecret(env, name, fallbackLabel) {
   const configured = String(env?.[name] || '').trim();
-  if (!configured && String(env?.NODE_ENV || '').toLowerCase() === 'production') {
+  if (!configured && isProductionEnvironment(env)) {
     throw new Error(`${name} is required in production.`);
   }
   return crypto.createHash('sha256').update(configured || `nine-below-local:${fallbackLabel}`).digest();
+}
+
+function isProductionEnvironment(env = process.env) {
+  return [env?.NODE_ENV, env?.APP_ENV, env?.EXPO_PUBLIC_APP_ENV]
+    .some(value => ['production', 'prod'].includes(String(value || '').trim().toLowerCase()));
 }
 
 function piiKey(env) {
@@ -77,7 +90,7 @@ function tokenKey(env) {
 export function earlyAccessSecurityStatus(env = process.env) {
   const piiConfigured = String(env.EARLY_ACCESS_PII_KEY || '').trim().length >= 32;
   const tokenConfigured = String(env.EARLY_ACCESS_TOKEN_SECRET || '').trim().length >= 32;
-  const production = String(env.NODE_ENV || '').toLowerCase() === 'production';
+  const production = isProductionEnvironment(env);
   return {
     production,
     piiConfigured,
@@ -90,8 +103,10 @@ export function earlyAccessEmailHash(email, env = process.env) {
   return crypto.createHmac('sha256', tokenKey(env)).update(normalizeEarlyAccessEmail(email)).digest('hex');
 }
 
-function tokenHash(token) {
-  return crypto.createHash('sha256').update(String(token || '')).digest('hex');
+function tokenHash(token, env = process.env, purpose = 'generic') {
+  return crypto.createHmac('sha256', tokenKey(env))
+    .update(`nine-below:${purpose}:v1\0${String(token || '')}`)
+    .digest('hex');
 }
 
 function secureEqual(left, right) {
@@ -137,6 +152,7 @@ function normalizeSignup(signup) {
     contactEncrypted: String(signup.contactEncrypted || ''),
     pendingContactEncrypted: String(signup.pendingContactEncrypted || ''),
     manageTokenHash: String(signup.manageTokenHash || ''),
+    manageTokenExpiresAt: Number(signup.manageTokenExpiresAt) || null,
     platforms: normalizePlatforms(signup.platforms),
     pendingPlatforms: normalizePlatforms(signup.pendingPlatforms),
     consentStatus,
@@ -227,6 +243,7 @@ function normalizeDelivery(delivery) {
     signupId: String(delivery.signupId || ''),
     inviteId: delivery.inviteId ? String(delivery.inviteId) : null,
     inviteCode: delivery.inviteCode ? String(delivery.inviteCode) : null,
+    inviteCodeEncrypted: String(delivery.inviteCodeEncrypted || ''),
     status: EARLY_ACCESS_DELIVERY_STATUSES.includes(delivery.status) ? delivery.status : 'queued',
     attempts: Math.max(0, Number(delivery.attempts) || 0),
     nextAttemptAt: Number(delivery.nextAttemptAt) || createdAt,
@@ -275,11 +292,13 @@ function attributionFrom(body = {}, options = {}) {
   };
 }
 
-function newContact(email, firstName, manageToken, platformEmail = '') {
+function newContact(email, firstName, manageToken, platformEmail = '', deviceModel = '', osVersion = '') {
   return {
     email,
     firstName: safeEarlyAccessText(firstName, 60),
     platformEmail: normalizeEarlyAccessEmail(platformEmail),
+    deviceModel: safeEarlyAccessText(deviceModel, 80),
+    osVersion: safeEarlyAccessText(osVersion, 40),
     manageToken,
   };
 }
@@ -293,6 +312,7 @@ function eraseEarlyAccessPii(signup, at, eventType = 'erased') {
   signup.contactEncrypted = '';
   signup.pendingContactEncrypted = '';
   signup.manageTokenHash = '';
+  signup.manageTokenExpiresAt = null;
   signup.confirmationTokenHash = '';
   signup.confirmationExpiresAt = null;
   signup.platforms = [];
@@ -344,7 +364,8 @@ export function submitEarlyAccessSignup(store, body = {}, options = {}) {
       signupId: crypto.randomUUID(),
       emailHash,
       contactEncrypted: encryptEarlyAccessContact(newContact(email, firstName, manageToken), options.env),
-      manageTokenHash: tokenHash(manageToken),
+      manageTokenHash: tokenHash(manageToken, options.env, 'manage'),
+      manageTokenExpiresAt: at + MANAGE_TOKEN_TTL_MS,
       platforms,
       consentStatus: 'pending',
       testerStage: 'waitlisted',
@@ -356,9 +377,18 @@ export function submitEarlyAccessSignup(store, body = {}, options = {}) {
     store.signups.push(signup);
   } else {
     const currentContact = decryptEarlyAccessContact(signup.contactEncrypted, options.env) || {};
-    const manageToken = currentContact.manageToken || crypto.randomBytes(32).toString('base64url');
-    const nextContactEncrypted = encryptEarlyAccessContact(newContact(email, firstName, manageToken, currentContact.platformEmail), options.env);
-    signup.manageTokenHash = tokenHash(manageToken);
+    const rejoining = signup.consentStatus === 'unsubscribed' || signup.erasedAt;
+    const manageToken = rejoining ? crypto.randomBytes(32).toString('base64url') : (currentContact.manageToken || crypto.randomBytes(32).toString('base64url'));
+    const nextContactEncrypted = encryptEarlyAccessContact(newContact(
+      email,
+      firstName,
+      manageToken,
+      currentContact.platformEmail,
+      currentContact.deviceModel,
+      currentContact.osVersion,
+    ), options.env);
+    signup.manageTokenHash = tokenHash(manageToken, options.env, 'manage');
+    signup.manageTokenExpiresAt = at + MANAGE_TOKEN_TTL_MS;
     signup.source = safeEarlyAccessText(body.source || signup.source || 'website', 80);
     signup.attribution = attributionFrom(body, options);
     if (signup.consentStatus === 'confirmed') {
@@ -373,11 +403,12 @@ export function submitEarlyAccessSignup(store, body = {}, options = {}) {
       signup.confirmationPurpose = signup.consentStatus === 'unsubscribed' ? 'resubscribe' : 'signup';
       signup.consentStatus = 'pending';
       signup.needsReconfirmation = false;
+      signup.erasedAt = null;
     }
     signup.updatedAt = at;
   }
 
-  signup.confirmationTokenHash = tokenHash(confirmationToken);
+  signup.confirmationTokenHash = tokenHash(confirmationToken, options.env, 'confirmation');
   signup.confirmationExpiresAt = at + CONFIRMATION_TTL_MS;
   signup.lastConfirmationSentAt = at;
   signup.confirmationSendHistory.push(at);
@@ -395,7 +426,7 @@ export function submitEarlyAccessSignup(store, body = {}, options = {}) {
 export function confirmEarlyAccessSignup(store, token, options = {}) {
   normalizeEarlyAccessStore(store);
   const at = nowValue(options);
-  const hash = tokenHash(token);
+  const hash = tokenHash(token, options.env, 'confirmation');
   const signup = store.signups.find(item => item.confirmationTokenHash && secureEqual(item.confirmationTokenHash, hash));
   if (!signup || !signup.confirmationExpiresAt || signup.confirmationExpiresAt < at) {
     return { error: 'This confirmation link is invalid or has expired.' };
@@ -423,9 +454,48 @@ export function confirmEarlyAccessSignup(store, token, options = {}) {
   return { ok: true, signup };
 }
 
-function findByManageToken(store, token) {
-  const hash = tokenHash(token);
-  return store.signups.find(item => item.manageTokenHash && secureEqual(item.manageTokenHash, hash)) || null;
+function findByManageToken(store, token, options = {}) {
+  if (!token) return null;
+  const at = nowValue(options);
+  const hash = tokenHash(token, options.env, 'manage');
+  let signup = store.signups.find(item => item.manageTokenHash && secureEqual(item.manageTokenHash, hash)) || null;
+  if (!signup) {
+    signup = store.signups.find(item => {
+      const contact = decryptEarlyAccessContact(item.contactEncrypted, options.env);
+      return contact?.manageToken && secureEqual(contact.manageToken, token);
+    }) || null;
+    if (signup) {
+      signup.manageTokenHash = hash;
+      signup.manageTokenExpiresAt = at + MANAGE_TOKEN_TTL_MS;
+      signup.updatedAt = Math.max(signup.updatedAt || 0, at);
+    }
+  }
+  if (!signup) return null;
+  if (!signup.manageTokenExpiresAt) signup.manageTokenExpiresAt = at + MANAGE_TOKEN_TTL_MS;
+  return signup.manageTokenExpiresAt >= at ? signup : null;
+}
+
+function scopedUnsubscribeToken(signup, options = {}) {
+  const expiresAt = nowValue(options) + UNSUBSCRIBE_TOKEN_TTL_MS;
+  const payload = `${signup.signupId}.${expiresAt}`;
+  const signature = crypto.createHmac('sha256', tokenKey(options.env))
+    .update(`nine-below:unsubscribe:v1\0${payload}`)
+    .digest('base64url');
+  return `u1.${payload}.${signature}`;
+}
+
+function findByUnsubscribeToken(store, token, options = {}) {
+  const match = /^u1\.([0-9a-f-]{36})\.(\d{10,16})\.([A-Za-z0-9_-]{40,})$/.exec(String(token || ''));
+  if (!match) return null;
+  const [, signupId, expiresValue, signature] = match;
+  const expiresAt = Number(expiresValue);
+  if (!Number.isFinite(expiresAt) || expiresAt < nowValue(options)) return null;
+  const payload = `${signupId}.${expiresValue}`;
+  const expected = crypto.createHmac('sha256', tokenKey(options.env))
+    .update(`nine-below:unsubscribe:v1\0${payload}`)
+    .digest('base64url');
+  if (!secureEqual(signature, expected)) return null;
+  return store.signups.find(item => item.signupId === signupId) || null;
 }
 
 function maskEmail(email) {
@@ -436,7 +506,7 @@ function maskEmail(email) {
 
 export function earlyAccessPreferences(store, token, options = {}) {
   normalizeEarlyAccessStore(store);
-  const signup = findByManageToken(store, token);
+  const signup = findByManageToken(store, token, options);
   if (!signup || signup.erasedAt) return { error: 'This preferences link is invalid or no longer active.' };
   const contact = decryptEarlyAccessContact(signup.contactEncrypted, options.env);
   if (!contact) return { error: 'Early-access preferences are unavailable.' };
@@ -448,14 +518,18 @@ export function earlyAccessPreferences(store, token, options = {}) {
       platforms: signup.platforms,
       consentStatus: signup.consentStatus,
       testerStage: signup.testerStage,
-      onboarding: signup.onboarding,
+      onboarding: signup.onboarding ? {
+        ...signup.onboarding,
+        deviceModel: contact.deviceModel || signup.onboarding.deviceModel || '',
+        osVersion: contact.osVersion || signup.onboarding.osVersion || '',
+      } : null,
     },
   };
 }
 
 export function unsubscribeEarlyAccess(store, token, options = {}) {
   normalizeEarlyAccessStore(store);
-  const signup = findByManageToken(store, token);
+  const signup = findByManageToken(store, token, options) || findByUnsubscribeToken(store, token, options);
   if (!signup) return { ok: true };
   const at = nowValue(options);
   if (signup.consentStatus !== 'unsubscribed') {
@@ -470,7 +544,7 @@ export function unsubscribeEarlyAccess(store, token, options = {}) {
 
 export function completeEarlyAccessOnboarding(store, token, body = {}, options = {}) {
   normalizeEarlyAccessStore(store);
-  const signup = findByManageToken(store, token);
+  const signup = findByManageToken(store, token, options);
   if (!signup || signup.consentStatus !== 'confirmed') return { error: 'This onboarding link is invalid or no longer active.' };
   if (!['selected', 'onboarding', 'ready'].includes(signup.testerStage)) return { error: 'This signup has not been selected for a testing wave.' };
   if (body.acknowledged !== true) return { error: 'Acknowledge the testing expectations to continue.' };
@@ -479,10 +553,13 @@ export function completeEarlyAccessOnboarding(store, token, body = {}, options =
   const platformEmail = normalizeEarlyAccessEmail(body.platformEmail || contact.email);
   if (signup.platforms.includes('android') && !platformEmail) return { error: 'Enter the Google account used with Google Play.' };
   const at = nowValue(options);
-  signup.contactEncrypted = encryptEarlyAccessContact({ ...contact, platformEmail }, options.env);
-  signup.onboarding = {
+  signup.contactEncrypted = encryptEarlyAccessContact({
+    ...contact,
+    platformEmail,
     deviceModel: safeEarlyAccessText(body.deviceModel, 80),
     osVersion: safeEarlyAccessText(body.osVersion, 40),
+  }, options.env);
+  signup.onboarding = {
     acknowledgedAt: at,
   };
   signup.testerStage = 'ready';
@@ -492,7 +569,7 @@ export function completeEarlyAccessOnboarding(store, token, body = {}, options =
 
 export function validateEarlyAccessFeedback(store, token, body = {}, options = {}) {
   normalizeEarlyAccessStore(store);
-  const signup = findByManageToken(store, token);
+  const signup = findByManageToken(store, token, options);
   if (!signup || signup.consentStatus !== 'confirmed') return { error: 'This feedback link is invalid or no longer active.' };
   const contact = decryptEarlyAccessContact(signup.contactEncrypted, options.env);
   if (!contact) return { error: 'Early-access contact information is unavailable.' };
@@ -516,13 +593,13 @@ export function validateEarlyAccessFeedback(store, token, body = {}, options = {
   };
 }
 
-function publicSignup(signup, env) {
+function publicSignup(signup, env, includePii = true) {
   const contact = decryptEarlyAccessContact(signup.contactEncrypted, env) || {};
   return {
     signupId: signup.signupId,
-    email: contact.email || null,
-    firstName: contact.firstName || '',
-    platformEmail: contact.platformEmail || '',
+    email: includePii ? (contact.email || null) : (maskEmail(contact.email) || null),
+    firstName: includePii ? (contact.firstName || '') : '',
+    platformEmail: includePii ? (contact.platformEmail || '') : '',
     platforms: signup.platforms,
     consentStatus: signup.consentStatus,
     testerStage: signup.testerStage,
@@ -533,11 +610,15 @@ function publicSignup(signup, env) {
     unsubscribedAt: signup.unsubscribedAt,
     needsReconfirmation: signup.needsReconfirmation,
     source: signup.source,
-    attribution: signup.attribution,
+    attribution: includePii ? signup.attribution : {},
     tags: signup.tags,
-    notes: signup.notes,
+    notes: includePii ? signup.notes : [],
     consentHistory: signup.consentHistory,
-    onboarding: signup.onboarding,
+    onboarding: signup.onboarding ? {
+      ...signup.onboarding,
+      deviceModel: includePii ? (contact.deviceModel || signup.onboarding.deviceModel || '') : '',
+      osVersion: includePii ? (contact.osVersion || signup.onboarding.osVersion || '') : '',
+    } : null,
     selectedAt: signup.selectedAt,
     invitedAt: signup.invitedAt,
     activatedAt: signup.activatedAt,
@@ -574,7 +655,7 @@ export function adminEarlyAccessSignups(store, query = {}, options = {}) {
   const stage = safeEarlyAccessText(query.stage, 40);
   const limit = Math.max(1, Math.min(500, Number(query.limit) || 200));
   return store.signups
-    .map(item => publicSignup(item, options.env))
+    .map(item => publicSignup(item, options.env, options.includePii !== false))
     .filter(item => !status || item.consentStatus === status)
     .filter(item => !platform || item.platforms.includes(platform))
     .filter(item => !stage || item.testerStage === stage)
@@ -611,7 +692,7 @@ export function updateEarlyAccessSignup(store, signupId, patch = {}, admin = nul
   });
   if (patch.unsubscribe === true) unsubscribeEarlyAccess(store, decryptEarlyAccessContact(signup.contactEncrypted, options.env)?.manageToken, options);
   signup.updatedAt = at;
-  return { signup: publicSignup(signup, options.env) };
+  return { signup: publicSignup(signup, options.env, options.includePii !== false) };
 }
 
 export function eraseEarlyAccessSignup(store, signupId, options = {}) {
@@ -741,7 +822,7 @@ export function scheduleEarlyAccessCampaign(store, campaignId, admin, options = 
       campaignId: campaign.campaignId,
       signupId: signup.signupId,
       inviteId: invite?.inviteId || null,
-      inviteCode: invite?.code || null,
+      inviteCodeEncrypted: invite?.code ? encryptEarlyAccessContact({ inviteCode: invite.code }, options.env) : '',
       status: 'queued',
       attempts: 0,
       nextAttemptAt: scheduledAt,
@@ -776,6 +857,8 @@ export function cancelEarlyAccessCampaign(store, campaignId, options = {}) {
   for (const delivery of store.deliveries.filter(item => item.campaignId === campaign.campaignId && ['queued', 'failed'].includes(item.status))) {
     delivery.status = 'skipped';
     delivery.lastError = 'Campaign cancelled.';
+    delivery.inviteCode = null;
+    delivery.inviteCodeEncrypted = '';
     delivery.updatedAt = at;
   }
   return { campaign };
@@ -847,6 +930,8 @@ export function completeEarlyAccessDelivery(store, deliveryId, options = {}) {
   delivery.sentAt = at;
   delivery.leaseExpiresAt = null;
   delivery.lastError = '';
+  delivery.inviteCode = null;
+  delivery.inviteCodeEncrypted = '';
   delivery.updatedAt = at;
   if (campaign && signup) {
     if (campaign.type === 'selection') signup.testerStage = 'onboarding';
@@ -866,7 +951,7 @@ export function failEarlyAccessDelivery(store, deliveryId, error, options = {}) 
   if (!delivery) return { error: 'Delivery not found.' };
   const at = nowValue(options);
   delivery.leaseExpiresAt = null;
-  delivery.lastError = safeEarlyAccessText(error?.message || error || 'Email delivery failed.', 300);
+  delivery.lastError = redactEarlyAccessError(error?.message || error || 'Email delivery failed.', 300);
   delivery.updatedAt = at;
   if (delivery.attempts >= MAX_DELIVERY_ATTEMPTS || options.permanent === true) {
     delivery.status = 'failed';
@@ -901,6 +986,39 @@ function linkWithFragment(baseUrl, path, token) {
   return `${String(baseUrl || '').replace(/\/$/, '')}${path}#token=${encodeURIComponent(token)}`;
 }
 
+function campaignManageContact(signup, options = {}) {
+  const at = nowValue(options);
+  const contact = decryptEarlyAccessContact(signup.contactEncrypted, options.env);
+  if (!contact?.email) return null;
+  if (!contact.manageToken || !signup.manageTokenExpiresAt || signup.manageTokenExpiresAt <= at) {
+    const manageToken = crypto.randomBytes(32).toString('base64url');
+    const refreshed = { ...contact, manageToken };
+    signup.contactEncrypted = encryptEarlyAccessContact(refreshed, options.env);
+    signup.manageTokenHash = tokenHash(manageToken, options.env, 'manage');
+    signup.manageTokenExpiresAt = at + MANAGE_TOKEN_TTL_MS;
+    signup.updatedAt = Math.max(signup.updatedAt || 0, at);
+    return refreshed;
+  }
+  const expectedHash = tokenHash(contact.manageToken, options.env, 'manage');
+  if (!secureEqual(signup.manageTokenHash, expectedHash)) {
+    signup.manageTokenHash = expectedHash;
+    signup.updatedAt = Math.max(signup.updatedAt || 0, at);
+  }
+  return contact;
+}
+
+function deliveryInviteCode(delivery, env) {
+  if (!delivery) return '';
+  const protectedInvite = decryptEarlyAccessContact(delivery.inviteCodeEncrypted, env)?.inviteCode;
+  if (protectedInvite) return safeEarlyAccessText(protectedInvite, 64);
+  const legacyInvite = safeEarlyAccessText(delivery.inviteCode, 64);
+  if (legacyInvite) {
+    delivery.inviteCodeEncrypted = encryptEarlyAccessContact({ inviteCode: legacyInvite }, env);
+    delivery.inviteCode = null;
+  }
+  return legacyInvite;
+}
+
 export function earlyAccessConfirmationEmail({ email, firstName, confirmationToken, baseUrl }) {
   const confirmationUrl = linkWithFragment(baseUrl, '/early-access/confirm', confirmationToken);
   const greeting = firstName ? `Hello ${firstName},` : 'Hello,';
@@ -921,18 +1039,19 @@ export function earlyAccessConfirmationEmail({ email, firstName, confirmationTok
 }
 
 export function renderEarlyAccessCampaignEmail(campaign, signup, delivery, options = {}) {
-  const contact = decryptEarlyAccessContact(signup.contactEncrypted, options.env);
+  const contact = campaignManageContact(signup, options);
   if (!contact?.email || !contact.manageToken) throw new Error('Recipient contact information is unavailable.');
   const baseUrl = String(options.baseUrl || '').replace(/\/$/, '');
   const manageUrl = linkWithFragment(baseUrl, '/early-access/preferences', contact.manageToken);
   const feedbackUrl = linkWithFragment(baseUrl, '/early-access/feedback', contact.manageToken);
   const onboardingUrl = linkWithFragment(baseUrl, '/early-access/onboarding', contact.manageToken);
-  const unsubscribeUrl = `${baseUrl}/early-access/unsubscribe?token=${encodeURIComponent(contact.manageToken)}`;
+  const unsubscribeUrl = `${baseUrl}/early-access/unsubscribe?token=${encodeURIComponent(scopedUnsubscribeToken(signup, options))}`;
   const ctaUrl = campaign.type === 'selection' ? onboardingUrl : campaign.accessUrl || feedbackUrl;
   const ctaLabel = campaign.type === 'selection' ? 'Complete tester setup' : campaign.ctaLabel || (campaign.type === 'access' ? 'Join the test' : 'Learn more');
   const greeting = contact.firstName ? `Hello ${contact.firstName},` : 'Hello,';
   const startLine = campaign.startAt ? `Testing begins ${new Date(campaign.startAt).toLocaleString()}.` : '';
-  const inviteLine = delivery?.inviteCode ? `Your one-use Nine Below invite code: ${delivery.inviteCode}` : '';
+  const inviteCode = deliveryInviteCode(delivery, options.env);
+  const inviteLine = inviteCode ? `Your one-use Nine Below invite code: ${inviteCode}` : '';
   const focusText = campaign.focusBullets.length ? ['What to watch for:', ...campaign.focusBullets.map(item => `- ${item}`)] : [];
   const footer = [
     `Manage preferences or unsubscribe: ${manageUrl}`,
@@ -959,12 +1078,15 @@ export function previewEarlyAccessCampaignEmail(campaign, email, options = {}) {
     signupId: 'preview',
     emailHash: 'preview',
     contactEncrypted: encryptEarlyAccessContact(newContact(normalizeEarlyAccessEmail(email), 'Partner', manageToken, email), options.env),
-    manageTokenHash: tokenHash(manageToken),
+    manageTokenHash: tokenHash(manageToken, options.env, 'manage'),
+    manageTokenExpiresAt: Date.now() + MANAGE_TOKEN_TTL_MS,
     platforms: campaign.targetPlatform === 'all' ? ['ios', 'android'] : [campaign.targetPlatform],
     consentStatus: 'confirmed',
     testerStage: campaign.type === 'access' ? 'ready' : 'waitlisted',
   });
-  return renderEarlyAccessCampaignEmail(campaign, signup, { inviteCode: campaign.type === 'access' ? 'PREVIEW-CODE' : null }, options);
+  return renderEarlyAccessCampaignEmail(campaign, signup, campaign.type === 'access'
+    ? { inviteCodeEncrypted: encryptEarlyAccessContact({ inviteCode: 'PREVIEW-CODE' }, options.env) }
+    : {}, options);
 }
 
 function csvCell(value) {
@@ -992,6 +1114,7 @@ export function applyEarlyAccessRetention(store, options = {}) {
   let erased = 0;
   const reconfirmations = [];
   const removedSignupIds = [];
+  const erasedSignupIds = [];
   for (const signup of store.signups) {
     if (signup.consentStatus === 'confirmed' && signup.consentRefreshedAt && signup.consentRefreshedAt + CONSENT_TTL_MS <= at) {
       const contact = decryptEarlyAccessContact(signup.contactEncrypted, options.env);
@@ -1000,7 +1123,7 @@ export function applyEarlyAccessRetention(store, options = {}) {
       signup.needsReconfirmation = true;
       signup.reconfirmationRequestedAt = at;
       signup.confirmationPurpose = 'reconfirm';
-      signup.confirmationTokenHash = tokenHash(confirmationToken);
+      signup.confirmationTokenHash = tokenHash(confirmationToken, options.env, 'confirmation');
       signup.confirmationExpiresAt = at + CONFIRMATION_TTL_MS;
       signup.lastConfirmationSentAt = at;
       signup.confirmationSendHistory.push(at);
@@ -1017,14 +1140,16 @@ export function applyEarlyAccessRetention(store, options = {}) {
     if (signup.needsReconfirmation && signup.reconfirmationRequestedAt && signup.reconfirmationRequestedAt + PENDING_RETENTION_MS <= at && !signup.erasedAt) {
       eraseEarlyAccessPii(signup, at, 'reconfirmation_expired');
       erased += 1;
+      erasedSignupIds.push(signup.signupId);
     }
     if (signup.consentStatus === 'unsubscribed' && signup.unsubscribedAt && !signup.erasedAt && signup.unsubscribedAt + UNSUBSCRIBED_PII_RETENTION_MS <= at) {
       eraseEarlyAccessPii(signup, at, 'pii_retention_erased');
       erased += 1;
+      erasedSignupIds.push(signup.signupId);
     }
   }
   store.signups = store.signups.filter(signup => {
-    const expiredPending = signup.consentStatus === 'pending' && !signup.needsReconfirmation && !signup.confirmedAt && signup.confirmationExpiresAt && signup.confirmationExpiresAt + PENDING_RETENTION_MS <= at;
+    const expiredPending = signup.consentStatus === 'pending' && !signup.needsReconfirmation && signup.confirmationExpiresAt && signup.confirmationExpiresAt + PENDING_RETENTION_MS <= at;
     const expiredSuppression = signup.consentStatus === 'unsubscribed' && signup.unsubscribedAt && signup.unsubscribedAt + SUPPRESSION_RETENTION_MS <= at;
     if (expiredPending || expiredSuppression) {
       removed += 1;
@@ -1033,5 +1158,5 @@ export function applyEarlyAccessRetention(store, options = {}) {
     }
     return true;
   });
-  return { removed, erased, reconfirmations, removedSignupIds, changed: removed + erased + reconfirmations.length > 0 };
+  return { removed, erased, reconfirmations, removedSignupIds, erasedSignupIds, changed: removed + erased + reconfirmations.length > 0 };
 }

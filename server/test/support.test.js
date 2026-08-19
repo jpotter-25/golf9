@@ -30,7 +30,8 @@ test('public support tickets use private token links and expose only public conv
   assert.ok(created.accessToken);
   assert.ok(created.ticket.publicReference);
   assert.equal(created.ticket.publicAccessTokenHash, undefined);
-  assert.equal(store.supportTickets[0].publicAccessTokenHash.length, 64);
+  assert.match(store.supportTickets[0].publicAccessTokenHash, /^v1:/);
+  assert.equal(JSON.stringify(store).includes(created.accessToken), false);
   assert.equal(publicSupportTicket(store, created.ticket.publicReference, 'wrong-token').error.length > 0, true);
 
   const admin = { adminId: 'support-admin', displayName: 'Support Admin' };

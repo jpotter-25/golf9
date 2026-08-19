@@ -11,7 +11,9 @@ import {
   decryptEarlyAccessContact,
   earlyAccessCsv,
   earlyAccessPreferences,
+  earlyAccessSecurityStatus,
   encryptEarlyAccessContact,
+  failEarlyAccessDelivery,
   markEarlyAccessActivated,
   normalizeEarlyAccessStore,
   renderEarlyAccessCampaignEmail,
@@ -63,6 +65,21 @@ test('early-access contact data encrypts with authenticated encryption', () => {
   assert.equal(decryptEarlyAccessContact(`${encrypted}tampered`, env), null);
 });
 
+test('every production environment indicator requires explicit independent secrets', () => {
+  const missing = earlyAccessSecurityStatus({ APP_ENV: 'production' });
+  assert.equal(missing.ready, false);
+  assert.equal(missing.production, true);
+  assert.equal(missing.piiConfigured, false);
+  assert.equal(missing.tokenConfigured, false);
+
+  const configured = earlyAccessSecurityStatus({
+    EXPO_PUBLIC_APP_ENV: 'prod',
+    EARLY_ACCESS_PII_KEY: env.EARLY_ACCESS_PII_KEY,
+    EARLY_ACCESS_TOKEN_SECRET: env.EARLY_ACCESS_TOKEN_SECRET,
+  });
+  assert.equal(configured.ready, true);
+});
+
 test('early-access signup requires double opt-in and verifies preference changes', () => {
   const store = openStore();
   const first = submitEarlyAccessSignup(store, signupBody(), { env, now: 1_000_000, ipHash: 'ip-hash' });
@@ -91,7 +108,7 @@ test('preferences, unsubscribe, resubscribe, onboarding, and feedback preserve c
   const store = openStore();
   const { signup } = confirmedSignup(store);
   const contact = decryptEarlyAccessContact(signup.contactEncrypted, env);
-  const preferences = earlyAccessPreferences(store, contact.manageToken, { env });
+  const preferences = earlyAccessPreferences(store, contact.manageToken, { env, now: 1_050_000 });
   assert.match(preferences.signup.email, /^te\*+@example\.com$/);
 
   const unsubscribed = unsubscribeEarlyAccess(store, contact.manageToken, { env, now: 1_100_000 });
@@ -100,22 +117,40 @@ test('preferences, unsubscribe, resubscribe, onboarding, and feedback preserve c
 
   const resubmitted = submitEarlyAccessSignup(store, signupBody(), { env, now: 2_100_000 });
   assert.equal(resubmitted.signup.consentStatus, 'pending');
+  const rejoinedContact = decryptEarlyAccessContact(resubmitted.signup.contactEncrypted, env);
+  assert.notEqual(rejoinedContact.manageToken, contact.manageToken);
+  assert.ok(earlyAccessPreferences(store, contact.manageToken, { env, now: 2_100_500 }).error);
   const reconfirmed = confirmEarlyAccessSignup(store, resubmitted.confirmationToken, { env, now: 2_101_000 });
   updateEarlyAccessSignup(store, reconfirmed.signup.signupId, { testerStage: 'selected' }, { adminId: 'admin-1' }, { env, now: 2_101_500 });
-  const onboarding = completeEarlyAccessOnboarding(store, contact.manageToken, {
+  const onboarding = completeEarlyAccessOnboarding(store, rejoinedContact.manageToken, {
     platformEmail: 'play-tester@gmail.com',
     deviceModel: 'Pixel Test',
     osVersion: 'Android Test',
     acknowledged: true,
   }, { env, now: 2_102_000 });
   assert.equal(onboarding.signup.testerStage, 'ready');
-  assert.equal(decryptEarlyAccessContact(onboarding.signup.contactEncrypted, env).platformEmail, 'play-tester@gmail.com');
+  const protectedContact = decryptEarlyAccessContact(onboarding.signup.contactEncrypted, env);
+  assert.equal(protectedContact.platformEmail, 'play-tester@gmail.com');
+  assert.equal(protectedContact.deviceModel, 'Pixel Test');
+  assert.doesNotMatch(JSON.stringify(onboarding.signup), /Pixel Test|Android Test/);
 
-  const feedback = validateEarlyAccessFeedback(store, contact.manageToken, {
+  const feedback = validateEarlyAccessFeedback(store, rejoinedContact.manageToken, {
     category: 'bug', severity: 'blocking', actual: 'The match stopped before the final card resolved.',
-  }, { env });
+  }, { env, now: 2_103_000 });
   assert.equal(feedback.feedback.signupId, signup.signupId);
   assert.equal(feedback.feedback.severity, 'blocking');
+});
+
+test('management credentials stop authorizing participant operations after expiry', () => {
+  const store = openStore();
+  const { signup } = confirmedSignup(store);
+  const manageToken = decryptEarlyAccessContact(signup.contactEncrypted, env).manageToken;
+  signup.manageTokenExpiresAt = 1_049_999;
+  assert.match(earlyAccessPreferences(store, manageToken, { env, now: 1_050_000 }).error, /invalid|expired|no longer active/i);
+  const neutralUnsubscribe = unsubscribeEarlyAccess(store, manageToken, { env, now: 1_050_000 });
+  assert.equal(neutralUnsubscribe.ok, true);
+  assert.equal(neutralUnsubscribe.signup, undefined);
+  assert.equal(signup.consentStatus, 'confirmed');
 });
 
 test('controlled campaigns segment recipients, queue once, render unsubscribe headers, and activate invite users', () => {
@@ -141,6 +176,9 @@ test('controlled campaigns segment recipients, queue once, render unsubscribe he
   });
   assert.match(selectionMessage.text, /Complete tester setup/);
   assert.match(selectionMessage.headers['List-Unsubscribe'], /early-access\/unsubscribe/);
+  const unsubscribeToken = decodeURIComponent(selectionMessage.headers['List-Unsubscribe'].match(/token=([^>]+)/)?.[1] || '');
+  assert.match(unsubscribeToken, /^u1\./);
+  assert.ok(earlyAccessPreferences(store, unsubscribeToken, { env }).error);
   completeEarlyAccessDelivery(store, claimedSelection.delivery.deliveryId, { now: 2_002_000 });
   assert.equal(store.signups.find(item => item.signupId === signup.signupId).testerStage, 'onboarding');
 
@@ -191,6 +229,28 @@ test('exports neutralize spreadsheet formulas and retention erases or removes ex
   assert.equal(pending.signup.consentStatus, 'pending');
   applyEarlyAccessRetention(store, { now: pending.signup.confirmationExpiresAt + (31 * 24 * 60 * 60 * 1000) });
   assert.equal(store.signups.some(item => item.signupId === pending.signup.signupId), false);
+
+  const abandonedStore = openStore();
+  const { signup: previous } = confirmedSignup(abandonedStore, 10_000_000, signupBody({ email: 'resubscribe@example.com' }));
+  const previousToken = decryptEarlyAccessContact(previous.contactEncrypted, env).manageToken;
+  unsubscribeEarlyAccess(abandonedStore, previousToken, { env, now: 11_000_000 });
+  const abandoned = submitEarlyAccessSignup(abandonedStore, signupBody({ email: 'resubscribe@example.com' }), { env, now: 12_000_000 });
+  applyEarlyAccessRetention(abandonedStore, { env, now: abandoned.signup.confirmationExpiresAt + (31 * 24 * 60 * 60 * 1000) });
+  assert.equal(abandonedStore.signups.length, 0);
+});
+
+test('delivery errors redact addresses and bearer values before persistence', () => {
+  const store = openStore();
+  const { signup } = confirmedSignup(store);
+  const campaign = createEarlyAccessCampaign(store, {
+    type: 'update', subject: 'Update', heading: 'Update', body: 'Testing update.',
+  }, { adminId: 'admin-1', displayName: 'Owner' }).campaign;
+  scheduleEarlyAccessCampaign(store, campaign.campaignId, { adminId: 'admin-1' }, { env, now: 2_000_000 });
+  const claimed = claimEarlyAccessDelivery(store, { now: 2_000_000 });
+  failEarlyAccessDelivery(store, claimed.delivery.deliveryId, new Error('Rejected tester@example.com token=abcdefghijklmnopqrstuvwxyz123456'), { now: 2_000_100 });
+  assert.doesNotMatch(claimed.delivery.lastError, /tester@example\.com|abcdefghijklmnopqrstuvwxyz123456/);
+  assert.match(claimed.delivery.lastError, /\[redacted-email\]|\[redacted\]/);
+  assert.equal(signup.signupId, claimed.signup.signupId);
 });
 
 test('retention requests renewed consent after 24 months and erases PII when it is not renewed', () => {

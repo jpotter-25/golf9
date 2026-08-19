@@ -713,7 +713,7 @@ async function loadInvites() {
     const card = document.createElement('div');
     card.className = `card ${invite.status !== 'active' ? 'dim' : ''}`;
     card.innerHTML = `
-      <strong>${escapeHtml(invite.code)} <span class="chip">${escapeHtml(invite.status)}</span></strong>
+      <strong>••••${escapeHtml(invite.codePreview || '')} <span class="chip">${escapeHtml(invite.status)}</span></strong>
       <p class="muted">${escapeHtml(invite.label)} - ${invite.remainingUses}/${invite.maxUses} remaining${invite.expiresAt ? ` - expires ${new Date(invite.expiresAt).toLocaleDateString()}` : ''}</p>
       ${invite.note ? `<p>${escapeHtml(invite.note)}</p>` : ''}
       <div class="statline">
@@ -734,7 +734,7 @@ async function createInvite(event) {
   const reason = prompt('Reason for audit log');
   if (!reason) return;
   const expiresAtValue = form.elements.expiresAt.value;
-  await api('/invites', {
+  const created = await api('/invites', {
     method: 'POST',
     body: JSON.stringify({
       reason,
@@ -746,7 +746,7 @@ async function createInvite(event) {
     }),
   });
   form.reset();
-  status('Invite created.', 'ok');
+  status(`Invite created: ${created.invite.code}. Copy it now; only the ending ${created.invite.codePreview} will be shown later.`, 'ok');
   await loadInvites();
 }
 
@@ -873,7 +873,7 @@ function renderEarlyAccessSignups() {
               </div>
             </details>
           </td>
-          <td><div class="actions-inline"><button data-early-action="save">Save</button><button data-early-action="unsubscribe" class="ghost">Unsubscribe</button><button data-early-action="erase" class="danger">Erase PII</button></div></td>
+          <td><div class="actions-inline"><button data-early-action="save">Save</button><button data-early-action="unsubscribe" class="ghost">Unsubscribe</button>${earlyAccessCan('earlyAccess:erase') ? '<button data-early-action="erase" class="danger">Erase PII</button>' : ''}</div></td>
         </tr>`).join('')}</tbody>
     </table>`;
   output.querySelectorAll('[data-early-action]').forEach(button => {

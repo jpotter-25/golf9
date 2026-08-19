@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { isProductionEnvironment } from './securityTokens.js';
 
 const COLLECTION_TABLES = [
   ['users', 'user_id'],
@@ -48,9 +49,18 @@ function itemId(item, key) {
 
 export function createPostgresStore(databaseUrl = process.env.DATABASE_URL) {
   if (!databaseUrl) return null;
+  const sslDisabled = process.env.DATABASE_SSL === '0';
+  if (sslDisabled && isProductionEnvironment(process.env)) {
+    throw new Error('DATABASE_SSL cannot be disabled in production.');
+  }
+  const sslCa = String(process.env.DATABASE_SSL_CA || '').replace(/\\n/g, '\n').trim();
+  const rejectUnauthorized = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== '0';
   const pool = new Pool({
     connectionString: databaseUrl,
-    ssl: process.env.DATABASE_SSL === '0' ? false : { rejectUnauthorized: false },
+    ssl: sslDisabled ? false : {
+      rejectUnauthorized,
+      ...(sslCa ? { ca: sslCa } : {}),
+    },
     max: Number(process.env.DATABASE_POOL_SIZE || 5),
   });
   return new PostgresStore(pool);
@@ -273,9 +283,8 @@ export class PostgresStore {
     const records = [
       ['early_access_deliveries', 'delivery_id', delivery?.deliveryId, delivery],
       ['early_access_campaigns', 'campaign_id', campaign?.campaignId, campaign],
-      ['early_access_signups', 'email_hash', signup?.emailHash, signup],
     ].filter(([, , id, data]) => id && data);
-    if (!records.length) return;
+    if (!records.length && !signup?.emailHash) return;
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -289,6 +298,23 @@ export class PostgresStore {
              <= COALESCE((EXCLUDED.data->>'updatedAt')::numeric, 0)
         `, [String(id), json(data)]);
       }
+      if (signup?.emailHash) {
+        const queueOwnedFields = {
+          testerStage: signup.testerStage,
+          selectedAt: signup.selectedAt,
+          invitedAt: signup.invitedAt,
+          activatedAt: signup.activatedAt,
+          activatedUserId: signup.activatedUserId,
+          updatedAt: signup.updatedAt,
+        };
+        await client.query(`
+          UPDATE golf9_early_access_signups
+             SET data = data || $2::jsonb, updated_at = NOW()
+           WHERE email_hash = $1
+             AND data->>'consentStatus' = 'confirmed'
+             AND COALESCE(data->>'erasedAt', '') = ''
+        `, [String(signup.emailHash), json(queueOwnedFields)]);
+      }
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -296,6 +322,26 @@ export class PostgresStore {
     } finally {
       client.release();
     }
+  }
+
+  async getEarlyAccessSignup(signupId) {
+    const result = await this.pool.query(
+      "SELECT data FROM golf9_early_access_signups WHERE data->>'signupId' = $1 LIMIT 1",
+      [String(signupId || '')],
+    );
+    return result.rows[0]?.data || null;
+  }
+
+  async saveEarlyAccessSignup(signup) {
+    if (!signup?.emailHash) return;
+    await this.pool.query(`
+      INSERT INTO golf9_early_access_signups (email_hash, data, updated_at)
+      VALUES ($1, $2::jsonb, NOW())
+      ON CONFLICT (email_hash) DO UPDATE
+        SET data = EXCLUDED.data, updated_at = NOW()
+      WHERE COALESCE((golf9_early_access_signups.data->>'updatedAt')::numeric, 0)
+         <= COALESCE((EXCLUDED.data->>'updatedAt')::numeric, 0)
+    `, [String(signup.emailHash), json(signup)]);
   }
 
   async deleteEarlyAccessSignups(signupIds = []) {

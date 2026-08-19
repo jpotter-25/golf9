@@ -11,6 +11,11 @@ import {
   totpQrDataUrl,
   verifyTotp,
 } from './adminMfa.js';
+import {
+  credentialVerifierMatches,
+  normalizeCredentialVerifier,
+  persistentCredentialVerifier,
+} from './securityTokens.js';
 
 const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 8;
 const ADMIN_MFA_TTL_MS = 1000 * 60 * 5;
@@ -50,6 +55,8 @@ const ROLE_PERMISSIONS = {
     'metrics:read',
     'earlyAccess:read',
     'earlyAccess:write',
+    'earlyAccess:piiRead',
+    'earlyAccess:erase',
     'earlyAccess:export',
     'earlyAccess:send',
   ],
@@ -222,7 +229,7 @@ export function normalizeAdminStore(store) {
   store.adminSessions = store.adminSessions
     .filter(session => session?.token && session?.adminId && Number(session.expiresAt) > now())
     .map(session => ({
-      token: String(session.token),
+      token: normalizeCredentialVerifier(session.token, 'admin-session'),
       adminId: String(session.adminId),
       expiresAt: Number(session.expiresAt),
       mfaVerifiedAt: Number(session.mfaVerifiedAt) || null,
@@ -261,6 +268,8 @@ export function normalizeAdminStore(store) {
       displayName: safeString(ticket.displayName, 40),
       contactName: safeString(ticket.contactName || ticket.displayName, 80),
       contactEmail: normalizeEmail(ticket.contactEmail),
+      earlyAccessSignupId: ticket.earlyAccessSignupId ? String(ticket.earlyAccessSignupId) : null,
+      protectedPayloadEncrypted: String(ticket.protectedPayloadEncrypted || ''),
       source: ['in_app', 'ninebelow', 'potterwell'].includes(ticket.source) ? ticket.source : 'in_app',
       website: safeString(ticket.website, 160),
       publicReference: safeString(ticket.publicReference, 24).toUpperCase() || null,
@@ -302,10 +311,13 @@ export function normalizeAdminStore(store) {
     }));
 
   store.inviteCodes = store.inviteCodes
-    .filter(invite => invite?.inviteId && invite?.code)
+    .filter(invite => invite?.inviteId && (invite?.codeHash || invite?.code))
     .map(invite => ({
       inviteId: String(invite.inviteId),
-      code: normalizeInviteCode(invite.code),
+      codeHash: invite.codeHash
+        ? normalizeCredentialVerifier(invite.codeHash, 'signup-invite')
+        : persistentCredentialVerifier(normalizeInviteCode(invite.code), 'signup-invite'),
+      codePreview: safeString(invite.codePreview || normalizeInviteCode(invite.code).slice(-4), 8),
       label: safeString(invite.label || 'Pre-alpha invite', 80),
       note: safeString(invite.note || '', 240),
       maxUses: Math.max(1, Number(invite.maxUses) || 1),
@@ -322,7 +334,7 @@ export function normalizeAdminStore(store) {
       earlyAccessSignupId: invite.earlyAccessSignupId ? String(invite.earlyAccessSignupId) : null,
       earlyAccessCampaignId: invite.earlyAccessCampaignId ? String(invite.earlyAccessCampaignId) : null,
     }))
-    .filter(invite => invite.code);
+    .filter(invite => invite.codeHash);
 
   return store;
 }
@@ -345,10 +357,11 @@ function inviteStatus(invite) {
   return 'active';
 }
 
-function publicInvite(invite) {
+function publicInvite(invite, revealedCode = null) {
   return {
     inviteId: invite.inviteId,
-    code: invite.code,
+    code: revealedCode,
+    codePreview: invite.codePreview || '',
     label: invite.label,
     note: invite.note,
     maxUses: invite.maxUses,
@@ -367,7 +380,7 @@ function publicInvite(invite) {
 
 export function adminInvites(store) {
   normalizeAdminStore(store);
-  return store.inviteCodes.slice().sort((a, b) => b.createdAt - a.createdAt).map(publicInvite);
+  return store.inviteCodes.slice().sort((a, b) => b.createdAt - a.createdAt).map(invite => publicInvite(invite));
 }
 
 export function createInviteCode(store, admin, body = {}) {
@@ -375,10 +388,12 @@ export function createInviteCode(store, admin, body = {}) {
   const providedCode = normalizeInviteCode(body.code);
   const code = providedCode || crypto.randomBytes(5).toString('hex').toUpperCase();
   if (code.length < 4) return { error: 'Invite code must be at least 4 characters.' };
-  if (store.inviteCodes.some(invite => invite.code === code)) return { error: 'Invite code already exists.' };
+  const codeHash = persistentCredentialVerifier(code, 'signup-invite');
+  if (store.inviteCodes.some(invite => invite.codeHash === codeHash)) return { error: 'Invite code already exists.' };
   const invite = {
     inviteId: crypto.randomUUID(),
-    code,
+    codeHash,
+    codePreview: code.slice(-4),
     label: safeString(body.label || 'Pre-alpha invite', 80),
     note: safeString(body.note || '', 240),
     maxUses: Math.max(1, Math.min(500, Number(body.maxUses) || 1)),
@@ -392,12 +407,15 @@ export function createInviteCode(store, admin, body = {}) {
     earlyAccessCampaignId: body.earlyAccessCampaignId ? String(body.earlyAccessCampaignId) : null,
   };
   store.inviteCodes.push(invite);
-  return { invite: publicInvite(invite) };
+  return { invite: publicInvite(invite, code) };
 }
 
 export function disableInviteCode(store, inviteId, reason) {
   normalizeAdminStore(store);
-  const invite = store.inviteCodes.find(item => item.inviteId === inviteId || item.code === normalizeInviteCode(inviteId));
+  const normalizedCode = normalizeInviteCode(inviteId);
+  const invite = store.inviteCodes.find(item => item.inviteId === inviteId || (
+    normalizedCode && credentialVerifierMatches(item.codeHash, normalizedCode, 'signup-invite')
+  ));
   if (!invite) return { error: 'Invite code not found.' };
   invite.disabledAt = now();
   invite.disabledReason = safeString(reason, ADMIN_REASON_MAX_LENGTH);
@@ -410,7 +428,7 @@ export function validateSignupInvite(store, code, required = false) {
   if (!normalized) {
     return required ? { error: 'A pre-alpha invite code is required.' } : { invite: null };
   }
-  const invite = store.inviteCodes.find(item => item.code === normalized);
+  const invite = store.inviteCodes.find(item => credentialVerifierMatches(item.codeHash, normalized, 'signup-invite'));
   if (!invite) return { error: 'Invite code is invalid.' };
   const status = inviteStatus(invite);
   if (status !== 'active') return { error: `Invite code is ${status}.` };
@@ -696,8 +714,9 @@ export function resetAdminPassword(store, req, actor, adminId, body = {}) {
 
 export function createAdminSession(store, req, admin) {
   normalizeAdminStore(store);
+  const token = crypto.randomBytes(32).toString('hex');
   const session = {
-    token: crypto.randomBytes(32).toString('hex'),
+    token: persistentCredentialVerifier(token, 'admin-session'),
     adminId: admin.adminId,
     expiresAt: now() + ADMIN_SESSION_TTL_MS,
     mfaVerifiedAt: null,
@@ -707,13 +726,15 @@ export function createAdminSession(store, req, admin) {
   };
   store.adminSessions.push(session);
   admin.lastLoginAt = now();
-  return session;
+  return { ...session, token };
 }
 
 export function authenticateAdmin(store, token) {
   normalizeAdminStore(store);
   if (!token) return null;
-  const session = store.adminSessions.find(item => item.token === token && item.expiresAt > now());
+  const session = store.adminSessions.find(item => (
+    item.expiresAt > now() && credentialVerifierMatches(item.token, token, 'admin-session')
+  ));
   if (!session) return null;
   const admin = store.admins.find(item => item.adminId === session.adminId && !item.disabledAt);
   return admin ? { session, admin } : null;
@@ -1099,7 +1120,7 @@ export function createPublicSupportTicket(store, req, body = {}) {
     source,
     website,
     publicReference: supportReference(store, source),
-    publicAccessTokenHash: hashValue(accessToken),
+    publicAccessTokenHash: persistentCredentialVerifier(accessToken, 'support-access'),
     category,
     status: 'open',
     subject,
@@ -1121,6 +1142,7 @@ function publicTicket(ticket) {
     displayName: ticket.displayName,
     contactName: ticket.contactName || ticket.displayName,
     contactEmail: ticket.contactEmail || null,
+    earlyAccessSignupId: ticket.earlyAccessSignupId || null,
     source: ticket.source || 'in_app',
     website: ticket.website || null,
     publicReference: ticket.publicReference || null,
@@ -1136,49 +1158,44 @@ function publicTicket(ticket) {
   };
 }
 
-function secureValueEqual(left, right) {
-  const leftBuffer = Buffer.from(String(left || ''));
-  const rightBuffer = Buffer.from(String(right || ''));
-  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
-}
-
 function findPublicTicket(store, reference, accessToken) {
   normalizeAdminStore(store);
   const normalizedReference = safeString(reference, 24).toUpperCase();
   const ticket = store.supportTickets.find(item => item.publicReference === normalizedReference);
   if (!ticket?.publicAccessTokenHash || !accessToken) return null;
-  return secureValueEqual(ticket.publicAccessTokenHash, hashValue(accessToken)) ? ticket : null;
+  return credentialVerifierMatches(ticket.publicAccessTokenHash, accessToken, 'support-access') ? ticket : null;
 }
 
-export function publicSupportTicket(store, reference, accessToken) {
+export function publicSupportTicket(store, reference, accessToken, options = {}) {
   const ticket = findPublicTicket(store, reference, accessToken);
   if (!ticket) return { error: 'Support case not found or the private link is invalid.' };
+  const visibleTicket = options.hydrate ? options.hydrate(publicTicket(ticket)) : publicTicket(ticket);
   return {
     ticket: {
-      reference: ticket.publicReference,
-      source: ticket.source,
-      contactName: ticket.contactName,
-      category: ticket.category,
-      status: ticket.status,
-      subject: ticket.subject,
-      createdAt: ticket.createdAt,
-      updatedAt: ticket.updatedAt,
+      reference: visibleTicket.publicReference,
+      source: visibleTicket.source,
+      contactName: visibleTicket.contactName,
+      category: visibleTicket.category,
+      status: visibleTicket.status,
+      subject: visibleTicket.subject,
+      createdAt: visibleTicket.createdAt,
+      updatedAt: visibleTicket.updatedAt,
       messages: [
         {
-          messageId: `initial:${ticket.ticketId}`,
+          messageId: `initial:${visibleTicket.ticketId}`,
           authorType: 'requester',
-          authorName: ticket.contactName,
-          text: ticket.message,
-          createdAt: ticket.createdAt,
+          authorName: visibleTicket.contactName,
+          text: visibleTicket.message,
+          createdAt: visibleTicket.createdAt,
         },
-        ...(ticket.notes || [])
+        ...(visibleTicket.notes || [])
           .filter(note => note.public)
           .map(note => ({
             messageId: note.noteId,
             authorType: note.authorType,
             authorName: note.authorType === 'admin'
               ? (note.adminName || 'Potterwell Support')
-              : (note.requesterName || ticket.contactName),
+              : (note.requesterName || visibleTicket.contactName),
             text: note.text,
             createdAt: note.createdAt,
           })),
@@ -1284,12 +1301,14 @@ export function publicAdminState(store) {
   };
 }
 
-export function setAdminCookie(res, token) {
-  res.setHeader('Set-Cookie', `golf9_admin=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=${Math.floor(ADMIN_SESSION_TTL_MS / 1000)}`);
+export function setAdminCookie(res, token, options = {}) {
+  const secure = options.secure === true ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `golf9_admin=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=${Math.floor(ADMIN_SESSION_TTL_MS / 1000)}${secure}`);
 }
 
-export function clearAdminCookie(res) {
-  res.setHeader('Set-Cookie', 'golf9_admin=; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=0');
+export function clearAdminCookie(res, options = {}) {
+  const secure = options.secure === true ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `golf9_admin=; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=0${secure}`);
 }
 
 export { hashPassword as hashAdminPassword, hashValue as hashAdminValue, publicAdmin };

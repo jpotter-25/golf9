@@ -34,7 +34,9 @@ NODE_ENV=production
 APP_ENV=staging
 PORT=<provided by host>
 DATABASE_URL=<managed postgres url>
-DATABASE_SSL=0
+DATABASE_SSL=1
+DATABASE_SSL_REJECT_UNAUTHORIZED=0
+TRUST_PROXY_HOPS=1
 CLIENT_ORIGINS=*
 PUBLIC_API_URL=https://ninebelow.potterwell.com
 ADMIN_PUBLIC_URL=https://ninebelow.potterwell.com/admin
@@ -44,15 +46,24 @@ SEED_TEST_ACCOUNTS=0
 ADMIN_BOOTSTRAP_USER=<private admin username>
 ADMIN_BOOTSTRAP_PASSWORD=<strong private password>
 ADMIN_BOOTSTRAP_MFA_CODE=<private six digit code>
+ADMIN_SMTP_USER=donotreply@potterwell.com
+ADMIN_SMTP_PASS=<unique no-reply mailbox password>
+ADMIN_SMTP_FROM=donotreply@potterwell.com
+SUPPORT_INBOX_EMAIL=app-developer@potterwell.com
+SERVER_TOKEN_SECRET=<independent random secret, at least 32 characters>
 EARLY_ACCESS_PII_KEY=<independent random secret, at least 32 characters>
 EARLY_ACCESS_TOKEN_SECRET=<independent random secret, at least 32 characters>
 EARLY_ACCESS_CAMPAIGN_EMAIL_ENABLED=0
 EARLY_ACCESS_POSTAL_ADDRESS=<Potterwell postal address used in campaign footers>
-EARLY_ACCESS_REPLY_TO=app-developer@potterwell.com
+EARLY_ACCESS_REPLY_TO=donotreply@potterwell.com
 EARLY_ACCESS_EMAILS_PER_MINUTE=60
 ```
 
 Do not use local defaults such as `admin`, `admin9`, or `000000` in staging or production.
+
+The Railway Postgres private-network connection still uses TLS. Railway's current database certificate is self-signed, so this deployment uses the explicit `DATABASE_SSL_REJECT_UNAUTHORIZED=0` exception instead of disabling encryption. If Railway supplies a trusted CA, place it in `DATABASE_SSL_CA` and change `DATABASE_SSL_REJECT_UNAUTHORIZED=1`; that is the preferred authenticated-TLS configuration. The service refuses to start in production when `DATABASE_SSL=0`.
+
+Keep `SERVER_TOKEN_SECRET`, `EARLY_ACCESS_PII_KEY`, and `EARLY_ACCESS_TOKEN_SECRET` independent and stable. Rotating the server-token secret invalidates stored sessions, invite verifiers, and public support links. Never place their values in source control, screenshots, exports, or documentation.
 
 ## DNS
 
@@ -98,7 +109,7 @@ The public signup page is `https://ninebelow.potterwell.com/early-access`. Regis
 
 Before opening it:
 
-1. Configure SMTP with a verified Potterwell sender and SPF, DKIM, and DMARC records.
+1. Configure SMTP with `donotreply@potterwell.com` as the authenticated sender and reply-to address, plus SPF, DKIM, and DMARC records. Keep `app-developer@potterwell.com` as the monitored internal support destination.
 2. Configure both early-access secrets and the Potterwell postal address.
 3. Leave `EARLY_ACCESS_CAMPAIGN_EMAIL_ENABLED=0` while testing confirmation, preferences, and unsubscribe with staff addresses.
 4. In Admin Console > Early Access, confirm every readiness indicator is green and open registration with an audit reason.
