@@ -80,6 +80,7 @@
         <nav class="tabs">
           <button data-tab="players" class="active">Players</button>
           <button data-tab="invites">Invites</button>
+          <button data-tab="earlyAccess">Early Access</button>
           <button data-tab="support">Support</button>
           <button data-tab="mail">Mail</button>
           <button data-tab="economy">Economy</button>
@@ -130,6 +131,77 @@
               <button type="submit">Create Invite</button>
             </form>
             <div id="inviteOutput" class="list"></div>
+          </div>
+        </section>
+        <section id="earlyAccess" class="tab">
+          <div class="panel">
+            <div class="split-header">
+              <div>
+                <h2>Early Access</h2>
+                <p class="muted">Manage consented interest, mobile testing waves, access delivery, and activation.</p>
+              </div>
+              <button id="loadEarlyAccess">Refresh Early Access</button>
+            </div>
+            <div id="earlyAccessStats" class="summary-grid"></div>
+            <div id="earlyAccessReadiness" class="card"></div>
+          </div>
+          <div class="panel" id="earlyAccessConfigPanel">
+            <h2>Public Registration</h2>
+            <form id="earlyAccessConfigForm" class="editor">
+              <div class="row three">
+                <label>Status
+                  <select name="enrollmentStatus"><option value="paused">Paused</option><option value="open">Open</option><option value="closed">Closed</option></select>
+                </label>
+                <label>Status message <input name="statusMessage" maxlength="240" /></label>
+                <label>Reason <input name="reason" placeholder="Required audit reason" required /></label>
+              </div>
+              <button type="submit">Save Registration Status</button>
+            </form>
+          </div>
+          <div class="panel">
+            <div class="split-header">
+              <div><h2>Signup List</h2><p class="muted">Search confirmed interest, tester stage, source, and platform.</p></div>
+              <div class="toolbar"><button id="exportEarlyAccess" class="ghost">Export CSV</button><button id="exportGooglePlay" class="ghost">Google Play CSV</button></div>
+            </div>
+            <div class="row four">
+              <input id="earlyAccessSearch" placeholder="Email, name, tag, source, or id" />
+              <select id="earlyAccessConsentFilter"><option value="">All consent</option><option value="pending">Pending</option><option value="confirmed">Confirmed</option><option value="unsubscribed">Unsubscribed</option></select>
+              <select id="earlyAccessPlatformFilter"><option value="">All platforms</option><option value="ios">iOS</option><option value="android">Android</option><option value="web_future">Browser later</option></select>
+              <select id="earlyAccessStageFilter"><option value="">All stages</option><option value="waitlisted">Waitlisted</option><option value="selected">Selected</option><option value="onboarding">Onboarding</option><option value="ready">Ready</option><option value="invited">Invited</option><option value="activated">Activated</option><option value="declined">Declined</option></select>
+            </div>
+            <div id="earlyAccessSignups" class="player-table-wrap"></div>
+          </div>
+          <div class="panel" id="earlyAccessCampaignPanel">
+            <h2>Campaign Composer</h2>
+            <p class="muted">Campaigns use fixed Potterwell templates. Test the message before scheduling a controlled wave.</p>
+            <form id="earlyAccessCampaignForm" class="editor">
+              <div class="row three">
+                <label>Internal name <input name="internalName" maxlength="100" required /></label>
+                <label>Type <select name="type"><option value="selection">Selection / onboarding</option><option value="access">Access invitation</option><option value="update">Program update</option></select></label>
+                <label>Audience platform <select name="targetPlatform"><option value="all">All</option><option value="ios">iOS</option><option value="android">Android</option><option value="web_future">Browser later</option></select></label>
+              </div>
+              <div class="row three">
+                <label>Wave size <input name="waveSize" type="number" min="1" max="5000" value="100" required /></label>
+                <label>Testing starts <input name="startAt" type="datetime-local" /></label>
+                <label>Secure access URL <input name="accessUrl" type="url" placeholder="https://..." /></label>
+              </div>
+              <label>Email subject <input name="subject" maxlength="120" required /></label>
+              <label>Preheader <input name="preheader" maxlength="160" /></label>
+              <label>Heading <input name="heading" maxlength="120" required /></label>
+              <label>Body <textarea name="body" rows="5" maxlength="2000" required></textarea></label>
+              <label>Testing focus <span class="muted">One item per line, up to five</span><textarea name="focusBullets" rows="5" maxlength="900"></textarea></label>
+              <label>Feedback instructions <textarea name="feedbackInstructions" rows="4" maxlength="800"></textarea></label>
+              <div class="row three">
+                <label>CTA label <input name="ctaLabel" maxlength="60" /></label>
+                <label>Schedule time <input name="scheduledAt" type="datetime-local" /></label>
+                <label>Reason <input name="reason" placeholder="Required audit reason" required /></label>
+              </div>
+              <button type="submit">Create Draft Campaign</button>
+            </form>
+          </div>
+          <div class="panel" id="earlyAccessCampaignListPanel">
+            <div class="split-header"><h2>Campaigns and Delivery</h2><button id="loadEarlyAccessCampaigns">Refresh Campaigns</button></div>
+            <div id="earlyAccessCampaigns" class="list"></div>
           </div>
         </section>
         <section id="support" class="tab">

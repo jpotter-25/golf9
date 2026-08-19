@@ -25,6 +25,10 @@ let liveOpsSelectedFeature = 'global';
 let liveOpsTesterIds = new Set();
 let liveOpsTesterMatches = [];
 let liveOpsCanWrite = false;
+let earlyAccessSignupsCache = [];
+let earlyAccessCampaignsCache = [];
+let earlyAccessPermissions = [];
+let earlyAccessEditingCampaignId = null;
 
 const NOTIFICATION_LABELS = {
   turn: 'Your Turn',
@@ -92,6 +96,7 @@ function bindTabs() {
       button.classList.add('active');
       document.querySelector(`#${button.dataset.tab}`)?.classList.add('active');
       if (button.dataset.tab === 'invites') loadInvites();
+      if (button.dataset.tab === 'earlyAccess') loadEarlyAccess();
       if (button.dataset.tab === 'mail') loadMail();
       if (button.dataset.tab === 'economy') loadEconomy();
       if (button.dataset.tab === 'notifications') loadNotifications();
@@ -115,6 +120,17 @@ function bindConsoleActions() {
   document.querySelector('#showArchivedPlayers').addEventListener('change', searchPlayers);
   document.querySelector('#loadInvites').addEventListener('click', loadInvites);
   document.querySelector('#inviteEditor').addEventListener('submit', createInvite);
+  document.querySelector('#loadEarlyAccess').addEventListener('click', loadEarlyAccess);
+  document.querySelector('#loadEarlyAccessCampaigns').addEventListener('click', loadEarlyAccessCampaigns);
+  document.querySelector('#earlyAccessConfigForm').addEventListener('submit', saveEarlyAccessConfig);
+  document.querySelector('#earlyAccessCampaignForm').addEventListener('submit', createEarlyAccessCampaignDraft);
+  document.querySelector('#exportEarlyAccess').addEventListener('click', () => exportEarlyAccess('general'));
+  document.querySelector('#exportGooglePlay').addEventListener('click', () => exportEarlyAccess('google-play'));
+  document.querySelector('#earlyAccessSearch').addEventListener('keydown', event => { if (event.key === 'Enter') loadEarlyAccessSignups(); });
+  document.querySelector('#earlyAccessSearch').addEventListener('change', loadEarlyAccessSignups);
+  document.querySelector('#earlyAccessConsentFilter').addEventListener('change', loadEarlyAccessSignups);
+  document.querySelector('#earlyAccessPlatformFilter').addEventListener('change', loadEarlyAccessSignups);
+  document.querySelector('#earlyAccessStageFilter').addEventListener('change', loadEarlyAccessSignups);
   document.querySelector('#loadTickets').addEventListener('click', loadTickets);
   document.querySelector('#loadMail').addEventListener('click', loadMail);
   document.querySelector('#mailComposer').addEventListener('submit', sendSystemMail);
@@ -740,6 +756,321 @@ async function disableInvite(inviteId) {
   await api(`/invites/${encodeURIComponent(inviteId)}/disable`, { method: 'POST', body: JSON.stringify({ reason }) });
   status('Invite disabled.', 'ok');
   await loadInvites();
+}
+
+function earlyAccessCan(permission) {
+  return earlyAccessPermissions.includes('*') || earlyAccessPermissions.includes(permission);
+}
+
+async function loadEarlyAccess() {
+  try {
+    const [overview, session, signups] = await Promise.all([
+      api('/early-access/summary'),
+      api('/auth/me'),
+      api('/early-access/signups'),
+    ]);
+    earlyAccessPermissions = session.admin?.permissions || [];
+    const canSend = earlyAccessCan('earlyAccess:send');
+    const campaigns = canSend ? await api('/early-access/campaigns') : { campaigns: [] };
+    earlyAccessSignupsCache = signups.signups || [];
+    earlyAccessCampaignsCache = campaigns.campaigns || [];
+    renderEarlyAccessOverview(overview);
+    renderEarlyAccessSignups();
+    renderEarlyAccessCampaigns();
+    document.querySelector('#earlyAccessCampaignPanel').hidden = !canSend;
+    document.querySelector('#earlyAccessCampaignListPanel').hidden = !canSend;
+    document.querySelector('#earlyAccessConfigPanel').hidden = !canSend;
+    document.querySelector('#exportEarlyAccess').hidden = !earlyAccessCan('earlyAccess:export');
+    document.querySelector('#exportGooglePlay').hidden = !earlyAccessCan('earlyAccess:export');
+  } catch (error) {
+    status(error.message, 'error');
+  }
+}
+
+function renderEarlyAccessOverview({ summary, config, email, inviteRequired }) {
+  const stats = document.querySelector('#earlyAccessStats');
+  const values = [
+    ['Confirmed', summary.confirmed], ['Pending', summary.pending], ['Unsubscribed', summary.unsubscribed], ['Selected', summary.selected],
+    ['Ready', summary.ready], ['Invited', summary.invited], ['Activated', summary.activated],
+    ['iOS interest', summary.platforms?.ios], ['Android interest', summary.platforms?.android], ['Browser later', summary.platforms?.web_future],
+  ];
+  stats.innerHTML = values.map(([label, value]) => `<div class="summary-stat"><span>${escapeHtml(label)}</span><strong>${Number(value || 0).toLocaleString()}</strong></div>`).join('');
+  document.querySelector('#earlyAccessReadiness').innerHTML = `
+    <div class="split-header"><strong>Launch readiness</strong><span class="chip ${email.enabled ? 'gold' : ''}">${email.enabled ? 'Campaign email ready' : 'Campaign email locked'}</span></div>
+    <p class="muted">Registration: ${escapeHtml(config.enrollmentStatus)} · SMTP: ${email.emailConfigured ? 'configured' : 'missing'} · Postal address: ${email.postalAddressConfigured ? 'configured' : 'missing'} · Security keys: ${email.security?.ready ? 'ready' : 'missing'} · Invite gate: ${inviteRequired ? 'required' : 'open'} · ${Number(email.emailsPerMinute || 0)} email/minute</p>
+  `;
+  const form = document.querySelector('#earlyAccessConfigForm');
+  form.elements.enrollmentStatus.value = config.enrollmentStatus;
+  form.elements.statusMessage.value = config.statusMessage;
+}
+
+async function saveEarlyAccessConfig(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  try {
+    await api('/early-access/config', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        config: { enrollmentStatus: form.elements.enrollmentStatus.value, statusMessage: form.elements.statusMessage.value },
+        reason: form.elements.reason.value,
+      }),
+    });
+    form.elements.reason.value = '';
+    status('Early-access registration status saved.', 'ok');
+    await loadEarlyAccess();
+  } catch (error) {
+    status(error.message, 'error');
+  }
+}
+
+function earlyAccessQuery() {
+  const params = new URLSearchParams();
+  const values = {
+    q: document.querySelector('#earlyAccessSearch').value.trim(),
+    status: document.querySelector('#earlyAccessConsentFilter').value,
+    platform: document.querySelector('#earlyAccessPlatformFilter').value,
+    stage: document.querySelector('#earlyAccessStageFilter').value,
+  };
+  Object.entries(values).forEach(([key, value]) => { if (value) params.set(key, value); });
+  return params;
+}
+
+async function loadEarlyAccessSignups() {
+  try {
+    const { signups } = await api(`/early-access/signups?${earlyAccessQuery()}`);
+    earlyAccessSignupsCache = signups || [];
+    renderEarlyAccessSignups();
+  } catch (error) {
+    status(error.message, 'error');
+  }
+}
+
+function renderEarlyAccessSignups() {
+  const output = document.querySelector('#earlyAccessSignups');
+  if (!earlyAccessSignupsCache.length) {
+    output.innerHTML = '<div class="empty-state">No early-access signups match these filters.</div>';
+    return;
+  }
+  output.innerHTML = `
+    <table class="admin-table early-access-table">
+      <thead><tr><th>Contact</th><th>Platforms</th><th>Consent</th><th>Tester stage</th><th>Tags</th><th>Activity</th><th>Notes & consent history</th><th>Actions</th></tr></thead>
+      <tbody>${earlyAccessSignupsCache.map(item => `
+        <tr data-signup-id="${escapeHtml(item.signupId)}">
+          <td><strong>${escapeHtml(item.firstName || 'Unnamed')}</strong><br><span class="muted">${escapeHtml(item.email || 'PII erased')}</span><br><span class="mono-cell">${escapeHtml(item.signupId)}</span></td>
+          <td>${item.platforms.map(platform => `<span class="chip">${escapeHtml(platform === 'web_future' ? 'browser later' : platform)}</span>`).join(' ')}</td>
+          <td><span class="status-pill ${item.consentStatus === 'confirmed' ? 'ok-pill' : item.consentStatus === 'unsubscribed' ? 'danger-pill' : ''}">${escapeHtml(item.consentStatus)}</span></td>
+          <td><select class="early-access-stage">${['waitlisted','selected','onboarding','ready','invited','activated','declined'].map(stage => `<option value="${stage}" ${item.testerStage === stage ? 'selected' : ''}>${stage}</option>`).join('')}</select></td>
+          <td><input class="early-access-tags" value="${escapeHtml((item.tags || []).join(', '))}" placeholder="comma-separated" /></td>
+          <td><span class="muted">Joined ${new Date(item.createdAt).toLocaleDateString()}<br>${item.activatedAt ? `Activated ${new Date(item.activatedAt).toLocaleDateString()}` : escapeHtml(item.source || 'website')}</span></td>
+          <td>
+            <details>
+              <summary>${Number(item.notes?.length || 0)} notes · ${Number(item.consentHistory?.length || 0)} consent events</summary>
+              <div class="early-access-history">
+                ${(item.consentHistory || []).map(event => `<p><strong>${escapeHtml(event.type || 'consent')}</strong><br><span class="muted">${new Date(event.at || item.createdAt).toLocaleString()}</span></p>`).join('') || '<p class="muted">No consent events recorded.</p>'}
+                ${(item.notes || []).map(note => `<p>${escapeHtml(note.text)}<br><span class="muted">${escapeHtml(note.adminName || 'Admin')} · ${new Date(note.createdAt).toLocaleString()}</span></p>`).join('') || '<p class="muted">No internal notes.</p>'}
+                <label>Add internal note<textarea class="early-access-note" rows="2" maxlength="500"></textarea></label>
+                <label>Audit reason<input class="early-access-reason" maxlength="240" placeholder="Required for changes" /></label>
+              </div>
+            </details>
+          </td>
+          <td><div class="actions-inline"><button data-early-action="save">Save</button><button data-early-action="unsubscribe" class="ghost">Unsubscribe</button><button data-early-action="erase" class="danger">Erase PII</button></div></td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+  output.querySelectorAll('[data-early-action]').forEach(button => {
+    button.addEventListener('click', () => runEarlyAccessSignupAction(button.closest('[data-signup-id]'), button.dataset.earlyAction));
+  });
+}
+
+async function runEarlyAccessSignupAction(row, action) {
+  const signupId = row.dataset.signupId;
+  const reasonField = row.querySelector('.early-access-reason');
+  const reason = reasonField?.value.trim() || '';
+  if (!reason) {
+    status('Enter an audit reason in the participant history panel.', 'error');
+    row.querySelector('details').open = true;
+    reasonField?.focus();
+    return;
+  }
+  try {
+    if (action === 'erase') {
+      if (!confirm('Permanently erase this signup’s contact information? The suppression record remains temporarily.')) return;
+      await api(`/early-access/signups/${encodeURIComponent(signupId)}/erase`, { method: 'POST', body: JSON.stringify({ reason }) });
+    } else {
+      const note = action === 'save' ? (row.querySelector('.early-access-note')?.value || '') : '';
+      await api(`/early-access/signups/${encodeURIComponent(signupId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          reason,
+          testerStage: row.querySelector('.early-access-stage').value,
+          tags: row.querySelector('.early-access-tags').value.split(',').map(value => value.trim()).filter(Boolean),
+          note,
+          unsubscribe: action === 'unsubscribe',
+        }),
+      });
+    }
+    status('Early-access signup updated.', 'ok');
+    await Promise.all([loadEarlyAccessSignups(), loadEarlyAccessSummaryOnly()]);
+  } catch (error) {
+    status(error.message, 'error');
+  }
+}
+
+async function loadEarlyAccessSummaryOnly() {
+  const overview = await api('/early-access/summary');
+  renderEarlyAccessOverview(overview);
+}
+
+async function exportEarlyAccess(format) {
+  const query = earlyAccessQuery();
+  if (format === 'google-play') query.set('format', 'google-play');
+  try {
+    const response = await fetch(`/admin/api/early-access/export.csv?${query}`, { credentials: 'same-origin' });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || 'Export failed.');
+    }
+    const blob = await response.blob();
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = format === 'google-play' ? 'nine-below-google-play-testers.csv' : 'nine-below-early-access.csv';
+    link.click();
+    URL.revokeObjectURL(link.href);
+    status('Early-access export downloaded and recorded in the audit log.', 'ok');
+  } catch (error) {
+    status(error.message, 'error');
+  }
+}
+
+async function createEarlyAccessCampaignDraft(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const value = name => form.elements[name].value;
+  const payload = {
+    internalName: value('internalName'),
+    type: value('type'),
+    targetPlatform: value('targetPlatform'),
+    waveSize: Number(value('waveSize')),
+    startAt: value('startAt') ? new Date(value('startAt')).getTime() : null,
+    scheduledAt: value('scheduledAt') ? new Date(value('scheduledAt')).getTime() : null,
+    accessUrl: value('accessUrl'),
+    subject: value('subject'),
+    preheader: value('preheader'),
+    heading: value('heading'),
+    body: value('body'),
+    focusBullets: value('focusBullets').split('\n').map(line => line.trim()).filter(Boolean),
+    feedbackInstructions: value('feedbackInstructions'),
+    ctaLabel: value('ctaLabel'),
+    reason: value('reason'),
+  };
+  try {
+    const endpoint = earlyAccessEditingCampaignId
+      ? `/early-access/campaigns/${encodeURIComponent(earlyAccessEditingCampaignId)}`
+      : '/early-access/campaigns';
+    await api(endpoint, { method: earlyAccessEditingCampaignId ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
+    earlyAccessEditingCampaignId = null;
+    form.reset();
+    form.elements.waveSize.value = '100';
+    form.querySelector('button[type="submit"]').textContent = 'Create Draft Campaign';
+    status('Draft early-access campaign saved.', 'ok');
+    await loadEarlyAccessCampaigns();
+  } catch (error) {
+    status(error.message, 'error');
+  }
+}
+
+async function loadEarlyAccessCampaigns() {
+  try {
+    const { campaigns } = await api('/early-access/campaigns');
+    earlyAccessCampaignsCache = campaigns || [];
+    renderEarlyAccessCampaigns();
+  } catch (error) {
+    status(error.message, 'error');
+  }
+}
+
+function renderEarlyAccessCampaigns() {
+  const output = document.querySelector('#earlyAccessCampaigns');
+  if (!earlyAccessCampaignsCache.length) {
+    output.innerHTML = '<div class="empty-state">No early-access campaigns have been created.</div>';
+    return;
+  }
+  const canSend = earlyAccessCan('earlyAccess:send');
+  output.replaceChildren(...earlyAccessCampaignsCache.map(campaign => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    const deliveries = campaign.deliveries || {};
+    card.innerHTML = `
+      <div class="split-header"><div><strong>${escapeHtml(campaign.internalName)}</strong><p class="muted">${escapeHtml(campaign.type)} · ${escapeHtml(campaign.targetPlatform)} · ${Number(campaign.recipientCount || 0).toLocaleString()} recipients</p></div><span class="chip">${escapeHtml(campaign.status)}</span></div>
+      <h3>${escapeHtml(campaign.subject)}</h3><p>${escapeHtml(campaign.heading)}</p>
+      <div class="statline"><span class="chip">Queued ${Number(deliveries.queued || 0)}</span><span class="chip">Sending ${Number(deliveries.sending || 0)}</span><span class="chip">Sent ${Number(deliveries.sent || 0)}</span><span class="chip">Failed ${Number(deliveries.failed || 0)}</span><span class="chip">Skipped ${Number(deliveries.skipped || 0)}</span></div>
+      <div class="actions-inline campaign-actions">
+        <button data-campaign-action="preview" class="ghost">Preview Audience</button>
+        ${canSend && campaign.status === 'draft' ? '<button data-campaign-action="edit" class="ghost">Edit Draft</button><button data-campaign-action="test" class="ghost">Test Send</button><button data-campaign-action="schedule">Schedule Wave</button>' : ''}
+        ${canSend && ['scheduled','sending'].includes(campaign.status) ? '<button data-campaign-action="cancel" class="danger">Cancel</button>' : ''}
+        ${canSend && Number(deliveries.failed || 0) ? '<button data-campaign-action="retry" class="ghost">Retry Failed</button>' : ''}
+      </div>`;
+    card.querySelectorAll('[data-campaign-action]').forEach(button => button.addEventListener('click', () => runEarlyAccessCampaignAction(campaign, button.dataset.campaignAction)));
+    return card;
+  }));
+}
+
+async function runEarlyAccessCampaignAction(campaign, action) {
+  try {
+    if (action === 'edit') {
+      const form = document.querySelector('#earlyAccessCampaignForm');
+      earlyAccessEditingCampaignId = campaign.campaignId;
+      const set = (name, value) => { form.elements[name].value = value ?? ''; };
+      set('internalName', campaign.internalName);
+      set('type', campaign.type);
+      set('targetPlatform', campaign.targetPlatform);
+      set('waveSize', campaign.waveSize);
+      set('startAt', campaign.startAt ? new Date(campaign.startAt).toISOString().slice(0, 16) : '');
+      set('scheduledAt', campaign.scheduledAt ? new Date(campaign.scheduledAt).toISOString().slice(0, 16) : '');
+      set('accessUrl', campaign.accessUrl);
+      set('subject', campaign.subject);
+      set('preheader', campaign.preheader);
+      set('heading', campaign.heading);
+      set('body', campaign.body);
+      set('focusBullets', (campaign.focusBullets || []).join('\n'));
+      set('feedbackInstructions', campaign.feedbackInstructions);
+      set('ctaLabel', campaign.ctaLabel);
+      set('reason', '');
+      form.querySelector('button[type="submit"]').textContent = 'Save Draft Campaign';
+      form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    if (action === 'preview') {
+      const result = await api(`/early-access/campaigns/${encodeURIComponent(campaign.campaignId)}/preview`);
+      alert(`${result.recipientCount.toLocaleString()} confirmed signup(s) currently match this wave.\n\n${(result.sample || []).map(item => `${item.firstName || 'Unnamed'} — ${item.email}`).join('\n') || 'No sample recipients.'}`);
+      return;
+    }
+    const reason = prompt('Reason for the audit log');
+    if (!reason) return;
+    if (action === 'test') {
+      await api(`/early-access/campaigns/${encodeURIComponent(campaign.campaignId)}/test-send`, { method: 'POST', body: JSON.stringify({ reason }) });
+      status('Test campaign email sent to your admin address.', 'ok');
+    }
+    if (action === 'schedule') {
+      const defaultTime = campaign.scheduledAt ? new Date(campaign.scheduledAt).toISOString() : new Date().toISOString();
+      const scheduledAt = prompt('Send at this ISO date/time', defaultTime);
+      if (!scheduledAt || Number.isNaN(new Date(scheduledAt).getTime())) throw new Error('Enter a valid schedule time.');
+      if (!confirm(`Queue up to ${campaign.waveSize} ${campaign.targetPlatform} recipient(s) for this ${campaign.type} wave?`)) return;
+      await api(`/early-access/campaigns/${encodeURIComponent(campaign.campaignId)}/schedule`, { method: 'POST', body: JSON.stringify({ reason, scheduledAt }) });
+      status('Early-access wave scheduled.', 'ok');
+    }
+    if (action === 'cancel') {
+      if (!confirm('Cancel all unsent deliveries in this campaign?')) return;
+      await api(`/early-access/campaigns/${encodeURIComponent(campaign.campaignId)}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) });
+      status('Campaign cancelled and unsent invite codes disabled.', 'ok');
+    }
+    if (action === 'retry') {
+      await api(`/early-access/campaigns/${encodeURIComponent(campaign.campaignId)}/retry-failed`, { method: 'POST', body: JSON.stringify({ reason }) });
+      status('Failed deliveries returned to the durable queue.', 'ok');
+    }
+    await Promise.all([loadEarlyAccessCampaigns(), loadEarlyAccessSummaryOnly(), loadEarlyAccessSignups()]);
+  } catch (error) {
+    status(error.message, 'error');
+  }
 }
 
 async function loadTickets() {

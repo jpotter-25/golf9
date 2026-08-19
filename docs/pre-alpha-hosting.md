@@ -44,6 +44,12 @@ SEED_TEST_ACCOUNTS=0
 ADMIN_BOOTSTRAP_USER=<private admin username>
 ADMIN_BOOTSTRAP_PASSWORD=<strong private password>
 ADMIN_BOOTSTRAP_MFA_CODE=<private six digit code>
+EARLY_ACCESS_PII_KEY=<independent random secret, at least 32 characters>
+EARLY_ACCESS_TOKEN_SECRET=<independent random secret, at least 32 characters>
+EARLY_ACCESS_CAMPAIGN_EMAIL_ENABLED=0
+EARLY_ACCESS_POSTAL_ADDRESS=<Potterwell postal address used in campaign footers>
+EARLY_ACCESS_REPLY_TO=app-developer@potterwell.com
+EARLY_ACCESS_EMAILS_PER_MINUTE=60
 ```
 
 Do not use local defaults such as `admin`, `admin9`, or `000000` in staging or production.
@@ -83,6 +89,24 @@ Then open the admin console and create invite codes:
 5. Send the code with the staging app install link.
 
 Existing approved accounts can log in normally. New accounts must enter a valid invite code.
+
+## Early Access Registration And Waves
+
+The public signup page is `https://ninebelow.potterwell.com/early-access`. Registration is paused by default even after deployment.
+
+Before opening it:
+
+1. Configure SMTP with a verified Potterwell sender and SPF, DKIM, and DMARC records.
+2. Configure both early-access secrets and the Potterwell postal address.
+3. Leave `EARLY_ACCESS_CAMPAIGN_EMAIL_ENABLED=0` while testing confirmation, preferences, and unsubscribe with staff addresses.
+4. In Admin Console > Early Access, confirm every readiness indicator is green and open registration with an audit reason.
+5. Keep `REQUIRE_INVITE_CODE=1` before scheduling an access campaign. Selection/onboarding campaigns can run before the game invite gate is enabled.
+6. Use the Google Play CSV export to add ready Android testers to the closed-testing list before sending their access wave.
+7. Configure the current Google Play opt-in or TestFlight URL in each access campaign, send an admin test copy, preview the recipient count, and then schedule the controlled wave.
+
+Set `EARLY_ACCESS_CAMPAIGN_EMAIL_ENABLED=1` only after sender verification, links, one-use game codes, feedback routing, and unsubscribe have passed the production smoke test.
+
+Production campaign workers must use PostgreSQL. Recipient deliveries use deterministic IDs and `FOR UPDATE SKIP LOCKED` leases so restarts or multiple server instances cannot claim the same queued message at the same time.
 
 ## Mobile Staging Builds
 

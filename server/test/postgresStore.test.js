@@ -23,9 +23,13 @@ test('postgres store loads and saves economy config metadata', async () => {
             { key: 'afkConfig', value: { takeoverMisses: 2, coinPenalty: 100 } },
             { key: 'forfeitConfig', value: { rankedRollingWindowHours: 48, rankedRollingLockMinutes: [30, 240] } },
             { key: 'releasePolicy', value: { revision: 3, entries: { 'playtest.android': { latestBuild: 43 } } } },
+            { key: 'earlyAccessConfig', value: { enrollmentStatus: 'paused' } },
           ],
         };
       }
+      if (/SELECT data FROM golf9_early_access_signups/.test(sql)) return { rows: [{ data: { signupId: 'signup-1', emailHash: 'hash-1' } }] };
+      if (/SELECT data FROM golf9_early_access_campaigns/.test(sql)) return { rows: [{ data: { campaignId: 'campaign-1', status: 'draft' } }] };
+      if (/SELECT data FROM golf9_early_access_deliveries/.test(sql)) return { rows: [{ data: { deliveryId: 'delivery-1', campaignId: 'campaign-1', signupId: 'signup-1' } }] };
       return { rows: [] };
     },
     connect: async () => client,
@@ -38,6 +42,10 @@ test('postgres store loads and saves economy config metadata', async () => {
   assert.equal(loaded.afkConfig.takeoverMisses, 2);
   assert.deepEqual(loaded.forfeitConfig.rankedRollingLockMinutes, [30, 240]);
   assert.equal(loaded.releasePolicy.entries['playtest.android'].latestBuild, 43);
+  assert.equal(loaded.earlyAccessConfig.enrollmentStatus, 'paused');
+  assert.equal(loaded.earlyAccessSignups[0].signupId, 'signup-1');
+  assert.equal(loaded.earlyAccessCampaigns[0].campaignId, 'campaign-1');
+  assert.equal(loaded.earlyAccessDeliveries[0].deliveryId, 'delivery-1');
 
   await store.save({
     rankedSeason: { id: 'season-two' },
@@ -47,6 +55,10 @@ test('postgres store loads and saves economy config metadata', async () => {
     afkConfig: { takeoverMisses: 3, coinPenalty: 250 },
     forfeitConfig: { rankedRollingWindowHours: 12, rankedRollingLockMinutes: [10, 60] },
     releasePolicy: { revision: 4, entries: { 'playtest.android': { latestBuild: 44 } } },
+    earlyAccessConfig: { enrollmentStatus: 'open' },
+    earlyAccessSignups: [{ signupId: 'signup-2', emailHash: 'hash-2' }],
+    earlyAccessCampaigns: [{ campaignId: 'campaign-2', status: 'draft' }],
+    earlyAccessDeliveries: [{ deliveryId: 'delivery-2', campaignId: 'campaign-2', signupId: 'signup-2' }],
   });
 
   const economySave = savedQueries.find(query => query.params[0] === 'economyConfig');
@@ -64,4 +76,51 @@ test('postgres store loads and saves economy config metadata', async () => {
   const releasePolicySave = savedQueries.find(query => query.params[0] === 'releasePolicy');
   assert.ok(releasePolicySave);
   assert.equal(JSON.parse(releasePolicySave.params[1]).entries['playtest.android'].latestBuild, 44);
+  const earlyAccessConfigSave = savedQueries.find(query => query.params[0] === 'earlyAccessConfig');
+  assert.ok(earlyAccessConfigSave);
+  assert.equal(JSON.parse(earlyAccessConfigSave.params[1]).enrollmentStatus, 'open');
+  assert.ok(savedQueries.some(query => query.params[0] === 'hash-2'));
+  assert.ok(savedQueries.some(query => query.params[0] === 'campaign-2'));
+  assert.ok(savedQueries.some(query => query.params[0] === 'delivery-2'));
+});
+
+test('postgres delivery claims use row locking and return campaign context', async () => {
+  const queries = [];
+  const client = {
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      if (/SELECT delivery_id, data/.test(sql)) {
+        return {
+          rows: [{
+            delivery_id: 'delivery-1',
+            data: {
+              deliveryId: 'delivery-1',
+              campaignId: 'campaign-1',
+              signupId: 'signup-1',
+              status: 'queued',
+              attempts: 1,
+              nextAttemptAt: 100,
+              updatedAt: 100,
+            },
+          }],
+        };
+      }
+      if (/SELECT data FROM golf9_early_access_campaigns/.test(sql)) return { rows: [{ data: { campaignId: 'campaign-1', status: 'scheduled' } }] };
+      if (/SELECT data FROM golf9_early_access_signups/.test(sql)) return { rows: [{ data: { signupId: 'signup-1', emailHash: 'hash-1', consentStatus: 'confirmed' } }] };
+      return { rows: [] };
+    },
+    release() {},
+  };
+  const pool = {
+    query: async () => ({ rows: [] }),
+    connect: async () => client,
+  };
+  const store = new PostgresStore(pool);
+  const claimed = await store.claimEarlyAccessDelivery({ now: 1_000, leaseMs: 5_000 });
+  assert.equal(claimed.delivery.status, 'sending');
+  assert.equal(claimed.delivery.attempts, 2);
+  assert.equal(claimed.delivery.leaseExpiresAt, 6_000);
+  assert.equal(claimed.campaign.campaignId, 'campaign-1');
+  assert.equal(claimed.signup.signupId, 'signup-1');
+  assert.ok(queries.some(query => /FOR UPDATE SKIP LOCKED/.test(query.sql)));
 });

@@ -48,8 +48,12 @@ const ROLE_PERMISSIONS = {
     'availability:read',
     'availability:write',
     'metrics:read',
+    'earlyAccess:read',
+    'earlyAccess:write',
+    'earlyAccess:export',
+    'earlyAccess:send',
   ],
-  support: ['users:read', 'invites:read', 'support:read', 'support:write', 'catalog:read', 'mail:read', 'mail:write', 'availability:read', 'metrics:read'],
+  support: ['users:read', 'invites:read', 'support:read', 'support:write', 'catalog:read', 'mail:read', 'mail:write', 'availability:read', 'metrics:read', 'earlyAccess:read', 'earlyAccess:write'],
   moderator: ['users:read', 'support:read', 'moderation:write', 'audit:read', 'catalog:read', 'availability:read', 'metrics:read'],
   economy: ['users:read', 'economy:write', 'cosmetics:write', 'catalog:read', 'catalog:write', 'competitive:read', 'mail:read', 'mail:write', 'availability:read', 'metrics:read'],
   readOnly: ['users:read', 'support:read', 'audit:read', 'catalog:read', 'competitive:read', 'mail:read', 'availability:read', 'metrics:read'],
@@ -315,6 +319,8 @@ export function normalizeAdminStore(store) {
       expiresAt: Number(invite.expiresAt) || null,
       disabledAt: Number(invite.disabledAt) || null,
       disabledReason: safeString(invite.disabledReason || '', ADMIN_REASON_MAX_LENGTH),
+      earlyAccessSignupId: invite.earlyAccessSignupId ? String(invite.earlyAccessSignupId) : null,
+      earlyAccessCampaignId: invite.earlyAccessCampaignId ? String(invite.earlyAccessCampaignId) : null,
     }))
     .filter(invite => invite.code);
 
@@ -354,6 +360,8 @@ function publicInvite(invite) {
     expiresAt: invite.expiresAt,
     disabledAt: invite.disabledAt,
     disabledReason: invite.disabledReason,
+    earlyAccessSignupId: invite.earlyAccessSignupId || null,
+    earlyAccessCampaignId: invite.earlyAccessCampaignId || null,
   };
 }
 
@@ -380,6 +388,8 @@ export function createInviteCode(store, admin, body = {}) {
     expiresAt: Number(body.expiresAt) || null,
     disabledAt: null,
     disabledReason: '',
+    earlyAccessSignupId: body.earlyAccessSignupId ? String(body.earlyAccessSignupId) : null,
+    earlyAccessCampaignId: body.earlyAccessCampaignId ? String(body.earlyAccessCampaignId) : null,
   };
   store.inviteCodes.push(invite);
   return { invite: publicInvite(invite) };

@@ -17,8 +17,11 @@ const COLLECTION_TABLES = [
   ['mail_entries', 'mail_id'],
   ['bans', 'ban_id'],
   ['invite_codes', 'invite_id'],
+  ['early_access_signups', 'email_hash'],
+  ['early_access_campaigns', 'campaign_id'],
+  ['early_access_deliveries', 'delivery_id'],
 ];
-const META_KEYS = ['rankedSeason', 'competitiveConfig', 'economyConfig', 'notificationConfig', 'availabilityConfig', 'afkConfig', 'forfeitConfig', 'releasePolicy'];
+const META_KEYS = ['rankedSeason', 'competitiveConfig', 'economyConfig', 'notificationConfig', 'availabilityConfig', 'afkConfig', 'forfeitConfig', 'releasePolicy', 'earlyAccessConfig'];
 
 function json(value) {
   return JSON.stringify(value ?? null);
@@ -37,6 +40,9 @@ function itemId(item, key) {
   if (key === 'mail_id') return item.mailId;
   if (key === 'ban_id') return item.banId;
   if (key === 'invite_id') return item.inviteId;
+  if (key === 'email_hash') return item.emailHash;
+  if (key === 'campaign_id') return item.campaignId;
+  if (key === 'delivery_id') return item.deliveryId;
   return item[key];
 }
 
@@ -75,6 +81,22 @@ export class PostgresStore {
         )
       `);
     }
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS golf9_early_access_signups_consent_idx
+        ON golf9_early_access_signups ((data->>'consentStatus'));
+      CREATE INDEX IF NOT EXISTS golf9_early_access_signups_stage_idx
+        ON golf9_early_access_signups ((data->>'testerStage'));
+      CREATE INDEX IF NOT EXISTS golf9_early_access_signups_signup_id_idx
+        ON golf9_early_access_signups ((data->>'signupId'));
+      CREATE INDEX IF NOT EXISTS golf9_early_access_signups_platforms_idx
+        ON golf9_early_access_signups USING GIN ((data->'platforms'));
+      CREATE INDEX IF NOT EXISTS golf9_early_access_campaigns_status_idx
+        ON golf9_early_access_campaigns ((data->>'status'));
+      CREATE INDEX IF NOT EXISTS golf9_early_access_deliveries_status_idx
+        ON golf9_early_access_deliveries ((data->>'status'));
+      CREATE INDEX IF NOT EXISTS golf9_early_access_deliveries_campaign_idx
+        ON golf9_early_access_deliveries ((data->>'campaignId'));
+    `);
   }
 
   async load() {
@@ -102,6 +124,10 @@ export class PostgresStore {
       mailEntries: [],
       bans: [],
       inviteCodes: [],
+      earlyAccessConfig: null,
+      earlyAccessSignups: [],
+      earlyAccessCampaigns: [],
+      earlyAccessDeliveries: [],
     };
 
     const meta = await this.pool.query('SELECT key, value FROM golf9_meta');
@@ -122,6 +148,9 @@ export class PostgresStore {
       else if (table === 'support_tickets') state.supportTickets = values;
       else if (table === 'mail_entries') state.mailEntries = values;
       else if (table === 'invite_codes') state.inviteCodes = values;
+      else if (table === 'early_access_signups') state.earlyAccessSignups = values;
+      else if (table === 'early_access_campaigns') state.earlyAccessCampaigns = values;
+      else if (table === 'early_access_deliveries') state.earlyAccessDeliveries = values;
       else state[table] = values;
     }
 
@@ -158,15 +187,25 @@ export class PostgresStore {
         mail_entries: state.mailEntries || [],
         bans: state.bans || [],
         invite_codes: state.inviteCodes || [],
+        early_access_signups: state.earlyAccessSignups || [],
+        early_access_campaigns: state.earlyAccessCampaigns || [],
+        early_access_deliveries: state.earlyAccessDeliveries || [],
       };
 
       for (const [table, key] of COLLECTION_TABLES) {
-        await client.query(`DELETE FROM golf9_${table}`);
+        const mergeByUpdatedAt = ['early_access_signups', 'early_access_campaigns', 'early_access_deliveries'].includes(table);
+        if (!mergeByUpdatedAt) await client.query(`DELETE FROM golf9_${table}`);
         for (const item of collections[table]) {
           const id = itemId(item, key);
           if (!id) continue;
+          const conflictClause = mergeByUpdatedAt
+            ? ` ON CONFLICT (${key}) DO UPDATE
+                  SET data = EXCLUDED.data, updated_at = NOW()
+                WHERE COALESCE((golf9_${table}.data->>'updatedAt')::numeric, 0)
+                   <= COALESCE((EXCLUDED.data->>'updatedAt')::numeric, 0)`
+            : '';
           await client.query(
-            `INSERT INTO golf9_${table} (${key}, data, updated_at) VALUES ($1, $2::jsonb, NOW())`,
+            `INSERT INTO golf9_${table} (${key}, data, updated_at) VALUES ($1, $2::jsonb, NOW())${conflictClause}`,
             [String(id), json(item)]
           );
         }
@@ -178,6 +217,91 @@ export class PostgresStore {
     } finally {
       client.release();
     }
+  }
+
+  async claimEarlyAccessDelivery({ now = Date.now(), leaseMs = 5 * 60 * 1000, maxAttempts = 5 } = {}) {
+    await this.migrate();
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const candidate = await client.query(`
+        SELECT delivery_id, data
+          FROM golf9_early_access_deliveries
+         WHERE (
+           (data->>'status' = 'queued' AND COALESCE((data->>'nextAttemptAt')::numeric, 0) <= $1)
+           OR (data->>'status' = 'sending' AND COALESCE((data->>'leaseExpiresAt')::numeric, 0) <= $1)
+         )
+           AND COALESCE((data->>'attempts')::integer, 0) < $2
+         ORDER BY COALESCE((data->>'nextAttemptAt')::numeric, 0), updated_at
+         FOR UPDATE SKIP LOCKED
+         LIMIT 1
+      `, [now, maxAttempts]);
+      const row = candidate.rows[0];
+      if (!row) {
+        await client.query('COMMIT');
+        return null;
+      }
+      const delivery = {
+        ...row.data,
+        status: 'sending',
+        attempts: Math.max(0, Number(row.data?.attempts) || 0) + 1,
+        leaseExpiresAt: now + leaseMs,
+        updatedAt: now,
+      };
+      await client.query(`
+        UPDATE golf9_early_access_deliveries
+           SET data = $2::jsonb, updated_at = NOW()
+         WHERE delivery_id = $1
+      `, [row.delivery_id, json(delivery)]);
+      const campaignResult = await client.query('SELECT data FROM golf9_early_access_campaigns WHERE campaign_id = $1', [delivery.campaignId]);
+      const signupResult = await client.query("SELECT data FROM golf9_early_access_signups WHERE data->>'signupId' = $1 LIMIT 1", [delivery.signupId]);
+      await client.query('COMMIT');
+      return {
+        delivery,
+        campaign: campaignResult.rows[0]?.data || null,
+        signup: signupResult.rows[0]?.data || null,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async saveEarlyAccessQueueContext({ delivery, campaign, signup }) {
+    const records = [
+      ['early_access_deliveries', 'delivery_id', delivery?.deliveryId, delivery],
+      ['early_access_campaigns', 'campaign_id', campaign?.campaignId, campaign],
+      ['early_access_signups', 'email_hash', signup?.emailHash, signup],
+    ].filter(([, , id, data]) => id && data);
+    if (!records.length) return;
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const [table, key, id, data] of records) {
+        await client.query(`
+          INSERT INTO golf9_${table} (${key}, data, updated_at)
+          VALUES ($1, $2::jsonb, NOW())
+          ON CONFLICT (${key}) DO UPDATE
+            SET data = EXCLUDED.data, updated_at = NOW()
+          WHERE COALESCE((golf9_${table}.data->>'updatedAt')::numeric, 0)
+             <= COALESCE((EXCLUDED.data->>'updatedAt')::numeric, 0)
+        `, [String(id), json(data)]);
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async deleteEarlyAccessSignups(signupIds = []) {
+    const ids = [...new Set(signupIds.map(String).filter(Boolean))];
+    if (!ids.length) return;
+    await this.pool.query("DELETE FROM golf9_early_access_signups WHERE data->>'signupId' = ANY($1::text[])", [ids]);
   }
 
   scheduleSave(stateFactory) {

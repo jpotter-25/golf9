@@ -249,6 +249,32 @@ h2 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.row.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.summary-stat {
+  display: grid;
+  gap: 0.3rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: rgba(6, 11, 24, 0.3);
+}
+
+.summary-stat span { color: var(--muted); font-size: 0.78rem; font-weight: 800; text-transform: uppercase; }
+.summary-stat strong { font-size: 1.65rem; }
+.early-access-table { min-width: 1180px; }
+.early-access-table select, .early-access-table input { min-width: 130px; }
+.campaign-actions { margin-top: 1rem; }
+
 .split-header {
   display: flex;
   justify-content: space-between;
@@ -1328,6 +1354,7 @@ button.live-ops-feature.selected {
 }
 
 @media (max-width: 920px) {
+  .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .live-ops-impact {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1373,9 +1400,24 @@ button.live-ops-feature.selected {
   padding: 0.75rem;
 }
 
+.early-access-history {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 15rem;
+  margin-top: 0.7rem;
+}
+
+.early-access-history p {
+  margin: 0;
+}
+
+.early-access-history textarea {
+  min-height: 4.5rem;
+}
+
 @media (max-width: 720px) {
   .row { grid-template-columns: 1fr; }
-  .row.two, .row.three, .toolbar, .workspace, .competitive-workspace, .wager-row, .result-toolbar, .admin-create-grid, .curve-row { grid-template-columns: 1fr; }
+  .row.two, .row.three, .row.four, .toolbar, .workspace, .competitive-workspace, .wager-row, .result-toolbar, .admin-create-grid, .curve-row, .summary-grid { grid-template-columns: 1fr; }
   .result-toolbar .muted { text-align: left; }
   .split-header { flex-direction: column; }
   .topbar { align-items: flex-start; flex-direction: column; }

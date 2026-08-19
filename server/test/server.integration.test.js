@@ -320,6 +320,192 @@ test('public support returns a private tracking link and queues both email copie
   });
 });
 
+test('early-access website confirms consent, onboards a controlled wave, sends access, and records activation', async () => {
+  await withServer(async (baseUrl) => {
+    const home = await (await fetch(baseUrl)).text();
+    assert.match(home, /Join Early Access/);
+    const page = await fetch(`${baseUrl}/early-access`);
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /Put your name on the list/);
+
+    const admin = await adminLogin(baseUrl);
+    await json(await fetch(`${baseUrl}/admin/api/early-access/config`, {
+      method: 'PATCH',
+      headers: adminHeaders(admin),
+      body: JSON.stringify({
+        config: { enrollmentStatus: 'open', statusMessage: 'Mobile testing signup is open.' },
+        reason: 'Open integration-test registration.',
+      }),
+    }));
+
+    const signupResponse = await fetch(`${baseUrl}/early-access/signups`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        firstName: 'Early',
+        email: 'early-access@example.com',
+        platforms: ['android'],
+        webFuture: true,
+        consent: true,
+        ageConfirmed: true,
+        source: 'integration-test',
+        utmCampaign: 'partner-preview',
+        faxNumber__nb_ea_29: '',
+      }),
+    });
+    assert.equal(signupResponse.status, 202);
+    assert.deepEqual(await signupResponse.json(), { ok: true, message: 'Check your email to confirm your signup.' });
+
+    async function outboxMessages() {
+      const outbox = await json(await fetch(`${baseUrl}/admin/api/auth/recovery/test-outbox`, { headers: adminHeaders(admin) }));
+      return outbox.messages || [];
+    }
+
+    async function waitForMessage(predicate) {
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        const found = (await outboxMessages()).find(predicate);
+        if (found) return found;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      throw new Error('Timed out waiting for early-access email.');
+    }
+
+    const confirmation = await waitForMessage(message => message.type === 'early-access-confirmation');
+    assert.equal(confirmation.to, 'early-access@example.com');
+    assert.ok(confirmation.confirmationToken);
+    const confirmed = await json(await fetch(`${baseUrl}/early-access/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: confirmation.confirmationToken }),
+    }));
+    assert.equal(confirmed.ok, true);
+
+    let signups = await json(await fetch(`${baseUrl}/admin/api/early-access/signups`, { headers: adminHeaders(admin) }));
+    assert.equal(signups.signups.length, 1);
+    assert.equal(signups.signups[0].consentStatus, 'confirmed');
+    assert.deepEqual(signups.signups[0].platforms, ['android', 'web_future']);
+
+    await json(await fetch(`${baseUrl}/admin/api/admins`, {
+      method: 'POST',
+      headers: adminHeaders(admin),
+      body: JSON.stringify({
+        displayName: 'Early Support',
+        email: 'early-support@example.com',
+        role: 'support',
+        temporaryPassword: 'EarlySupport9!',
+        reason: 'Verify early-access support permissions.',
+      }),
+    }));
+    const support = await loginAdminCredentials(baseUrl, { displayName: 'Early Support', password: 'EarlySupport9!' });
+    const supportMe = await json(await fetch(`${baseUrl}/admin/api/auth/me`, { headers: adminHeaders(support) }));
+    assert.ok(supportMe.admin.permissions.includes('earlyAccess:read'));
+    assert.ok(supportMe.admin.permissions.includes('earlyAccess:write'));
+    assert.equal(supportMe.admin.permissions.includes('earlyAccess:send'), false);
+    assert.equal((await fetch(`${baseUrl}/admin/api/early-access/summary`, { headers: adminHeaders(support) })).status, 200);
+    assert.equal((await fetch(`${baseUrl}/admin/api/early-access/signups`, { headers: adminHeaders(support) })).status, 200);
+    assert.equal((await fetch(`${baseUrl}/admin/api/early-access/campaigns`, { headers: adminHeaders(support) })).status, 403);
+    assert.equal((await fetch(`${baseUrl}/admin/api/early-access/export.csv`, { headers: adminHeaders(support) })).status, 403);
+
+    const selectionCampaign = await json(await fetch(`${baseUrl}/admin/api/early-access/campaigns`, {
+      method: 'POST',
+      headers: adminHeaders(admin),
+      body: JSON.stringify({
+        reason: 'Create the first controlled selection wave.',
+        internalName: 'Android selection wave',
+        type: 'selection',
+        targetPlatform: 'android',
+        waveSize: 1,
+        subject: 'You were selected for Nine Below',
+        heading: 'Your table is almost ready',
+        body: 'Complete tester setup so Potterwell can prepare your mobile access.',
+      }),
+    }));
+    const preview = await json(await fetch(`${baseUrl}/admin/api/early-access/campaigns/${selectionCampaign.campaign.campaignId}/preview`, { headers: adminHeaders(admin) }));
+    assert.equal(preview.recipientCount, 1);
+    await json(await fetch(`${baseUrl}/admin/api/early-access/campaigns/${selectionCampaign.campaign.campaignId}/schedule`, {
+      method: 'POST',
+      headers: adminHeaders(admin),
+      body: JSON.stringify({ reason: 'Schedule one selected Android tester.', scheduledAt: new Date().toISOString() }),
+    }));
+
+    const selectionEmail = await waitForMessage(message => message.type === 'early-access-campaign' && message.campaignId === selectionCampaign.campaign.campaignId);
+    const onboardingToken = decodeURIComponent(selectionEmail.text.match(/\/early-access\/onboarding#token=([^\s]+)/)?.[1] || '');
+    assert.ok(onboardingToken);
+    await json(await fetch(`${baseUrl}/early-access/onboarding`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: onboardingToken,
+        platformEmail: 'early-access@gmail.com',
+        deviceModel: 'Pixel integration test',
+        osVersion: 'Android test',
+        acknowledged: true,
+      }),
+    }));
+
+    const feedback = await json(await fetch(`${baseUrl}/early-access/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: onboardingToken,
+        category: 'gameplay',
+        severity: 'medium',
+        build: 'integration-1',
+        actual: 'The test feedback path correctly created a support case.',
+      }),
+    }));
+    assert.match(feedback.reference, /^NB-/);
+
+    const accessCampaign = await json(await fetch(`${baseUrl}/admin/api/early-access/campaigns`, {
+      method: 'POST',
+      headers: adminHeaders(admin),
+      body: JSON.stringify({
+        reason: 'Create the first Android access wave.',
+        internalName: 'Android access wave',
+        type: 'access',
+        targetPlatform: 'android',
+        waveSize: 1,
+        subject: 'Nine Below early access starts now',
+        heading: 'Welcome to the first deal',
+        body: 'Install the private testing build and use your one-use Nine Below code.',
+        accessUrl: 'https://play.google.com/apps/testing/com.potterwell.ninebelow',
+      }),
+    }));
+    await json(await fetch(`${baseUrl}/admin/api/early-access/campaigns/${accessCampaign.campaign.campaignId}/schedule`, {
+      method: 'POST',
+      headers: adminHeaders(admin),
+      body: JSON.stringify({ reason: 'Schedule one ready Android tester.', scheduledAt: new Date().toISOString() }),
+    }));
+    const accessEmail = await waitForMessage(message => message.type === 'early-access-campaign' && message.campaignId === accessCampaign.campaign.campaignId);
+    const inviteCode = accessEmail.text.match(/one-use Nine Below invite code: ([A-Z0-9-]+)/)?.[1];
+    assert.ok(inviteCode);
+    assert.equal(accessEmail.headers['List-Unsubscribe-Post'], 'List-Unsubscribe=One-Click');
+
+    const activatedPlayer = await json(await fetch(`${baseUrl}/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: testDisplayName('EarlyUser'), password: 'password1', inviteCode }),
+    }));
+    assert.ok(activatedPlayer.user.userId);
+    signups = await json(await fetch(`${baseUrl}/admin/api/early-access/signups`, { headers: adminHeaders(admin) }));
+    assert.equal(signups.signups[0].testerStage, 'activated');
+    assert.equal(signups.signups[0].activatedUserId, activatedPlayer.user.userId);
+
+    const googlePlayExport = await fetch(`${baseUrl}/admin/api/early-access/export.csv?format=google-play`, { headers: adminHeaders(admin) });
+    assert.equal(googlePlayExport.status, 200);
+    assert.match(await googlePlayExport.text(), /early-access@gmail\.com/);
+  }, {
+    SEED_ADMIN_ACCOUNT: '1',
+    ADMIN_BOOTSTRAP_EMAIL: 'owner@example.com',
+    ADMIN_EMAIL_TEST_MODE: '1',
+    EARLY_ACCESS_PII_KEY: 'integration-pii-key-that-is-at-least-thirty-two-characters',
+    EARLY_ACCESS_TOKEN_SECRET: 'integration-token-key-that-is-at-least-thirty-two-characters',
+    EARLY_ACCESS_POSTAL_ADDRESS: 'PO Box 9, Madison, WI 53701',
+    REQUIRE_INVITE_CODE: '1',
+  });
+});
+
 test('Potterwell contact requests use parent branding and the shared support inbox', async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/support/public`, {
