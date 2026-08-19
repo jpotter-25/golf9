@@ -1439,7 +1439,9 @@ export default function GameScreen({ route, navigation }: Props) {
         ? state.currentPlayerIndex === 0
         : true;
     if (viewerIsCurrent) return;
-    const viewerKey = isOnline && !viewerIsCurrent ? 'announcement' : `turn:${state.currentPlayerIndex}`;
+    // Solo has one human viewer, so the final-sweep announcement is acknowledged once
+    // for the whole table instead of repeating as each AI seat takes its turn.
+    const viewerKey = isOnline || isSolo ? 'announcement' : `turn:${state.currentPlayerIndex}`;
     const key = `${state.id}:${state.round ?? round}:${state.sweepStarterIndex}:${viewerKey}`;
     if (lastSweepAlertKey.current === key) return;
     lastSweepAlertKey.current = key;
