@@ -92,6 +92,8 @@ Existing approved accounts can log in normally. New accounts must enter a valid 
 
 ## Early Access Registration And Waves
 
+See the complete [Early Access Operations Guide](early-access-operations.md) for registration controls, testing waves, campaigns, exports, privacy, retention, and emergency shutdown procedures.
+
 The public signup page is `https://ninebelow.potterwell.com/early-access`. Registration is paused by default even after deployment.
 
 Before opening it:
