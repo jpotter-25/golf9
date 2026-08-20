@@ -11,6 +11,7 @@ expo-export-smoke/
 .expo/
 client/.expo/
 client/dist/
+client/.codex-export-android/
 
 .env
 .env.local
