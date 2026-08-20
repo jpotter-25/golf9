@@ -204,15 +204,19 @@ h2 {
 
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.6rem;
-  overflow-x: auto;
+  align-items: center;
+  overflow-x: visible;
   padding-bottom: 0.6rem;
 }
 
 .tabs button {
+  flex: 0 0 auto;
   background: #111936;
   color: var(--muted);
   border: 1px solid var(--line);
+  padding: 0.68rem 0.85rem;
   white-space: nowrap;
 }
 
@@ -1634,6 +1638,8 @@ button.live-ops-feature.selected {
 }
 
 @media (max-width: 720px) {
+  .tabs { gap: 0.4rem; }
+  .tabs button { padding: 0.58rem 0.68rem; font-size: 0.82rem; }
   .row { grid-template-columns: 1fr; }
   .row.two, .row.three, .row.four, .toolbar, .workspace, .competitive-workspace, .wager-row, .result-toolbar, .admin-create-grid, .curve-row, .summary-grid, .health-summary, .health-grid { grid-template-columns: 1fr; }
   .health-card-header { flex-direction: column; }
