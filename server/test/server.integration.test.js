@@ -269,6 +269,44 @@ test('public policy pages are available for store and social auth review', async
   });
 });
 
+test('admin health dashboard requires authentication and returns safe live diagnostics', async () => {
+  await withServer(async (baseUrl) => {
+    const denied = await fetch(`${baseUrl}/admin/api/health`);
+    assert.equal(denied.status, 401);
+
+    const admin = await adminLogin(baseUrl);
+    const response = await fetch(`${baseUrl}/admin/api/health?refresh=1`, {
+      headers: adminHeaders(admin),
+    });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('cache-control'), /no-store/);
+    const { health } = await json(response);
+    assert.ok(['healthy', 'warning', 'critical'].includes(health.status));
+    assert.equal(health.refreshAfterMs, 10_000);
+    assert.equal(health.checks.length, 7);
+    assert.deepEqual(health.checks.map(check => check.id), [
+      'api-runtime',
+      'database',
+      'email',
+      'early-access',
+      'game-services',
+      'notifications-support',
+      'security-deployment',
+    ]);
+    assert.equal(health.checks.find(check => check.id === 'database').summary, 'Local JSON persistence is active outside production.');
+    assert.equal(health.checks.find(check => check.id === 'email').status, 'healthy');
+    assert.equal(health.checks.find(check => check.id === 'email').metrics[0].value, 'Test outbox');
+    const serialized = JSON.stringify(health);
+    assert.doesNotMatch(serialized, /health-dashboard-secret|smtp-secret-host|EARLY_ACCESS_TOKEN_SECRET|ADMIN_SMTP_PASS/);
+  }, {
+    SEED_ADMIN_ACCOUNT: '1',
+    ADMIN_EMAIL_TEST_MODE: '1',
+    ADMIN_SMTP_PASS: 'health-dashboard-secret',
+    ADMIN_SMTP_HOST: 'smtp-secret-host.invalid',
+    EARLY_ACCESS_TOKEN_SECRET: 'early-access-health-secret-at-least-32-characters',
+  });
+});
+
 test('public support returns a private tracking link and queues both email copies', async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/support/public`, {

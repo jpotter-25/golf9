@@ -102,6 +102,32 @@ test('database TLS preserves ordinary verified TLS without Railway compatibility
   assert.equal('checkServerIdentity' in ssl, false);
 });
 
+test('postgres health checks report live query latency without exposing database errors', async () => {
+  const successful = new PostgresStore({
+    query: async sql => {
+      assert.match(sql, /SELECT 1 AS ok/);
+      return { rows: [{ ok: 1 }] };
+    },
+  });
+  const healthy = await successful.healthCheck();
+  assert.equal(healthy.ok, true);
+  assert.equal(typeof healthy.latencyMs, 'number');
+  assert.equal(successful.runtimeStatus().lastHealthSuccessAt, healthy.checkedAt);
+
+  const failed = new PostgresStore({
+    query: async () => {
+      const error = new Error('postgresql://user:password@secret-host/database');
+      error.code = 'ECONNREFUSED';
+      throw error;
+    },
+  });
+  const unhealthy = await failed.healthCheck();
+  assert.deepEqual(Object.keys(unhealthy).sort(), ['checkedAt', 'errorCode', 'latencyMs', 'ok']);
+  assert.equal(unhealthy.ok, false);
+  assert.equal(unhealthy.errorCode, 'ECONNREFUSED');
+  assert.doesNotMatch(JSON.stringify(unhealthy), /password|secret-host/);
+});
+
 test('postgres store loads and saves economy config metadata', async () => {
   const savedQueries = [];
   const client = {

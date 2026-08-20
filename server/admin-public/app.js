@@ -29,6 +29,8 @@ let earlyAccessSignupsCache = [];
 let earlyAccessCampaignsCache = [];
 let earlyAccessPermissions = [];
 let earlyAccessEditingCampaignId = null;
+let healthPollTimer = null;
+let healthRequestInFlight = false;
 
 const NOTIFICATION_LABELS = {
   turn: 'Your Turn',
@@ -82,10 +84,12 @@ function money(value) {
 }
 
 function renderConsole() {
+  stopHealthPolling();
   app.replaceChildren(template.content.cloneNode(true));
   bindTabs();
   bindConsoleActions();
   loadMetrics();
+  startHealthPolling();
 }
 
 function bindTabs() {
@@ -95,6 +99,7 @@ function bindTabs() {
       document.querySelectorAll('.tab').forEach(item => item.classList.remove('active'));
       button.classList.add('active');
       document.querySelector(`#${button.dataset.tab}`)?.classList.add('active');
+      startHealthPolling();
       if (button.dataset.tab === 'invites') loadInvites();
       if (button.dataset.tab === 'earlyAccess') loadEarlyAccess();
       if (button.dataset.tab === 'mail') loadMail();
@@ -109,9 +114,11 @@ function bindTabs() {
 
 function bindConsoleActions() {
   document.querySelector('#logoutButton').addEventListener('click', async () => {
+    stopHealthPolling();
     await api('/auth/logout', { method: 'POST' }).catch(() => null);
     location.reload();
   });
+  document.querySelector('#refreshHealth')?.addEventListener('click', () => loadHealth({ force: true }));
   document.querySelector('#searchPlayers').addEventListener('click', searchPlayers);
   document.querySelector('#playerSearch').addEventListener('keydown', event => {
     if (event.key === 'Enter') searchPlayers();
@@ -196,6 +203,140 @@ async function loadMetrics() {
   } catch {
     status('');
   }
+}
+
+function healthStatusLabel(value) {
+  if (value === 'healthy') return 'Healthy';
+  if (value === 'warning') return 'Warning';
+  if (value === 'critical') return 'Critical';
+  return 'Unknown';
+}
+
+function healthStatusSummary(health) {
+  if (health.status === 'critical') return 'Immediate attention is needed';
+  if (health.status === 'warning') return 'Nine Below is operating with warnings';
+  return 'All monitored systems are healthy';
+}
+
+function renderHealthReport(health) {
+  const overall = document.querySelector('#healthOverall');
+  const message = document.querySelector('#healthMessage');
+  const summary = document.querySelector('#healthSummary');
+  const grid = document.querySelector('#healthGrid');
+  const events = document.querySelector('#healthEvents');
+  const indicator = document.querySelector('#healthTabIndicator');
+  if (!overall || !message || !summary || !grid || !events || !indicator) return;
+
+  overall.textContent = healthStatusSummary(health);
+  overall.className = `health-heading health-${health.status}`;
+  message.textContent = `Last checked ${new Date(health.checkedAt).toLocaleString()}. The Health badge remains live throughout the admin console.`;
+  indicator.className = `health-tab-indicator health-${health.status}`;
+  indicator.setAttribute('aria-label', `Health status: ${healthStatusLabel(health.status)}`);
+  indicator.title = `Health: ${healthStatusLabel(health.status)}`;
+
+  summary.innerHTML = ['healthy', 'warning', 'critical'].map(statusValue => `
+    <div class="health-summary-stat health-${statusValue}">
+      <span>${escapeHtml(healthStatusLabel(statusValue))}</span>
+      <strong>${Number(health.counts?.[statusValue] || 0).toLocaleString()}</strong>
+    </div>
+  `).join('');
+
+  grid.innerHTML = (health.checks || []).map(check => {
+    const metrics = (check.metrics || []).map(metric => `
+      <div class="health-metric">
+        <span>${escapeHtml(metric.label)}</span>
+        <strong>${escapeHtml(metric.value)}</strong>
+      </div>
+    `).join('');
+    const details = (check.details || []).map(item => `<li>${escapeHtml(item)}</li>`).join('');
+    const guidance = (check.guidance || []).map(item => `<li>${escapeHtml(item)}</li>`).join('');
+    const latency = Number.isFinite(check.latencyMs) ? ` · ${Number(check.latencyMs).toLocaleString()} ms` : '';
+    return `
+      <article class="health-card health-${escapeHtml(check.status)}">
+        <div class="health-card-header">
+          <div>
+            <p class="health-card-title"><span class="health-dot" aria-hidden="true"></span>${escapeHtml(check.title)}</p>
+            <span class="health-state-label">${escapeHtml(healthStatusLabel(check.status))}</span>
+          </div>
+          <time datetime="${escapeHtml(new Date(check.checkedAt).toISOString())}">${escapeHtml(new Date(check.checkedAt).toLocaleTimeString())}${escapeHtml(latency)}</time>
+        </div>
+        <p class="health-card-summary">${escapeHtml(check.summary)}</p>
+        <div class="health-metrics">${metrics}</div>
+        <details class="health-details">
+          <summary>View context and next steps</summary>
+          ${details ? `<h3>Context</h3><ul>${details}</ul>` : ''}
+          ${guidance ? `<h3>Recommended action</h3><ul>${guidance}</ul>` : '<p>No action is currently required.</p>'}
+        </details>
+      </article>
+    `;
+  }).join('');
+
+  events.innerHTML = (health.recentEvents || []).length
+    ? health.recentEvents.map(event => `
+      <div class="health-event health-${escapeHtml(event.status)}">
+        <span class="health-dot" aria-hidden="true"></span>
+        <div>
+          <strong>${escapeHtml(event.title)}</strong>
+          <p>${escapeHtml(healthStatusLabel(event.previousStatus))} → ${escapeHtml(healthStatusLabel(event.status))}: ${escapeHtml(event.summary)}</p>
+          <time datetime="${escapeHtml(new Date(event.at).toISOString())}">${escapeHtml(new Date(event.at).toLocaleString())}</time>
+        </div>
+      </div>
+    `).join('')
+    : '<div class="empty-state">No health warnings or status changes have been detected since this server process started.</div>';
+}
+
+function renderHealthFailure(error) {
+  const overall = document.querySelector('#healthOverall');
+  const message = document.querySelector('#healthMessage');
+  const grid = document.querySelector('#healthGrid');
+  const indicator = document.querySelector('#healthTabIndicator');
+  if (overall) {
+    overall.textContent = 'Health report unavailable';
+    overall.className = 'health-heading health-critical';
+  }
+  if (message) message.textContent = `${error.message} Try Refresh now and review the Railway deployment logs if the problem continues.`;
+  if (grid) grid.innerHTML = '<div class="panel error">The authenticated health endpoint did not return a report.</div>';
+  if (indicator) {
+    indicator.className = 'health-tab-indicator health-critical';
+    indicator.setAttribute('aria-label', 'Health status: Critical');
+  }
+}
+
+async function loadHealth({ force = false } = {}) {
+  if (healthRequestInFlight && !force) return;
+  const refreshButton = document.querySelector('#refreshHealth');
+  healthRequestInFlight = true;
+  if (refreshButton) {
+    refreshButton.disabled = true;
+    refreshButton.textContent = 'Checking...';
+  }
+  try {
+    const { health } = await api(`/health${force ? '?refresh=1' : ''}`);
+    renderHealthReport(health);
+  } catch (error) {
+    renderHealthFailure(error);
+  } finally {
+    healthRequestInFlight = false;
+    if (refreshButton) {
+      refreshButton.disabled = false;
+      refreshButton.textContent = 'Refresh now';
+    }
+  }
+}
+
+function stopHealthPolling() {
+  if (!healthPollTimer) return;
+  clearInterval(healthPollTimer);
+  healthPollTimer = null;
+}
+
+function startHealthPolling() {
+  stopHealthPolling();
+  const healthActive = !!document.querySelector('#health.active');
+  loadHealth();
+  healthPollTimer = setInterval(() => {
+    if (document.visibilityState !== 'hidden') loadHealth();
+  }, healthActive ? 10_000 : 30_000);
 }
 
 async function searchPlayers() {

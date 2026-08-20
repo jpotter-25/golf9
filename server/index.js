@@ -612,6 +612,10 @@ const postgresStore = createPostgresStore(DATABASE_URL);
 const googleOAuthClient = new OAuth2Client();
 let storeReady = false;
 let storeLoadError = null;
+let databaseHealthCache = { checkedAt: 0, result: null, pending: null };
+let smtpHealthCache = { checkedAt: 0, result: null, pending: null };
+const operationalHealthStates = new Map();
+const operationalHealthEvents = [];
 let lastDailyPushScanAt = 0;
 let storeMigrationPending = false;
 let earlyAccessDeliveryRunning = false;
@@ -628,6 +632,71 @@ function storageStatus() {
     ready: storeReady,
     error: storeLoadError ? 'Persistence failed to load.' : null,
   };
+}
+
+function safeHealthErrorCode(value) {
+  return String(value || 'UNKNOWN_ERROR').replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 80);
+}
+
+function databaseHealthMessage(errorCode) {
+  const code = safeHealthErrorCode(errorCode).toUpperCase();
+  if (code.includes('CERT') || code.includes('TLS') || code.includes('ALTNAME')) {
+    return 'Database TLS verification failed. The pinned CA or presented certificate may have changed.';
+  }
+  if (['28P01', '28000'].includes(code) || code.includes('AUTH')) {
+    return 'Database authentication failed. Review the Railway database credentials.';
+  }
+  if (code.includes('TIMEOUT') || code === 'ETIMEDOUT') {
+    return 'The database did not answer within the health-check timeout.';
+  }
+  if (['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN'].includes(code)) {
+    return 'The database network connection is unavailable.';
+  }
+  return 'The live database query failed.';
+}
+
+function databaseCertificateHealth() {
+  const pem = String(process.env.DATABASE_SSL_CA || '').replace(/\\n/g, '\n').trim();
+  if (!pem) return { configured: false, expiresAt: null, daysRemaining: null, error: null };
+  try {
+    const certificate = new crypto.X509Certificate(pem);
+    const expiresAt = Date.parse(certificate.validTo);
+    return {
+      configured: true,
+      expiresAt: Number.isFinite(expiresAt) ? expiresAt : null,
+      daysRemaining: Number.isFinite(expiresAt) ? Math.floor((expiresAt - Date.now()) / (24 * 60 * 60 * 1000)) : null,
+      error: null,
+    };
+  } catch {
+    return { configured: true, expiresAt: null, daysRemaining: null, error: 'The configured database CA cannot be parsed.' };
+  }
+}
+
+async function liveDatabaseHealth({ force = false } = {}) {
+  if (!postgresStore) return { ok: !IS_PRODUCTION, checkedAt: Date.now(), provider: 'json', latencyMs: null };
+  const cacheMs = 8_000;
+  if (!force && databaseHealthCache.result && Date.now() - databaseHealthCache.checkedAt < cacheMs) {
+    return databaseHealthCache.result;
+  }
+  if (databaseHealthCache.pending) return databaseHealthCache.pending;
+  databaseHealthCache.pending = postgresStore.healthCheck({ timeoutMs: 3_000 })
+    .then(result => {
+      databaseHealthCache = { checkedAt: result.checkedAt, result: { ...result, provider: 'postgres' }, pending: null };
+      return databaseHealthCache.result;
+    })
+    .catch(error => {
+      const checkedAt = Date.now();
+      const result = {
+        ok: false,
+        checkedAt,
+        provider: 'postgres',
+        latencyMs: null,
+        errorCode: safeHealthErrorCode(error?.code),
+      };
+      databaseHealthCache = { checkedAt, result, pending: null };
+      return result;
+    });
+  return databaseHealthCache.pending;
 }
 
 function rankedConfig() {
@@ -889,6 +958,42 @@ function adminEmailTransport() {
     socketTimeout: ADMIN_SMTP_SOCKET_TIMEOUT_MS,
   });
   return adminSmtpTransport;
+}
+
+async function liveSmtpHealth({ force = false } = {}) {
+  const config = adminEmailConfigStatus();
+  if (config.testMode) {
+    return { ok: true, checkedAt: Date.now(), latencyMs: 0, mode: 'test', errorCode: null };
+  }
+  if (!config.enabled) {
+    return { ok: false, checkedAt: Date.now(), latencyMs: null, mode: 'disabled', errorCode: 'SMTP_NOT_CONFIGURED' };
+  }
+  const cacheMs = 60_000;
+  if (!force && smtpHealthCache.result && Date.now() - smtpHealthCache.checkedAt < cacheMs) {
+    return smtpHealthCache.result;
+  }
+  if (smtpHealthCache.pending) return smtpHealthCache.pending;
+  const startedAt = Date.now();
+  smtpHealthCache.pending = adminEmailTransport().verify()
+    .then(() => {
+      const checkedAt = Date.now();
+      const result = { ok: true, checkedAt, latencyMs: checkedAt - startedAt, mode: 'smtp', errorCode: null };
+      smtpHealthCache = { checkedAt, result, pending: null };
+      return result;
+    })
+    .catch(error => {
+      const checkedAt = Date.now();
+      const result = {
+        ok: false,
+        checkedAt,
+        latencyMs: checkedAt - startedAt,
+        mode: 'smtp',
+        errorCode: safeHealthErrorCode(error?.code || error?.responseCode || 'SMTP_VERIFY_FAILED'),
+      };
+      smtpHealthCache = { checkedAt, result, pending: null };
+      return result;
+    });
+  return smtpHealthCache.pending;
 }
 
 async function sendTransactionalEmail(message, testMetadata = {}) {
@@ -4596,6 +4701,277 @@ function liveOpsImpactSummary() {
   };
 }
 
+function healthMetric(label, value) {
+  return { label, value: String(value ?? 'Not available') };
+}
+
+function worstHealthStatus(statuses) {
+  const rank = { healthy: 0, warning: 1, critical: 2 };
+  return statuses.reduce((worst, status) => (rank[status] > rank[worst] ? status : worst), 'healthy');
+}
+
+function smtpHealthMessage(errorCode) {
+  const code = safeHealthErrorCode(errorCode).toUpperCase();
+  if (code.includes('AUTH') || code.includes('EAUTH') || code === '535') return 'SMTP rejected the configured sender credentials.';
+  if (code.includes('CERT') || code.includes('TLS')) return 'SMTP TLS verification failed.';
+  if (code.includes('TIMEOUT') || code === 'ETIMEDOUT') return 'SMTP did not answer within the connection timeout.';
+  if (code === 'SMTP_NOT_CONFIGURED') return 'Transactional email is not fully configured.';
+  return 'The SMTP verification request failed.';
+}
+
+function recordOperationalHealthTransitions(checks, checkedAt) {
+  for (const check of checks) {
+    const previousStatus = operationalHealthStates.get(check.id) || null;
+    operationalHealthStates.set(check.id, check.status);
+    if (previousStatus === check.status || (!previousStatus && check.status === 'healthy')) continue;
+    const event = {
+      id: crypto.randomUUID(),
+      checkId: check.id,
+      title: check.title,
+      previousStatus,
+      status: check.status,
+      summary: check.summary,
+      at: checkedAt,
+    };
+    operationalHealthEvents.unshift(event);
+    operationalHealthEvents.splice(50);
+    const message = `[health] ${check.title}: ${previousStatus || 'initial'} -> ${check.status} (${check.summary})`;
+    if (check.status === 'critical') console.error(message);
+    else if (check.status === 'warning') console.warn(message);
+    else console.info(message);
+  }
+}
+
+async function adminHealthReport({ force = false } = {}) {
+  const checkedAt = Date.now();
+  const [database, smtp] = await Promise.all([
+    liveDatabaseHealth({ force }),
+    liveSmtpHealth({ force }),
+  ]);
+  const checks = [];
+  const memory = process.memoryUsage();
+  const impact = liveOpsImpactSummary();
+
+  checks.push({
+    id: 'api-runtime',
+    title: 'API & Runtime',
+    status: storeReady ? 'healthy' : 'critical',
+    summary: storeReady ? 'The Nine Below server is ready and responding.' : 'The server is responding, but persistence is not ready.',
+    checkedAt,
+    metrics: [
+      healthMetric('Uptime', `${Math.floor(process.uptime() / 60).toLocaleString()} min`),
+      healthMetric('Memory', `${Math.round(memory.rss / 1024 / 1024).toLocaleString()} MB`),
+      healthMetric('Node', process.version),
+      healthMetric('Environment', PUBLIC_ENV),
+    ],
+    details: [
+      storeLoadError ? 'Persistence failed during server startup.' : 'HTTP and Socket.IO are running in this process.',
+      `Process started ${new Date(Date.now() - (process.uptime() * 1000)).toISOString()}.`,
+    ],
+    guidance: storeReady ? [] : ['Review the active Railway deployment logs and the Database & Persistence check.'],
+  });
+
+  const certificate = databaseCertificateHealth();
+  const databaseRuntime = postgresStore?.runtimeStatus?.() || {};
+  const saveFailureActive = !!databaseRuntime.lastFailedSaveAt
+    && (!databaseRuntime.lastSuccessfulSaveAt || databaseRuntime.lastFailedSaveAt > databaseRuntime.lastSuccessfulSaveAt);
+  const pinConfigured = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== '0'
+    && !!String(process.env.DATABASE_SSL_CA || '').trim()
+    && !!String(process.env.DATABASE_SSL_CA_SHA256 || '').trim();
+  const certificateCritical = certificate.error || (certificate.daysRemaining !== null && certificate.daysRemaining < 7);
+  const certificateWarning = certificate.daysRemaining !== null && certificate.daysRemaining < 30;
+  let databaseStatus = 'healthy';
+  if (!database.ok || !storeReady || saveFailureActive || (IS_PRODUCTION && !postgresStore) || certificateCritical) databaseStatus = 'critical';
+  else if ((IS_PRODUCTION && !pinConfigured) || certificateWarning) databaseStatus = 'warning';
+  const databaseSummary = !database.ok
+    ? databaseHealthMessage(database.errorCode)
+    : saveFailureActive
+      ? 'The database is reachable, but the most recent persistence save failed.'
+      : certificateCritical
+        ? (certificate.error || 'The pinned database CA expires in less than seven days.')
+        : database.provider === 'postgres'
+          ? 'A live PostgreSQL query succeeded.'
+          : 'Local JSON persistence is active outside production.';
+  checks.push({
+    id: 'database',
+    title: 'Database & Persistence',
+    status: databaseStatus,
+    summary: databaseSummary,
+    checkedAt: database.checkedAt || checkedAt,
+    latencyMs: database.latencyMs,
+    metrics: [
+      healthMetric('Provider', database.provider === 'postgres' ? 'PostgreSQL' : 'Local JSON'),
+      healthMetric('Live query', database.ok ? 'Passed' : 'Failed'),
+      healthMetric('TLS CA pin', pinConfigured ? 'Verified' : (IS_PRODUCTION ? 'Incomplete' : 'Not required locally')),
+      healthMetric('CA remaining', certificate.daysRemaining === null ? 'Not available' : `${certificate.daysRemaining.toLocaleString()} days`),
+    ],
+    details: [
+      database.latencyMs === null ? 'No database latency was recorded.' : `Live SELECT 1 latency was ${database.latencyMs} ms.`,
+      certificate.expiresAt ? `The configured CA certificate expires ${new Date(certificate.expiresAt).toISOString()}.` : 'No CA expiration date is available.',
+      databaseRuntime.lastSuccessfulSaveAt ? `Last successful queued save: ${new Date(databaseRuntime.lastSuccessfulSaveAt).toISOString()}.` : 'No queued save has completed since this process started.',
+      databaseRuntime.lastFailedSaveAt ? `Last failed queued save: ${new Date(databaseRuntime.lastFailedSaveAt).toISOString()} (${safeHealthErrorCode(databaseRuntime.lastSaveErrorCode)}).` : 'No queued save failures have been recorded since this process started.',
+    ],
+    guidance: databaseStatus === 'healthy' ? [] : [
+      'Review Railway PostgreSQL status and the active deployment logs.',
+      'If Railway rotated its certificate authority, verify the new CA and fingerprint before updating DATABASE_SSL_CA and DATABASE_SSL_CA_SHA256.',
+    ],
+  });
+
+  const emailConfig = adminEmailConfigStatus();
+  const emailStatus = smtp.ok ? (smtp.mode === 'test' && IS_PRODUCTION ? 'warning' : 'healthy') : (IS_PRODUCTION ? 'critical' : 'warning');
+  checks.push({
+    id: 'email',
+    title: 'Transactional Email',
+    status: emailStatus,
+    summary: smtp.ok
+      ? (smtp.mode === 'test' ? 'Email is being captured by the test outbox.' : 'SMTP accepted a live connection and authentication check.')
+      : smtpHealthMessage(smtp.errorCode),
+    checkedAt: smtp.checkedAt || checkedAt,
+    latencyMs: smtp.latencyMs,
+    metrics: [
+      healthMetric('Mode', smtp.mode === 'test' ? 'Test outbox' : smtp.mode === 'smtp' ? 'SMTP' : 'Disabled'),
+      healthMetric('Sender', emailConfig.fromConfigured ? 'Configured' : 'Missing'),
+      healthMetric('Credentials', emailConfig.credentialsConfigured ? 'Configured' : 'Missing'),
+      healthMetric('TLS', emailConfig.secure ? 'Implicit TLS' : 'STARTTLS required'),
+    ],
+    details: [
+      smtp.latencyMs === null ? 'No SMTP latency was recorded.' : `SMTP verification latency was ${smtp.latencyMs} ms.`,
+      smtp.errorCode ? `Safe provider error code: ${safeHealthErrorCode(smtp.errorCode)}.` : 'No SMTP verification error is active.',
+      'Sender addresses and SMTP credentials are deliberately hidden from this dashboard.',
+    ],
+    guidance: smtp.ok ? [] : ['Review the SMTP variables and provider status, then use Refresh now to run another verification.'],
+  });
+
+  const earlySummary = earlyAccessSummary(earlyAccessStore);
+  const earlyEmail = earlyAccessCampaignEmailStatus();
+  const staleSending = earlyAccessStore.deliveries.filter(delivery => delivery.status === 'sending'
+    && Number(delivery.leaseExpiresAt || 0) > 0
+    && Number(delivery.leaseExpiresAt) < checkedAt).length;
+  let earlyStatus = 'healthy';
+  if (!earlyEmail.security.ready || staleSending > 0 || (earlyAccessStore.config.enrollmentStatus === 'open' && !smtp.ok)) earlyStatus = 'critical';
+  else if (Number(earlySummary.deliveries.failed || 0) > 0) earlyStatus = 'warning';
+  checks.push({
+    id: 'early-access',
+    title: 'Early Access',
+    status: earlyStatus,
+    summary: staleSending > 0
+      ? `${staleSending.toLocaleString()} email delivery lease(s) are stuck.`
+      : Number(earlySummary.deliveries.failed || 0) > 0
+        ? `${Number(earlySummary.deliveries.failed).toLocaleString()} early-access delivery attempt(s) need review.`
+        : `Registration is ${earlyAccessStore.config.enrollmentStatus}; the delivery queue has no active failures.`,
+    checkedAt,
+    metrics: [
+      healthMetric('Registration', earlyAccessStore.config.enrollmentStatus),
+      healthMetric('Confirmed', earlySummary.confirmed),
+      healthMetric('Queued', earlySummary.deliveries.queued || 0),
+      healthMetric('Failed', earlySummary.deliveries.failed || 0),
+    ],
+    details: [
+      earlyEmail.security.ready ? 'PII encryption and token-signing requirements are satisfied.' : 'Early-access encryption or token-signing configuration is incomplete.',
+      earlyEmail.deliveryEnabled ? 'Campaign delivery is enabled.' : 'Campaign delivery is intentionally locked by configuration.',
+      earlyEmail.postalAddressConfigured ? 'The campaign postal-address requirement is configured.' : 'The campaign postal-address requirement is not configured, so campaigns remain locked.',
+      `${staleSending.toLocaleString()} expired sending lease(s) are awaiting recovery.`,
+    ],
+    guidance: earlyStatus === 'healthy' ? [] : ['Open the Early Access tab to inspect failed deliveries and campaign state.'],
+  });
+
+  const availability = availabilityAdminView(availabilityStore, checkedAt);
+  const globalAvailability = availability.entries?.global?.state || 'live';
+  const gameStatus = globalAvailability === 'live' ? 'healthy' : 'warning';
+  checks.push({
+    id: 'game-services',
+    title: 'Game Services',
+    status: gameStatus,
+    summary: globalAvailability === 'live'
+      ? 'Player-facing game services are live.'
+      : `Global player availability is intentionally set to ${globalAvailability}.`,
+    checkedAt,
+    metrics: [
+      healthMetric('Socket connections', io.engine.clientsCount || 0),
+      healthMetric('Active matches', impact.activeMatchesProtected),
+      healthMetric('Waiting rooms', impact.waitingRooms),
+      healthMetric('Ranked queue', impact.queuedPlayers),
+    ],
+    details: [
+      `${impact.activePlayersProtected.toLocaleString()} player(s) are protected in active matches.`,
+      `${impact.waitingPlayers.toLocaleString()} player(s) are currently waiting in rooms.`,
+      `${availability.schedules?.length || 0} availability change(s) are scheduled.`,
+    ],
+    guidance: gameStatus === 'healthy' ? [] : ['Open Live Ops to review the active maintenance message, affected features, and restoration schedule.'],
+  });
+
+  const openTickets = adminStore.supportTickets.filter(ticket => !['resolved', 'closed'].includes(ticket.status));
+  const agedTickets = openTickets.filter(ticket => checkedAt - Number(ticket.createdAt || checkedAt) > 7 * 24 * 60 * 60 * 1000).length;
+  const notificationEnabled = notificationConfig().enabled;
+  const operationsStatus = agedTickets > 0 ? 'warning' : 'healthy';
+  checks.push({
+    id: 'notifications-support',
+    title: 'Notifications & Support',
+    status: operationsStatus,
+    summary: agedTickets > 0
+        ? `${agedTickets.toLocaleString()} support ticket(s) have been open for more than seven days.`
+        : 'Notification configuration and the support queue have no active warnings.',
+    checkedAt,
+    metrics: [
+      healthMetric('Push', PUSH_TEST_MODE ? 'Test mode' : notificationEnabled ? 'Enabled' : 'Disabled'),
+      healthMetric('Open tickets', openTickets.length),
+      healthMetric('Older than 7 days', agedTickets),
+      healthMetric('Test pushes queued', pushTestOutbox.length),
+    ],
+    details: [
+      PUSH_TEST_MODE ? 'Push messages are being captured by the test outbox.' : EXPO_ACCESS_TOKEN ? 'Expo enhanced push security is configured.' : 'Expo push delivery is using the standard endpoint without enhanced access-token enforcement.',
+      'Support requester details remain protected by admin permissions and are not included here.',
+    ],
+    guidance: operationsStatus === 'healthy' ? [] : ['Open Notifications to review push configuration or Support to triage the oldest tickets.'],
+  });
+
+  const publicHttps = PUBLIC_API_URL.startsWith('https://');
+  const adminHttps = ADMIN_PUBLIC_URL.startsWith('https://');
+  const wildcardCors = CLIENT_ORIGINS.includes('*');
+  let securityStatus = 'healthy';
+  if (IS_PRODUCTION && (!publicHttps || !adminHttps)) securityStatus = 'critical';
+  else if (IS_PRODUCTION && (wildcardCors || ALLOW_UNSAFE_JSON_IN_PRODUCTION)) securityStatus = 'warning';
+  const deploymentId = String(process.env.RAILWAY_DEPLOYMENT_ID || '').trim();
+  const commitSha = String(process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || '').trim();
+  checks.push({
+    id: 'security-deployment',
+    title: 'Security & Deployment',
+    status: securityStatus,
+    summary: securityStatus === 'healthy'
+      ? 'Production transport and storage safety checks are satisfied.'
+      : securityStatus === 'critical'
+        ? 'A production URL is not configured for HTTPS.'
+        : 'A production safety exception or wildcard client origin is enabled.',
+    checkedAt,
+    metrics: [
+      healthMetric('HTTPS', publicHttps && adminHttps ? 'Required URLs secure' : 'Review URLs'),
+      healthMetric('Client origins', wildcardCors ? 'Wildcard' : `${CLIENT_ORIGINS.length} allowed`),
+      healthMetric('Deployment', deploymentId ? deploymentId.slice(0, 12) : 'Local / unavailable'),
+      healthMetric('Commit', commitSha ? commitSha.slice(0, 12) : 'Unavailable'),
+    ],
+    details: [
+      ALLOW_UNSAFE_JSON_IN_PRODUCTION ? 'Emergency JSON persistence fallback is permitted.' : 'Emergency JSON persistence fallback is disabled.',
+      wildcardCors ? 'Socket.IO accepts a wildcard client origin.' : 'Socket.IO client origins are explicitly restricted.',
+      'Secret values, database addresses, and account PII are never returned by this endpoint.',
+    ],
+    guidance: securityStatus === 'healthy' ? [] : ['Review PUBLIC_API_URL, ADMIN_PUBLIC_URL, CLIENT_ORIGINS, and emergency persistence settings in Railway.'],
+  });
+
+  recordOperationalHealthTransitions(checks, checkedAt);
+  const counts = Object.fromEntries(['healthy', 'warning', 'critical'].map(status => [
+    status,
+    checks.filter(check => check.status === status).length,
+  ]));
+  return {
+    status: worstHealthStatus(checks.map(check => check.status)),
+    checkedAt,
+    refreshAfterMs: 10_000,
+    counts,
+    checks,
+    recentEvents: operationalHealthEvents.slice(0, 20),
+  };
+}
+
 function applyAvailabilityStore(nextStore, revision = null, { reconcile = true } = {}) {
   availabilityStore = normalizeAvailabilityStore(nextStore);
   if (reconcile) reconcileAvailabilityState();
@@ -5924,6 +6300,17 @@ app.get('/admin/api/metrics', requireAdmin(adminStore, 'metrics:read'), (_req, r
     storage: storageStatus(),
   },
 }));
+
+app.get('/admin/api/health', requireAdmin(adminStore, 'metrics:read'), async (req, res) => {
+  try {
+    const health = await adminHealthReport({ force: req.query.refresh === '1' });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ health });
+  } catch (error) {
+    console.error('Admin health report failed:', safeHealthErrorCode(error?.code || error?.name));
+    return res.status(503).json({ error: 'The health report could not be completed.' });
+  }
+});
 
 app.get('/admin/api/notifications', requireAdmin(adminStore, 'notifications:read'), (_req, res) => {
   const registeredUsers = [...users.values()].filter(user => normalizePushNotifications(user).tokens.length).length;

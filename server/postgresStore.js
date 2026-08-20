@@ -144,10 +144,14 @@ export function createDatabaseSslConfig(databaseUrl, env = process.env) {
 export function createPostgresStore(databaseUrl = process.env.DATABASE_URL, env = process.env) {
   if (!databaseUrl) return null;
   const ssl = createDatabaseSslConfig(databaseUrl, env);
+  const configuredConnectionTimeout = Number(env.DATABASE_POOL_CONNECTION_TIMEOUT_MS || 5_000);
   const pool = new Pool({
     connectionString: databaseUrl,
     ssl,
     max: Number(env.DATABASE_POOL_SIZE || 5),
+    connectionTimeoutMillis: Number.isFinite(configuredConnectionTimeout) && configuredConnectionTimeout > 0
+      ? configuredConnectionTimeout
+      : 5_000,
   });
   return new PostgresStore(pool);
 }
@@ -158,6 +162,71 @@ export class PostgresStore {
     this.pendingSave = null;
     this.pendingStateFactory = null;
     this.lastSave = Promise.resolve();
+    this.lastSuccessfulSaveAt = null;
+    this.lastFailedSaveAt = null;
+    this.lastSaveErrorCode = null;
+    this.lastHealthSuccessAt = null;
+    this.lastHealthFailureAt = null;
+    this.lastHealthErrorCode = null;
+  }
+
+  async healthCheck({ timeoutMs = 3_000 } = {}) {
+    const startedAt = Date.now();
+    let timeout;
+    try {
+      const query = this.pool.query('SELECT 1 AS ok');
+      const result = await Promise.race([
+        query,
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => {
+            const error = new Error('Database health check timed out.');
+            error.code = 'HEALTH_CHECK_TIMEOUT';
+            reject(error);
+          }, Math.max(500, Number(timeoutMs) || 3_000));
+        }),
+      ]);
+      if (result?.rows?.[0]?.ok !== 1) throw new Error('Database health check returned an unexpected result.');
+      this.lastHealthSuccessAt = Date.now();
+      this.lastHealthErrorCode = null;
+      return {
+        ok: true,
+        latencyMs: this.lastHealthSuccessAt - startedAt,
+        checkedAt: this.lastHealthSuccessAt,
+      };
+    } catch (error) {
+      this.lastHealthFailureAt = Date.now();
+      this.lastHealthErrorCode = String(error?.code || 'DATABASE_QUERY_FAILED').slice(0, 80);
+      return {
+        ok: false,
+        latencyMs: this.lastHealthFailureAt - startedAt,
+        checkedAt: this.lastHealthFailureAt,
+        errorCode: this.lastHealthErrorCode,
+      };
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  }
+
+  runtimeStatus() {
+    return {
+      savePending: !!this.pendingSave || !!this.pendingStateFactory,
+      lastSuccessfulSaveAt: this.lastSuccessfulSaveAt,
+      lastFailedSaveAt: this.lastFailedSaveAt,
+      lastSaveErrorCode: this.lastSaveErrorCode,
+      lastHealthSuccessAt: this.lastHealthSuccessAt,
+      lastHealthFailureAt: this.lastHealthFailureAt,
+      lastHealthErrorCode: this.lastHealthErrorCode,
+    };
+  }
+
+  recordSaveSuccess() {
+    this.lastSuccessfulSaveAt = Date.now();
+    this.lastSaveErrorCode = null;
+  }
+
+  recordSaveFailure(error) {
+    this.lastFailedSaveAt = Date.now();
+    this.lastSaveErrorCode = String(error?.code || 'DATABASE_SAVE_FAILED').slice(0, 80);
   }
 
   async migrate() {
@@ -445,7 +514,9 @@ export class PostgresStore {
       this.pendingStateFactory = null;
       this.lastSave = this.lastSave
         .then(() => this.save(snapshot))
+        .then(() => this.recordSaveSuccess())
         .catch(error => {
+          this.recordSaveFailure(error);
           console.error('Postgres save failed:', error);
         });
     }, Number(process.env.DATABASE_SAVE_DEBOUNCE_MS || 150));
@@ -460,7 +531,9 @@ export class PostgresStore {
       if (snapshot) {
         this.lastSave = this.lastSave
           .then(() => this.save(snapshot))
+          .then(() => this.recordSaveSuccess())
           .catch(error => {
+            this.recordSaveFailure(error);
             console.error('Postgres save failed:', error);
           });
       }

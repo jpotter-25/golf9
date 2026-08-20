@@ -78,7 +78,8 @@
           <button id="logoutButton" class="ghost">Log Out</button>
         </header>
         <nav class="tabs">
-          <button data-tab="players" class="active">Players</button>
+          <button data-tab="health" class="active">Health <span id="healthTabIndicator" class="health-tab-indicator health-unknown" aria-label="Health status not checked"></span></button>
+          <button data-tab="players">Players</button>
           <button data-tab="invites">Invites</button>
           <button data-tab="earlyAccess">Early Access</button>
           <button data-tab="support">Support</button>
@@ -93,7 +94,31 @@
           <button data-tab="audit">Audit</button>
         </nav>
         <p id="status" class="status"></p>
-        <section id="players" class="tab active">
+        <section id="health" class="tab active">
+          <div class="panel health-overview">
+            <div class="split-header">
+              <div>
+                <p class="eyebrow">Operational health</p>
+                <h2 id="healthOverall">Checking Nine Below...</h2>
+                <p id="healthMessage" class="muted" aria-live="polite">Running live service checks.</p>
+              </div>
+              <button id="refreshHealth">Refresh now</button>
+            </div>
+            <div id="healthSummary" class="health-summary" aria-label="Health status summary"></div>
+            <p class="health-refresh-note muted">Checks refresh every 10 seconds here and every 30 seconds while you use other admin tabs. SMTP verification is cached for one minute unless you refresh manually.</p>
+          </div>
+          <div id="healthGrid" class="health-grid" aria-live="polite"></div>
+          <div class="panel">
+            <div class="split-header">
+              <div>
+                <h2>Recent health changes</h2>
+                <p class="muted">Status changes detected by this server process. Railway deployment logs remain the source for startup failures.</p>
+              </div>
+            </div>
+            <div id="healthEvents" class="health-events"></div>
+          </div>
+        </section>
+        <section id="players" class="tab">
           <div class="panel">
             <h2>Player Lookup</h2>
             <div class="row">
