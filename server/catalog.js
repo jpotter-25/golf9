@@ -408,7 +408,8 @@ export function uploadCatalogAsset(store, uploadRoot, publicBaseUrl, cosmeticId,
   const safeId = cleanId(cosmeticId);
   const dir = path.join(uploadRoot, safeId);
   fs.mkdirSync(dir, { recursive: true });
-  const fileName = `preview-${Date.now()}.${ext}`;
+  const previousAssetUrl = String(item.asset?.url || '');
+  const fileName = `asset-${crypto.randomUUID()}.${ext}`;
   const absolutePath = path.join(dir, fileName);
   fs.writeFileSync(absolutePath, bytes);
   item.asset = {
@@ -420,6 +421,18 @@ export function uploadCatalogAsset(store, uploadRoot, publicBaseUrl, cosmeticId,
     byteSize: bytes.length,
     uploadedAt: now(),
   };
+  if (previousAssetUrl && previousAssetUrl !== item.asset.url) {
+    const referencedByPublishedCatalog = [
+      ...(Array.isArray(store.live) ? store.live : []),
+      ...(Array.isArray(store.history) ? store.history.flatMap(snapshot => snapshot?.items || snapshot?.catalog || []) : []),
+    ].some(entry => entry?.asset?.url === previousAssetUrl);
+    if (!referencedByPublishedCatalog) {
+      const previousName = path.basename(previousAssetUrl);
+      const previousPath = path.resolve(dir, previousName);
+      const resolvedDir = `${path.resolve(dir)}${path.sep}`;
+      if (previousPath.startsWith(resolvedDir) && fs.existsSync(previousPath)) fs.unlinkSync(previousPath);
+    }
+  }
   item.updatedAt = now();
   return { item, asset: item.asset };
 }

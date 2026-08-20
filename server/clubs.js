@@ -622,13 +622,13 @@ export function publicClubProfile(club, users, viewerUserId, rankedSeason = null
     createdAt: club.createdAt,
     updatedAt: club.updatedAt,
     progression: club.progression,
-    treasury: {
+    treasury: viewerMember ? {
       balance: club.treasury.balance,
       lifetimeDonated: club.treasury.lifetimeDonated,
-    },
-    treasuryGoal: club.treasuryGoal ? { ...club.treasuryGoal } : null,
-    donationStats: publicDonationStats(club, users, viewerUserId),
-    nextPrestige: prestige.maxed ? null : {
+    } : null,
+    treasuryGoal: viewerMember && club.treasuryGoal ? { ...club.treasuryGoal } : null,
+    donationStats: viewerMember ? publicDonationStats(club, users, viewerUserId) : null,
+    nextPrestige: !viewerMember || prestige.maxed ? null : {
       tier: prestige.next.tier,
       name: prestige.next.name,
       treasuryCost: prestige.next.treasuryCost,
@@ -647,15 +647,15 @@ export function publicClubProfile(club, users, viewerUserId, rankedSeason = null
       userId: String(item.userId || item.authorUserId || 'club'),
       displayName: item.displayName || item.authorName || 'Club',
     })),
-    goals: {
+    goals: viewerMember ? {
       weekly: club.goals.weekly.items.map(publicGoal),
       season: club.goals.season.items.map(publicGoal),
-    },
-    event: {
+    } : null,
+    event: viewerMember ? {
       ...club.events.active,
       leaderboardScore: club.events.active.score,
-    },
-    rewards: publicClubRewards(club, viewerUserId),
+    } : null,
+    rewards: viewerMember ? publicClubRewards(club, viewerUserId) : [],
     chat: [],
     permissions: {
       canEdit: canUpdateClub(viewerRole),

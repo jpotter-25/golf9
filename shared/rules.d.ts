@@ -1,6 +1,6 @@
 export type Suit = '♠' | '♥' | '♦' | '♣';
 export type Rank = 'A' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'J' | 'Q' | 'K';
-export type Card = { id: string; suit: Suit; rank: Rank; faceUp: boolean; zeroed?: boolean };
+export type Card = { id: string; suit: Suit; rank: Rank; faceUp: boolean; zeroed?: boolean; visibleToUserId?: string };
 export type Grid = (Card | null)[][];
 export type EquippedCosmetics = { cardBack?: string; avatarFrame?: string; avatarIcon?: string; avatarAccessory?: string; title?: string; tableTheme?: string };
 export type SharedPlayerCosmetics = Omit<EquippedCosmetics, 'tableTheme'>;
@@ -34,6 +34,7 @@ export const ROUND_SUMMARY_DURATION: number;
 export const MAX_PLAYERS: number;
 export const MIN_PLAYERS: number;
 export function makeId(prefix?: string): string;
+export function setSecureRandomIntProvider(provider: ((maxExclusive: number) => number) | null): void;
 export function sharedPlayerCosmetics(cosmetics?: EquippedCosmetics | null): SharedPlayerCosmetics | null;
 export function sanitizePlayerIdentity(user: { userId: string; displayName?: string; inventory?: { equipped?: EquippedCosmetics }; cosmetics?: EquippedCosmetics }): PlayerIdentity;
 export function deckCountForPlayers(playerCount: number): number;

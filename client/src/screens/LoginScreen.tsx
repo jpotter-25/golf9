@@ -64,6 +64,10 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
         Alert.alert('Name needs cleanup', nameError);
         return;
       }
+      if (cleanPassword.length < 12 || cleanPassword.length > 128 || !/[A-Za-z]/.test(cleanPassword) || !/\d/.test(cleanPassword)) {
+        Alert.alert('Stronger password needed', 'Use 12–128 characters with at least one letter and one number.');
+        return;
+      }
     }
     const cleanInviteCode = inviteCode.trim();
     if (mode === 'signup' && inviteRequired && !cleanInviteCode) {
@@ -173,6 +177,7 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
           textContentType={isLogin ? 'password' : 'newPassword'}
           autoComplete={isLogin ? 'current-password' : 'new-password'}
         />
+        {!isLogin ? <Text style={styles.inputHint}>Use 12–128 characters with at least one letter and one number.</Text> : null}
         {!isLogin && inviteRequired ? (
           <TextInput
             style={styles.input}

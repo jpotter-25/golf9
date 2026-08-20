@@ -33,4 +33,8 @@ test('production persistent verifiers fail closed without a strong server token 
     () => persistentCredentialVerifier('token', 'player-session', { NODE_ENV: 'production' }),
     /at least 32 characters in production/i,
   );
+  assert.throws(
+    () => persistentCredentialVerifier('token', 'player-session', { RAILWAY_ENVIRONMENT_ID: 'hosted-preview' }),
+    /at least 32 characters/i,
+  );
 });

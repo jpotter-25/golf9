@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { isPublicHostedEnvironment } from './securityTokens.js';
 
 export const EARLY_ACCESS_PLATFORMS = ['ios', 'android', 'web_future'];
 export const EARLY_ACCESS_CONSENT_STATUSES = ['pending', 'confirmed', 'unsubscribed'];
@@ -68,15 +69,10 @@ function normalizeConfig(value = {}) {
 
 function deriveSecret(env, name, fallbackLabel) {
   const configured = String(env?.[name] || '').trim();
-  if (!configured && isProductionEnvironment(env)) {
-    throw new Error(`${name} is required in production.`);
+  if (!configured && isPublicHostedEnvironment(env)) {
+    throw new Error(`${name} is required in hosted environments.`);
   }
   return crypto.createHash('sha256').update(configured || `nine-below-local:${fallbackLabel}`).digest();
-}
-
-function isProductionEnvironment(env = process.env) {
-  return [env?.NODE_ENV, env?.APP_ENV, env?.EXPO_PUBLIC_APP_ENV]
-    .some(value => ['production', 'prod'].includes(String(value || '').trim().toLowerCase()));
 }
 
 function piiKey(env) {
@@ -90,7 +86,7 @@ function tokenKey(env) {
 export function earlyAccessSecurityStatus(env = process.env) {
   const piiConfigured = String(env.EARLY_ACCESS_PII_KEY || '').trim().length >= 32;
   const tokenConfigured = String(env.EARLY_ACCESS_TOKEN_SECRET || '').trim().length >= 32;
-  const production = isProductionEnvironment(env);
+  const production = isPublicHostedEnvironment(env);
   return {
     production,
     piiConfigured,
@@ -153,6 +149,8 @@ function normalizeSignup(signup) {
     pendingContactEncrypted: String(signup.pendingContactEncrypted || ''),
     manageTokenHash: String(signup.manageTokenHash || ''),
     manageTokenExpiresAt: Number(signup.manageTokenExpiresAt) || null,
+    pendingManageTokenHash: String(signup.pendingManageTokenHash || ''),
+    pendingManageTokenExpiresAt: Number(signup.pendingManageTokenExpiresAt) || null,
     platforms: normalizePlatforms(signup.platforms),
     pendingPlatforms: normalizePlatforms(signup.pendingPlatforms),
     consentStatus,
@@ -313,6 +311,8 @@ function eraseEarlyAccessPii(signup, at, eventType = 'erased') {
   signup.pendingContactEncrypted = '';
   signup.manageTokenHash = '';
   signup.manageTokenExpiresAt = null;
+  signup.pendingManageTokenHash = '';
+  signup.pendingManageTokenExpiresAt = null;
   signup.confirmationTokenHash = '';
   signup.confirmationExpiresAt = null;
   signup.platforms = [];
@@ -378,7 +378,7 @@ export function submitEarlyAccessSignup(store, body = {}, options = {}) {
   } else {
     const currentContact = decryptEarlyAccessContact(signup.contactEncrypted, options.env) || {};
     const rejoining = signup.consentStatus === 'unsubscribed' || signup.erasedAt;
-    const manageToken = rejoining ? crypto.randomBytes(32).toString('base64url') : (currentContact.manageToken || crypto.randomBytes(32).toString('base64url'));
+    const manageToken = crypto.randomBytes(32).toString('base64url');
     const nextContactEncrypted = encryptEarlyAccessContact(newContact(
       email,
       firstName,
@@ -387,19 +387,23 @@ export function submitEarlyAccessSignup(store, body = {}, options = {}) {
       currentContact.deviceModel,
       currentContact.osVersion,
     ), options.env);
-    signup.manageTokenHash = tokenHash(manageToken, options.env, 'manage');
-    signup.manageTokenExpiresAt = at + MANAGE_TOKEN_TTL_MS;
     signup.source = safeEarlyAccessText(body.source || signup.source || 'website', 80);
     signup.attribution = attributionFrom(body, options);
     if (signup.consentStatus === 'confirmed') {
       signup.pendingContactEncrypted = nextContactEncrypted;
       signup.pendingPlatforms = platforms;
+      signup.pendingManageTokenHash = tokenHash(manageToken, options.env, 'manage');
+      signup.pendingManageTokenExpiresAt = at + MANAGE_TOKEN_TTL_MS;
       signup.confirmationPurpose = 'update';
     } else {
       signup.contactEncrypted = nextContactEncrypted;
       signup.platforms = platforms;
       signup.pendingContactEncrypted = '';
       signup.pendingPlatforms = [];
+      signup.manageTokenHash = tokenHash(manageToken, options.env, 'manage');
+      signup.manageTokenExpiresAt = at + MANAGE_TOKEN_TTL_MS;
+      signup.pendingManageTokenHash = '';
+      signup.pendingManageTokenExpiresAt = null;
       signup.confirmationPurpose = signup.consentStatus === 'unsubscribed' ? 'resubscribe' : 'signup';
       signup.consentStatus = 'pending';
       signup.needsReconfirmation = false;
@@ -433,10 +437,16 @@ export function confirmEarlyAccessSignup(store, token, options = {}) {
   }
   if (signup.pendingContactEncrypted) signup.contactEncrypted = signup.pendingContactEncrypted;
   if (signup.pendingPlatforms.length) signup.platforms = signup.pendingPlatforms;
+  if (signup.pendingManageTokenHash) {
+    signup.manageTokenHash = signup.pendingManageTokenHash;
+    signup.manageTokenExpiresAt = signup.pendingManageTokenExpiresAt;
+  }
   const confirmationPurpose = signup.confirmationPurpose;
   const wasUpdate = confirmationPurpose === 'update';
   signup.pendingContactEncrypted = '';
   signup.pendingPlatforms = [];
+  signup.pendingManageTokenHash = '';
+  signup.pendingManageTokenExpiresAt = null;
   signup.consentStatus = 'confirmed';
   signup.confirmedAt ||= at;
   signup.consentRefreshedAt = at;
@@ -461,6 +471,7 @@ function findByManageToken(store, token, options = {}) {
   let signup = store.signups.find(item => item.manageTokenHash && secureEqual(item.manageTokenHash, hash)) || null;
   if (!signup) {
     signup = store.signups.find(item => {
+      if (item.manageTokenHash) return false;
       const contact = decryptEarlyAccessContact(item.contactEncrypted, options.env);
       return contact?.manageToken && secureEqual(contact.manageToken, token);
     }) || null;
@@ -613,7 +624,12 @@ function publicSignup(signup, env, includePii = true) {
     attribution: includePii ? signup.attribution : {},
     tags: signup.tags,
     notes: includePii ? signup.notes : [],
-    consentHistory: signup.consentHistory,
+    consentHistory: signup.consentHistory.map(event => includePii ? event : {
+      type: event.type,
+      at: event.at,
+      consentVersion: event.consentVersion,
+      policyVersion: event.policyVersion,
+    }),
     onboarding: signup.onboarding ? {
       ...signup.onboarding,
       deviceModel: includePii ? (contact.deviceModel || signup.onboarding.deviceModel || '') : '',

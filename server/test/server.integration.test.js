@@ -91,7 +91,7 @@ async function signup(baseUrl, displayName, inviteCode = '') {
   return json(await fetch(`${baseUrl}/auth/signup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ displayName: playerName, password: 'password1', inviteCode }),
+    body: JSON.stringify({ displayName: playerName, password: 'StrongPass9!', inviteCode }),
   }));
 }
 
@@ -153,36 +153,17 @@ async function adminLogin(baseUrl) {
 }
 
 async function earnFreeCoins(baseUrl, token) {
-  return json(await fetch(`${baseUrl}/results/local`, {
+  return json(await fetch(`${baseUrl}/economy/daily-bonus/claim`, {
     method: 'POST',
     headers: authHeaders(token),
-    body: JSON.stringify({
-      mode: 'solo',
-      totalRounds: 5,
-      roundScores: [4, 5, 6, 7, 8],
-      columnClears: 1,
-      players: [
-        { displayName: 'Player 1', total: 20 },
-        { displayName: 'Player 2', total: 55 },
-      ],
-    }),
   }));
 }
 
-async function earnClubLevel(baseUrl, token) {
-  return json(await fetch(`${baseUrl}/results/local`, {
+async function adminSetLevel(baseUrl, admin, userId, level) {
+  return json(await fetch(`${baseUrl}/admin/api/users/${encodeURIComponent(userId)}/progression/adjust`, {
     method: 'POST',
-    headers: authHeaders(token),
-    body: JSON.stringify({
-      mode: 'solo',
-      totalRounds: 5,
-      roundScores: [0, 1, 2, 3, 4],
-      columnClears: 150,
-      players: [
-        { displayName: 'Player 1', total: 0 },
-        { displayName: 'Player 2', total: 55 },
-      ],
-    }),
+    headers: adminHeaders(admin),
+    body: JSON.stringify({ level, reason: 'Test progression setup.' }),
   }));
 }
 
@@ -271,6 +252,8 @@ test('public policy pages are available for store and social auth review', async
 
 test('admin health dashboard requires authentication and returns safe live diagnostics', async () => {
   await withServer(async (baseUrl) => {
+    assert.deepEqual(await json(await fetch(`${baseUrl}/health`)), { ok: true });
+    assert.deepEqual(await json(await fetch(`${baseUrl}/health/ready`)), { ok: true, ready: true });
     const denied = await fetch(`${baseUrl}/admin/api/health`);
     assert.equal(denied.status, 401);
 
@@ -333,9 +316,11 @@ test('public support returns a private tracking link and queues both email copie
     assert.match(payload.trackingUrl, /#token=/);
     assert.equal(payload.emailDelivery, 'queued');
 
-    const tracked = await json(await fetch(
-      `${baseUrl}/support/public/${encodeURIComponent(payload.reference)}?token=${encodeURIComponent(payload.accessToken)}`,
-    ));
+    const tracked = await json(await fetch(`${baseUrl}/support/public/${encodeURIComponent(payload.reference)}/access`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: payload.accessToken }),
+    }));
     assert.equal(tracked.ticket.subject, 'Support form verification');
 
     await new Promise(resolve => setTimeout(resolve, 50));
@@ -559,7 +544,7 @@ test('early-access website confirms consent, onboards a controlled wave, sends a
     const activatedPlayer = await json(await fetch(`${baseUrl}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: testDisplayName('EarlyUser'), password: 'password1', inviteCode }),
+      body: JSON.stringify({ displayName: testDisplayName('EarlyUser'), password: 'StrongPass9!', inviteCode }),
     }));
     assert.ok(activatedPlayer.user.userId);
     signups = await json(await fetch(`${baseUrl}/admin/api/early-access/signups`, { headers: adminHeaders(admin) }));
@@ -576,16 +561,25 @@ test('early-access website confirms consent, onboards a controlled wave, sends a
 
     const trackingToken = new URLSearchParams(new URL(feedback.trackingUrl).hash.slice(1)).get('token');
     assert.ok(trackingToken);
-    assert.equal((await fetch(`${baseUrl}/support/public/${feedback.reference}?token=${encodeURIComponent(trackingToken)}`)).status, 200);
+    assert.equal((await fetch(`${baseUrl}/support/public/${feedback.reference}/access`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: trackingToken }),
+    })).status, 200);
     await json(await fetch(`${baseUrl}/admin/api/early-access/signups/${signups.signups[0].signupId}/erase`, {
       method: 'POST',
       headers: adminHeaders(admin),
       body: JSON.stringify({ reason: 'Verify linked early-access feedback erasure.' }),
     }));
-    assert.equal((await fetch(`${baseUrl}/support/public/${feedback.reference}?token=${encodeURIComponent(trackingToken)}`)).status, 404);
+    assert.equal((await fetch(`${baseUrl}/support/public/${feedback.reference}/access`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: trackingToken }),
+    })).status, 404);
     const erasedSnapshot = JSON.parse(await readFile(path.join(dataDir, 'auth-store.json'), 'utf8'));
     const erasedFeedback = erasedSnapshot.supportTickets.find(ticket => ticket.publicReference === feedback.reference);
-    assert.equal(erasedFeedback.protectedPayloadEncrypted, '');
+    assert.match(erasedFeedback.protectedPayloadEncrypted, /^v1\./);
+    assert.equal(JSON.stringify(erasedFeedback).includes('early-access@gmail.com'), false);
     assert.equal(erasedFeedback.publicAccessTokenHash, null);
     assert.equal(erasedFeedback.contactEmail, '');
   }, {
@@ -624,9 +618,11 @@ test('Potterwell contact requests use parent branding and the shared support inb
     assert.match(payload.trackingUrl, /\/support\/ticket\?reference=/);
     assert.match(payload.trackingUrl, /#token=/);
 
-    const tracked = await json(await fetch(
-      `${baseUrl}/support/public/${encodeURIComponent(payload.reference)}?token=${encodeURIComponent(payload.accessToken)}`,
-    ));
+    const tracked = await json(await fetch(`${baseUrl}/support/public/${encodeURIComponent(payload.reference)}/access`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: payload.accessToken }),
+    }));
     assert.equal(tracked.ticket.source, 'potterwell');
     assert.equal(tracked.ticket.category, 'partnership');
     assert.equal(tracked.ticket.subject, 'Partnership inquiry');
@@ -684,7 +680,7 @@ test('authenticated account deletion requires fresh credentials and revokes the 
       headers: authHeaders(player.token),
       body: JSON.stringify({
         method: 'password',
-        password: 'password1',
+        password: 'StrongPass9!',
         confirmation: 'NOT DELETE',
       }),
     });
@@ -706,7 +702,7 @@ test('authenticated account deletion requires fresh credentials and revokes the 
       headers: authHeaders(player.token),
       body: JSON.stringify({
         method: 'password',
-        password: 'password1',
+        password: 'StrongPass9!',
         confirmation: 'DELETE',
       }),
     }));
@@ -722,7 +718,7 @@ test('authenticated account deletion requires fresh credentials and revokes the 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         displayName: player.user.displayName,
-        password: 'password1',
+        password: 'StrongPass9!',
       }),
     });
     assert.equal(relogin.status, 401);
@@ -732,8 +728,8 @@ test('authenticated account deletion requires fresh credentials and revokes the 
 test('admin config is canonical and malformed nested admin URLs redirect', async () => {
   await withServer(async (baseUrl) => {
     const config = await json(await fetch(`${baseUrl}/auth/config`));
-    assert.equal(config.apiUrl, 'https://ninebelow.potterwell.com');
-    assert.equal(config.adminUrl, 'https://ninebelow.potterwell.com/admin');
+    assert.equal(Object.hasOwn(config, 'apiUrl'), false);
+    assert.equal(Object.hasOwn(config, 'adminUrl'), false);
 
     const nested = await fetch(`${baseUrl}/admin/https://ninebelow.potterwell.com/admin/`, { redirect: 'manual' });
     assert.equal(nested.status, 302);
@@ -746,11 +742,12 @@ test('admin config is canonical and malformed nested admin URLs redirect', async
 
 test('local JSON storage remains available outside production', async () => {
   await withServer(async (baseUrl) => {
-    const health = await json(await fetch(`${baseUrl}/health/ready`));
-    assert.equal(health.storage.provider, 'json');
-    assert.equal(health.storage.durable, false);
-    assert.equal(health.storage.databaseConfigured, false);
-  }, { NODE_ENV: 'development', APP_ENV: 'development', DATABASE_URL: '' });
+    const admin = await adminLogin(baseUrl);
+    const { health } = await json(await fetch(`${baseUrl}/admin/api/health`, { headers: adminHeaders(admin) }));
+    const database = health.checks.find(check => check.id === 'database');
+    assert.equal(database.status, 'healthy');
+    assert.equal(database.metrics.find(metric => metric.label === 'Provider').value, 'Local JSON');
+  }, { NODE_ENV: 'development', APP_ENV: 'development', DATABASE_URL: '', SEED_ADMIN_ACCOUNT: '1' });
 });
 
 test('production refuses to start without durable database storage', async () => {
@@ -768,7 +765,7 @@ test('production refuses to start without durable database storage', async () =>
       ALLOW_JSON_FALLBACK_ON_DB_ERROR: '',
       PORT: String(serverPort),
       DATA_DIR: dataDir,
-      CLIENT_ORIGINS: '*',
+      CLIENT_ORIGINS: 'https://ninebelow.potterwell.com',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -787,6 +784,7 @@ test('production refuses to start without durable database storage', async () =>
 test('push notification tokens can register, rotate, and unregister', async () => {
   await withServer(async (baseUrl) => {
     const player = await signup(baseUrl, `PushTester${Date.now()}`);
+    const secondPlayer = await signup(baseUrl, `PushOther${Date.now()}`);
     const first = await json(await fetch(`${baseUrl}/push/register`, {
       method: 'POST',
       headers: authHeaders(player.token),
@@ -810,12 +808,29 @@ test('push notification tokens can register, rotate, and unregister', async () =
     }));
     assert.equal(rotated.pushTokenCount, 1);
 
+    const transferred = await json(await fetch(`${baseUrl}/push/register`, {
+      method: 'POST',
+      headers: authHeaders(secondPlayer.token),
+      body: JSON.stringify({
+        expoPushToken: 'ExponentPushToken[test-token-two]',
+        deviceId: 'other-device',
+        platform: 'android',
+      }),
+    }));
+    assert.equal(transferred.pushTokenCount, 1);
+
     const removed = await json(await fetch(`${baseUrl}/push/unregister`, {
       method: 'POST',
       headers: authHeaders(player.token),
       body: JSON.stringify({ deviceId: 'test-device' }),
     }));
     assert.equal(removed.pushTokenCount, 0);
+    const removedFromNewOwner = await json(await fetch(`${baseUrl}/push/unregister`, {
+      method: 'POST',
+      headers: authHeaders(secondPlayer.token),
+      body: JSON.stringify({ deviceId: 'other-device' }),
+    }));
+    assert.equal(removedFromNewOwner.pushTokenCount, 0);
   }, { PUSH_TEST_MODE: '1' });
 });
 
@@ -893,9 +908,11 @@ test('turn push waits until the active player backgrounds or disconnects', async
     const created = await json(await fetch(`${baseUrl}/rooms`, {
       method: 'POST',
       headers: authHeaders(one.token),
-      body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
+      body: JSON.stringify({ maxPlayers: 2, rounds: 5, matchType: 'ranked', buyIn: 50_000 }),
     }));
     const code = created.room.code;
+    assert.equal(created.room.matchType, 'casual');
+    assert.equal(created.room.economy.buyIn, 0);
     await json(await fetch(`${baseUrl}/rooms/${code}/join`, { method: 'POST', headers: authHeaders(two.token) }));
 
     const socketOne = io(baseUrl, { transports: ['websocket'], auth: { token: one.token }, forceNew: true });
@@ -972,28 +989,28 @@ test('signup enforces compact player names', async () => {
     const tooShort = await fetch(`${baseUrl}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: 'A', password: 'password1' }),
+      body: JSON.stringify({ displayName: 'A', password: 'StrongPass9!' }),
     });
     assert.equal(tooShort.status, 400);
 
     const tooLong = await fetch(`${baseUrl}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: '1234567890123', password: 'password1' }),
+      body: JSON.stringify({ displayName: '1234567890123', password: 'StrongPass9!' }),
     });
     assert.equal(tooLong.status, 400);
 
     const badCharacters = await fetch(`${baseUrl}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: 'Bad Name!', password: 'password1' }),
+      body: JSON.stringify({ displayName: 'Bad Name!', password: 'StrongPass9!' }),
     });
     assert.equal(badCharacters.status, 400);
 
     const accepted = await json(await fetch(`${baseUrl}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: 'Ace_12-Play', password: 'password1' }),
+      body: JSON.stringify({ displayName: 'Ace_12-Play', password: 'StrongPass9!' }),
     }));
     assert.equal(accepted.user.displayName, 'Ace_12-Play');
   });
@@ -1007,7 +1024,7 @@ test('pre-alpha invite gate blocks open signup and consumes admin-created invite
     const blocked = await fetch(`${baseUrl}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: testDisplayName('NoInvite'), password: 'password1' }),
+      body: JSON.stringify({ displayName: testDisplayName('NoInvite'), password: 'StrongPass9!' }),
     });
     assert.equal(blocked.status, 403);
 
@@ -1028,7 +1045,7 @@ test('pre-alpha invite gate blocks open signup and consumes admin-created invite
     const accepted = await json(await fetch(`${baseUrl}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: testDisplayName('Invited'), password: 'password1', inviteCode: 'ALPHA1' }),
+      body: JSON.stringify({ displayName: testDisplayName('Invited'), password: 'StrongPass9!', inviteCode: 'ALPHA1' }),
     }));
     assert.ok(accepted.token);
 
@@ -1046,7 +1063,7 @@ test('pre-alpha invite gate blocks open signup and consumes admin-created invite
     const exhausted = await fetch(`${baseUrl}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: testDisplayName('Late'), password: 'password1', inviteCode: 'ALPHA1' }),
+      body: JSON.stringify({ displayName: testDisplayName('Late'), password: 'StrongPass9!', inviteCode: 'ALPHA1' }),
     });
     assert.equal(exhausted.status, 403);
   }, { REQUIRE_INVITE_CODE: '1', SEED_ADMIN_ACCOUNT: '1' });
@@ -1239,7 +1256,7 @@ test('admin console supports MFA login, audited player ops, support tickets, and
     const relogin = await json(await fetch(`${baseUrl}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: player.user.displayName, password: 'password1' }),
+      body: JSON.stringify({ displayName: player.user.displayName, password: 'StrongPass9!' }),
     }));
     assert.equal(relogin.user.userId, player.user.userId);
 
@@ -1300,6 +1317,46 @@ test('admin authenticator recovery codes are single use', async () => {
   }, { SEED_ADMIN_ACCOUNT: '1' });
 });
 
+test('admin authenticator codes cannot be replayed and repeated MFA failures lock verification', async () => {
+  await withServer(async (baseUrl, dataDir) => {
+    await adminLogin(baseUrl);
+    const secret = adminTotpSecrets.get(adminTotpKey(baseUrl, 'admin'));
+    assert.ok(secret);
+    const futureCode = generateTotp(secret, { time: Date.now() + 30_000 });
+
+    const login = async () => {
+      const response = await fetch(`${baseUrl}/admin/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: 'admin', password: 'admin9' }),
+      });
+      assert.equal(response.status, 200);
+      const payload = await json(response);
+      assert.equal(Object.hasOwn(payload.admin, 'email'), false);
+      assert.equal(Object.hasOwn(payload.admin, 'role'), false);
+      assert.equal(Object.hasOwn(payload.admin, 'permissions'), false);
+      return response.headers.get('set-cookie').split(';')[0];
+    };
+    const verify = (cookie, code) => fetch(`${baseUrl}/admin/api/auth/mfa/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ code }),
+    });
+
+    assert.equal((await verify(await login(), futureCode)).status, 200);
+    const replayCookie = await login();
+    assert.equal((await verify(replayCookie, futureCode)).status, 403);
+    for (let attempt = 0; attempt < 7; attempt += 1) {
+      assert.equal((await verify(replayCookie, '111111')).status, 403);
+    }
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const persisted = JSON.parse(await readFile(path.join(dataDir, 'auth-store.json'), 'utf8'));
+    const persistedAdmin = persisted.admins.find(admin => admin.displayName === 'admin');
+    assert.equal(persistedAdmin.mfaFailedAttempts, 8);
+    assert.equal(persistedAdmin.mfaLockedUntil > Date.now(), true);
+  }, { SEED_ADMIN_ACCOUNT: '1' });
+});
+
 test('owner admins can manage admin accounts and email recovery unlocks password reset', async () => {
   await withServer(async (baseUrl) => {
     const owner = await adminLogin(baseUrl);
@@ -1343,12 +1400,13 @@ test('owner admins can manage admin accounts and email recovery unlocks password
       });
       assert.ok(failed.status === 401 || failed.status === 429);
     }
-    const locked = await fetch(`${baseUrl}/admin/api/auth/login`, {
+    const loginAfterFailures = await fetch(`${baseUrl}/admin/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ displayName: 'Ops Admin', password: 'ResetPass9!ok' }),
     });
-    assert.equal(locked.status, 429);
+    assert.equal(loginAfterFailures.status, 200);
+    assert.equal((await loginAfterFailures.json()).mfaRequired, true);
 
     const requestRecovery = await json(await fetch(`${baseUrl}/admin/api/auth/recovery/request`, {
       method: 'POST',
@@ -1494,6 +1552,11 @@ test('auth, room readiness, authoritative intents, duplicate rejection, and held
       assert.equal((await emitAck(socketOne, 'room:ready', { code, ready: true })).room.players[0].ready, true);
       assert.equal((await emitAck(socketTwo, 'room:ready', { code, ready: true })).room.players[1].ready, true);
       assert.deepEqual(await emitAck(socketOne, 'room:start', { code }), { ok: true });
+      assert.equal((await emitAck(socketOne, 'room:start', { code })).error, 'Game already started.');
+
+      const malformedPayload = await emitAck(socketOne, 'game:intent', null);
+      assert.equal(malformedPayload.error, 'Game not found.');
+      assert.equal(socketOne.connected, true);
 
       let joinOne = await emitAck(socketOne, 'room:join', { code });
       assert.equal(joinOne.game.phase, 'peek');
@@ -1567,6 +1630,10 @@ test('auth, room readiness, authoritative intents, duplicate rejection, and held
         assert.equal(revealedState.game.players[revealedState.game.currentPlayerIndex].grid[0][2].faceUp, true);
         assert.equal(revealedState.game.viewerHeldCard.rank, draw.drawn.rank);
         assert.equal(revealedState.game.viewerHeldSource, 'draw');
+        const privateCardId = revealedState.game.pendingDecision.cardId;
+        const opponentState = await emitAck(otherSocket, 'room:join', { code });
+        assert.equal(opponentState.game.players[revealedState.game.currentPlayerIndex].grid[0][2].faceUp, false);
+        assert.equal(JSON.stringify(opponentState.game).includes(privateCardId), false);
 
         const keepRevealed = await emitAck(reconnected, 'game:intent', {
           code,
@@ -1919,13 +1986,14 @@ test('Club Standings expose per-member Ranked victories and retire LP leaderboar
   });
 });
 
-test('records local match progression and reward summary', async () => {
+test('records local match history without trusting client-authored progression', async () => {
   await withServer(async (baseUrl) => {
     const account = await signup(baseUrl, `Local${Date.now()}`);
     const recorded = await json(await fetch(`${baseUrl}/results/local`, {
       method: 'POST',
       headers: authHeaders(account.token),
       body: JSON.stringify({
+        clientResultId: `local-history-${Date.now()}`,
         mode: 'solo',
         totalRounds: 5,
         roundScores: [8, 12, 6, 10, 4],
@@ -1939,13 +2007,12 @@ test('records local match progression and reward summary', async () => {
 
     assert.equal(recorded.result.mode, 'solo');
     assert.equal(recorded.result.players[0].won, true);
-    assert.ok(recorded.progression.xpGained > 0);
-    assert.ok(recorded.progression.coinsGained > 0);
-    assert.equal(recorded.user.statistics.gamesPlayed, 1);
-    assert.equal(recorded.user.statistics.soloGames, 1);
-    assert.equal(recorded.user.statistics.columnClears, 1);
-    assert.ok(recorded.user.achievements.some(item => item.id === 'first_match' && item.unlockedAt));
-    assert.ok(recorded.user.achievements.some(item => item.id === 'column_cleaner' && item.unlockedAt));
+    assert.equal(recorded.progression.xpGained, 0);
+    assert.equal(recorded.progression.coinsGained, 0);
+    assert.equal(recorded.progression.unverifiedLocal, true);
+    assert.equal(recorded.user.statistics.gamesPlayed, 0);
+    assert.equal(recorded.user.statistics.soloGames, 0);
+    assert.equal(recorded.user.statistics.columnClears, 0);
 
     const completed = await json(await fetch(`${baseUrl}/results/me`, { headers: authHeaders(account.token) }));
     assert.equal(completed.results.length, 1);
@@ -1982,7 +2049,7 @@ test('retries an offline local result without duplicating rewards or history', a
 
     assert.equal(retried.duplicate, true);
     assert.equal(retried.result.resultId, first.result.resultId);
-    assert.equal(retried.user.statistics.gamesPlayed, 1);
+    assert.equal(retried.user.statistics.gamesPlayed, 0);
     assert.equal(retried.user.currency.coins, first.user.currency.coins);
     assert.equal(retried.user.progression.totalXp, first.user.progression.totalXp);
 
@@ -2015,33 +2082,10 @@ test('daily table bonus endpoint lets broke players rebuild on a rolling 24-hour
   });
 });
 
-test('claims challenges and manages cosmetic inventory', async () => {
+test('admin progression grants unlock cosmetic purchasing and equipping', async () => {
   await withServer(async (baseUrl) => {
     const account = await signup(baseUrl, `Shop${Date.now()}`);
-    const recorded = await json(await fetch(`${baseUrl}/results/local`, {
-      method: 'POST',
-      headers: authHeaders(account.token),
-      body: JSON.stringify({
-        mode: 'solo',
-        totalRounds: 5,
-        roundScores: [8, 12, 6, 10, 4],
-        columnClears: 1,
-        players: [
-          { displayName: 'Player 1', total: 40 },
-          { displayName: 'Player 2', total: 55 },
-        ],
-      }),
-    }));
-
-    const completed = recorded.user.challenges.daily.items.find(item => item.canClaim);
-    assert.ok(completed);
-    const claimed = await json(await fetch(`${baseUrl}/challenges/claim`, {
-      method: 'POST',
-      headers: authHeaders(account.token),
-      body: JSON.stringify({ challengeId: completed.id }),
-    }));
-    assert.ok(claimed.progression.xpGained > 0);
-    assert.equal(claimed.challenge.claimedAt > 0, true);
+    const admin = await adminLogin(baseUrl);
 
     const catalog = await json(await fetch(`${baseUrl}/cosmetics/catalog`, { headers: authHeaders(account.token) }));
     const lockedCardBack = catalog.cosmetics.find(item => item.id === 'gold-trim-card-back');
@@ -2057,23 +2101,8 @@ test('claims challenges and manages cosmetic inventory', async () => {
     assert.equal(lockedPurchase.status, 400);
     assert.deepEqual(await lockedPurchase.json(), { error: 'Reach Level 4.' });
 
-    for (let index = 0; index < 3; index += 1) {
-      await json(await fetch(`${baseUrl}/results/local`, {
-        method: 'POST',
-        headers: authHeaders(account.token),
-        body: JSON.stringify({
-          clientResultId: `cosmetic-progression-${index}`,
-          mode: 'solo',
-          totalRounds: 5,
-          roundScores: [8, 12, 6, 10, 4],
-          columnClears: 1,
-          players: [
-            { displayName: 'Player 1', total: 40 },
-            { displayName: 'Player 2', total: 55 },
-          ],
-        }),
-      }));
-    }
+    await adminSetLevel(baseUrl, admin, account.user.userId, 4);
+    await adminAdjustCoins(baseUrl, admin, account.user.userId, 5000);
 
     const unlockedCatalog = await json(await fetch(`${baseUrl}/cosmetics/catalog`, { headers: authHeaders(account.token) }));
     const unlockedCardBack = unlockedCatalog.cosmetics.find(item => item.id === 'gold-trim-card-back');
@@ -2093,7 +2122,7 @@ test('claims challenges and manages cosmetic inventory', async () => {
       body: JSON.stringify({ cosmeticId: 'gold-trim-card-back' }),
     }));
     assert.equal(equipped.user.inventory.equipped.cardBack, 'gold-trim-card-back');
-  });
+  }, { SEED_ADMIN_ACCOUNT: '1' });
 });
 
 test('room chat supports presets, stickers, and blocks filtered custom messages', async () => {
@@ -2212,9 +2241,14 @@ test('friends, public profiles, and room invites work end to end', async () => {
     const created = await json(await fetch(`${baseUrl}/rooms`, {
       method: 'POST',
       headers: authHeaders(one.token),
-      body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
+      body: JSON.stringify({ maxPlayers: 2, rounds: 5, isPublic: false }),
     }));
     assert.equal(created.room.players[0].cosmetics.tableTheme, undefined);
+    const directPrivateJoin = await fetch(`${baseUrl}/rooms/${created.room.code}/join`, {
+      method: 'POST',
+      headers: authHeaders(two.token),
+    });
+    assert.equal(directPrivateJoin.status, 403);
     const invited = await json(await fetch(`${baseUrl}/rooms/${created.room.code}/invites`, {
       method: 'POST',
       headers: authHeaders(one.token),
@@ -2772,7 +2806,7 @@ test('clubs create, search, request, approve, chat, and ignore local matches', a
     });
     assert.equal(lockedCreate.status, 403);
 
-    await earnClubLevel(baseUrl, owner.token);
+    await adminSetLevel(baseUrl, admin, owner.user.userId, 10);
     await adminAdjustCoins(baseUrl, admin, owner.user.userId, 5000);
 
     const created = await json(await fetch(`${baseUrl}/clubs`, {
@@ -2934,6 +2968,7 @@ test('clubs create, search, request, approve, chat, and ignore local matches', a
       method: 'POST',
       headers: authHeaders(owner.token),
       body: JSON.stringify({
+        clientResultId: `club-local-${Date.now()}`,
         mode: 'solo',
         totalRounds: 5,
         roundScores: [2, 3, 4, 5, 6],

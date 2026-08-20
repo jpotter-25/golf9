@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import QRCode from 'qrcode';
+import { isPublicHostedEnvironment } from './securityTokens.js';
 
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 const TOTP_STEP_SECONDS = 30;
@@ -8,8 +9,11 @@ const LOCAL_ENCRYPTION_KEY = 'nine-below-local-admin-mfa-development-key';
 
 function encryptionKey(env = process.env) {
   const configured = String(env.ADMIN_MFA_ENCRYPTION_KEY || '').trim();
-  if (!configured && env.NODE_ENV === 'production') {
-    throw new Error('ADMIN_MFA_ENCRYPTION_KEY is required for authenticator MFA in production.');
+  if (configured.length > 0 && configured.length < 32) {
+    throw new Error('ADMIN_MFA_ENCRYPTION_KEY must be at least 32 characters.');
+  }
+  if (!configured && isPublicHostedEnvironment(env)) {
+    throw new Error('ADMIN_MFA_ENCRYPTION_KEY is required for authenticator MFA in hosted environments.');
   }
   return crypto.createHash('sha256').update(configured || LOCAL_ENCRYPTION_KEY).digest();
 }
@@ -59,16 +63,22 @@ export function generateTotp(secret, options = {}) {
   return String(value).padStart(TOTP_DIGITS, '0');
 }
 
-export function verifyTotp(secret, code, options = {}) {
+export function matchingTotpCounter(secret, code, options = {}) {
   const normalized = String(code || '').replace(/\s+/g, '');
-  if (!/^\d{6}$/.test(normalized)) return false;
+  if (!/^\d{6}$/.test(normalized)) return null;
   const time = Number(options.time ?? Date.now());
   const window = Math.max(0, Number(options.window ?? 1));
   for (let offset = -window; offset <= window; offset += 1) {
     const candidate = generateTotp(secret, { time: time + (offset * TOTP_STEP_SECONDS * 1000) });
-    if (crypto.timingSafeEqual(Buffer.from(candidate), Buffer.from(normalized))) return true;
+    if (crypto.timingSafeEqual(Buffer.from(candidate), Buffer.from(normalized))) {
+      return Math.floor((time + (offset * TOTP_STEP_SECONDS * 1000)) / 1000 / TOTP_STEP_SECONDS);
+    }
   }
-  return false;
+  return null;
+}
+
+export function verifyTotp(secret, code, options = {}) {
+  return matchingTotpCounter(secret, code, options) !== null;
 }
 
 export function buildTotpUri({ secret, accountName, issuer = 'Nine Below Admin' }) {

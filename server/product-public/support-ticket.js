@@ -85,7 +85,11 @@
       return;
     }
     try {
-      const response = await fetch(`/support/public/${encodeURIComponent(reference)}?token=${encodeURIComponent(token)}`);
+      const response = await fetch(`/support/public/${encodeURIComponent(reference)}/access`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken: token }),
+      });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || 'The case could not be found.');
       render(payload.ticket);

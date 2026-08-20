@@ -4,6 +4,7 @@ import { normalizeUserProgression } from './progression.js';
 const MAIL_TITLE_MAX_LENGTH = 90;
 const MAIL_BODY_MAX_LENGTH = 1400;
 const FEEDBACK_MAX_LENGTH = 1000;
+const MAX_MAIL_COIN_REWARD = 100_000;
 const FEEDBACK_CATEGORIES = new Set(['bug', 'suggestion', 'account', 'gameplay', 'other']);
 
 function now() {
@@ -30,7 +31,7 @@ function cleanBody(value, maxLength = MAIL_BODY_MAX_LENGTH) {
 function normalizeAttachment(input = {}) {
   const type = String(input?.type || '').trim();
   if (type === 'coins') {
-    const amount = Math.max(0, Math.trunc(Number(input.amount) || 0));
+    const amount = Math.min(MAX_MAIL_COIN_REWARD, Math.max(0, Math.trunc(Number(input.amount) || 0)));
     return amount > 0 ? { type: 'coins', amount } : null;
   }
   if (type === 'cosmetic') {
@@ -170,6 +171,7 @@ function normalizeMailPayload(body = {}) {
   if (!title || !message) return { error: 'Title and message are required.' };
   const attachments = [];
   const coins = Math.trunc(Number(body.coins || body.coinAmount || 0));
+  if (coins > MAX_MAIL_COIN_REWARD) return { error: `Coin rewards cannot exceed ${MAX_MAIL_COIN_REWARD}.` };
   if (Number.isFinite(coins) && coins > 0) attachments.push({ type: 'coins', amount: coins });
   const cosmeticId = cleanText(body.cosmeticId, 80);
   if (cosmeticId) attachments.push({ type: 'cosmetic', cosmeticId });

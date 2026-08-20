@@ -102,6 +102,24 @@ test('database TLS preserves ordinary verified TLS without Railway compatibility
   assert.equal('checkServerIdentity' in ssl, false);
 });
 
+test('hosted database connections cannot disable certificate verification', () => {
+  assert.throws(
+    () => createDatabaseSslConfig('postgresql://postgres.railway.internal/ninebelow', {
+      RAILWAY_ENVIRONMENT_ID: 'preview-environment',
+      DATABASE_SSL: '0',
+    }),
+    /cannot be disabled/i,
+  );
+  assert.throws(
+    () => createDatabaseSslConfig('postgresql://postgres.railway.internal/ninebelow', {
+      RAILWAY_ENVIRONMENT_ID: 'preview-environment',
+      DATABASE_SSL: '1',
+      DATABASE_SSL_REJECT_UNAUTHORIZED: '0',
+    }),
+    /cannot be disabled in hosted environments/i,
+  );
+});
+
 test('postgres health checks report live query latency without exposing database errors', async () => {
   const successful = new PostgresStore({
     query: async sql => {
@@ -208,6 +226,63 @@ test('postgres store loads and saves economy config metadata', async () => {
   assert.ok(savedQueries.some(query => query.params[0] === 'hash-2'));
   assert.ok(savedQueries.some(query => query.params[0] === 'campaign-2'));
   assert.ok(savedQueries.some(query => query.params[0] === 'delivery-2'));
+});
+
+test('postgres snapshot writes are fenced when another process advanced state', async () => {
+  const queries = [];
+  const client = {
+    async query(sql) {
+      queries.push(sql);
+      if (/SELECT value FROM golf9_meta/.test(sql)) return { rows: [{ value: 2 }] };
+      return { rows: [] };
+    },
+    release() {},
+  };
+  const store = new PostgresStore({
+    query: async () => ({ rows: [] }),
+    connect: async () => client,
+  });
+  store.stateRevision = 1;
+
+  await assert.rejects(
+    () => store.save({}),
+    error => error?.code === 'STALE_STATE_WRITE',
+  );
+  assert.ok(queries.some(sql => /FOR UPDATE/.test(sql)));
+  assert.ok(queries.includes('ROLLBACK'));
+  assert.equal(queries.includes('COMMIT'), false);
+});
+
+test('mail reward claim locks and updates the user and mail entry in one transaction', async () => {
+  const queries = [];
+  const client = {
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      if (/SELECT value FROM golf9_meta/.test(sql)) return { rows: [{ value: 0 }] };
+      if (/SELECT data FROM golf9_users/.test(sql)) return { rows: [{ data: { userId: 'user-1', currency: { coins: 10 } } }] };
+      if (/SELECT data FROM golf9_mail_entries/.test(sql)) return { rows: [{ data: { mailId: 'mail-1', claimedAt: null } }] };
+      return { rows: [] };
+    },
+    release() {},
+  };
+  const store = new PostgresStore({
+    query: async () => ({ rows: [] }),
+    connect: async () => client,
+  });
+
+  const claimed = await store.mutateMailClaim({ userId: 'user-1', mailId: 'mail-1' }, (user, mail) => {
+    user.currency.coins += 25;
+    mail.claimedAt = 123;
+    return { ok: true };
+  });
+
+  assert.equal(claimed.user.currency.coins, 35);
+  assert.equal(claimed.mail.claimedAt, 123);
+  assert.ok(queries.some(query => /golf9_users.+FOR UPDATE/s.test(query.sql)));
+  assert.ok(queries.some(query => /golf9_mail_entries.+FOR UPDATE/s.test(query.sql)));
+  assert.ok(queries.some(query => /UPDATE golf9_users/.test(query.sql)));
+  assert.ok(queries.some(query => /UPDATE golf9_mail_entries/.test(query.sql)));
+  assert.ok(queries.some(query => query.sql === 'COMMIT'));
 });
 
 test('postgres delivery claims use row locking and return campaign context', async () => {

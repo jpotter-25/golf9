@@ -1,7 +1,7 @@
 import { X509Certificate } from 'node:crypto';
 import { checkServerIdentity as checkTlsServerIdentity } from 'node:tls';
 import { Pool } from 'pg';
-import { isProductionEnvironment } from './securityTokens.js';
+import { isPublicHostedEnvironment } from './securityTokens.js';
 
 const COLLECTION_TABLES = [
   ['users', 'user_id'],
@@ -79,8 +79,8 @@ function parseDatabaseUrl(databaseUrl) {
 export function createDatabaseSslConfig(databaseUrl, env = process.env) {
   const parsedDatabaseUrl = parseDatabaseUrl(databaseUrl);
   const sslDisabled = env.DATABASE_SSL === '0';
-  if (sslDisabled && isProductionEnvironment(env)) {
-    throw new Error('DATABASE_SSL cannot be disabled in production.');
+  if (sslDisabled && isPublicHostedEnvironment(env)) {
+    throw new Error('DATABASE_SSL cannot be disabled in hosted environments.');
   }
   if (sslDisabled) return false;
 
@@ -88,6 +88,10 @@ export function createDatabaseSslConfig(databaseUrl, env = process.env) {
   const expectedCaFingerprint = normalizeSha256Fingerprint(env.DATABASE_SSL_CA_SHA256);
   const rejectUnauthorized = env.DATABASE_SSL_REJECT_UNAUTHORIZED !== '0';
   const railwayHostnameCompatibility = env.DATABASE_SSL_RAILWAY_PRIVATE_HOSTNAME_COMPAT === '1';
+
+  if (!rejectUnauthorized && isPublicHostedEnvironment(env)) {
+    throw new Error('DATABASE_SSL_REJECT_UNAUTHORIZED cannot be disabled in hosted environments.');
+  }
 
   if (expectedCaFingerprint && !rejectUnauthorized) {
     throw new Error('DATABASE_SSL_CA_SHA256 requires DATABASE_SSL_REJECT_UNAUTHORIZED=1.');
@@ -168,6 +172,7 @@ export class PostgresStore {
     this.lastHealthSuccessAt = null;
     this.lastHealthFailureAt = null;
     this.lastHealthErrorCode = null;
+    this.stateRevision = 0;
   }
 
   async healthCheck({ timeoutMs = 3_000 } = {}) {
@@ -298,6 +303,7 @@ export class PostgresStore {
     const meta = await this.pool.query('SELECT key, value FROM golf9_meta');
     for (const row of meta.rows) {
       if (META_KEYS.includes(row.key)) state[row.key] = row.value;
+      if (row.key === 'stateRevision') this.stateRevision = Math.max(0, Number(row.value) || 0);
     }
 
     for (const [table] of COLLECTION_TABLES) {
@@ -327,6 +333,14 @@ export class PostgresStore {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+      const revisionResult = await client.query("SELECT value FROM golf9_meta WHERE key = 'stateRevision' FOR UPDATE");
+      const storedRevision = Math.max(0, Number(revisionResult.rows[0]?.value) || 0);
+      if (storedRevision !== this.stateRevision) {
+        const error = new Error('Another server instance advanced the persistent state. This instance is fenced from writing.');
+        error.code = 'STALE_STATE_WRITE';
+        throw error;
+      }
+      const nextRevision = storedRevision + 1;
       for (const key of META_KEYS) {
         await client.query(`
           INSERT INTO golf9_meta (key, value, updated_at)
@@ -359,7 +373,8 @@ export class PostgresStore {
 
       for (const [table, key] of COLLECTION_TABLES) {
         const mergeByUpdatedAt = ['early_access_signups', 'early_access_campaigns', 'early_access_deliveries'].includes(table);
-        if (!mergeByUpdatedAt) await client.query(`DELETE FROM golf9_${table}`);
+        const appendOnly = table === 'admin_audit';
+        if (!mergeByUpdatedAt && !appendOnly) await client.query(`DELETE FROM golf9_${table}`);
         for (const item of collections[table]) {
           const id = itemId(item, key);
           if (!id) continue;
@@ -368,14 +383,20 @@ export class PostgresStore {
                   SET data = EXCLUDED.data, updated_at = NOW()
                 WHERE COALESCE((golf9_${table}.data->>'updatedAt')::numeric, 0)
                    <= COALESCE((EXCLUDED.data->>'updatedAt')::numeric, 0)`
-            : '';
+            : appendOnly ? ` ON CONFLICT (${key}) DO NOTHING` : '';
           await client.query(
             `INSERT INTO golf9_${table} (${key}, data, updated_at) VALUES ($1, $2::jsonb, NOW())${conflictClause}`,
             [String(id), json(item)]
           );
         }
       }
+      await client.query(`
+        INSERT INTO golf9_meta (key, value, updated_at)
+        VALUES ('stateRevision', $1::jsonb, NOW())
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+      `, [json(nextRevision)]);
       await client.query('COMMIT');
+      this.stateRevision = nextRevision;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -497,6 +518,56 @@ export class PostgresStore {
       WHERE COALESCE((golf9_early_access_signups.data->>'updatedAt')::numeric, 0)
          <= COALESCE((EXCLUDED.data->>'updatedAt')::numeric, 0)
     `, [String(signup.emailHash), json(signup)]);
+  }
+
+  async mutateMailClaim({ userId, mailId }, mutate) {
+    const operation = this.lastSave.then(async () => {
+      await this.migrate();
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const revisionResult = await client.query("SELECT value FROM golf9_meta WHERE key = 'stateRevision' FOR UPDATE");
+        const storedRevision = Math.max(0, Number(revisionResult.rows[0]?.value) || 0);
+        if (storedRevision !== this.stateRevision) {
+          const error = new Error('Another server instance advanced the persistent state. This instance is fenced from writing.');
+          error.code = 'STALE_STATE_WRITE';
+          throw error;
+        }
+        const userResult = await client.query('SELECT data FROM golf9_users WHERE user_id = $1 FOR UPDATE', [String(userId)]);
+        const mailResult = await client.query('SELECT data FROM golf9_mail_entries WHERE mail_id = $1 FOR UPDATE', [String(mailId)]);
+        if (!userResult.rows[0]?.data || !mailResult.rows[0]?.data) {
+          await client.query('ROLLBACK');
+          return { error: 'Mail not found.', status: 404 };
+        }
+        const user = structuredClone(userResult.rows[0].data);
+        const mail = structuredClone(mailResult.rows[0].data);
+        const result = mutate(user, mail);
+        if (result?.error) {
+          await client.query('ROLLBACK');
+          return result;
+        }
+        await client.query('UPDATE golf9_users SET data = $2::jsonb, updated_at = NOW() WHERE user_id = $1', [String(userId), json(user)]);
+        await client.query('UPDATE golf9_mail_entries SET data = $2::jsonb, updated_at = NOW() WHERE mail_id = $1', [String(mailId), json(mail)]);
+        const nextRevision = storedRevision + 1;
+        await client.query(`
+          INSERT INTO golf9_meta (key, value, updated_at)
+          VALUES ('stateRevision', $1::jsonb, NOW())
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+        `, [json(nextRevision)]);
+        await client.query('COMMIT');
+        this.stateRevision = nextRevision;
+        return { result, user, mail };
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    });
+    this.lastSave = operation.then(() => this.recordSaveSuccess()).catch(error => {
+      this.recordSaveFailure(error);
+    });
+    return operation;
   }
 
   async deleteEarlyAccessSignups(signupIds = []) {

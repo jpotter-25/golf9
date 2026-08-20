@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { normalizeUserProgression } from './progression.js';
 import { normalizeRankedSeason } from './ranked.js';
+import { isPublicHostedEnvironment } from './securityTokens.js';
 
 export const DEV_TEST_ACCOUNTS = [
   { userId: 'dev-test-one', displayName: 't1test', password: 't1test' },
@@ -23,9 +24,9 @@ function hasPassword(user, password) {
 }
 
 export function shouldSeedDevTestAccounts(dataDir, defaultDataDir, env = process.env) {
+  if (isPublicHostedEnvironment(env)) return false;
   if (env.SEED_TEST_ACCOUNTS === '1') return true;
   if (env.SEED_TEST_ACCOUNTS === '0') return false;
-  if (env.NODE_ENV === 'production') return false;
   return path.resolve(dataDir) === path.resolve(defaultDataDir);
 }
 

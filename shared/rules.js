@@ -11,9 +11,30 @@ const suits = ['♠', '♥', '♦', '♣'];
 const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 
 const SHARED_COSMETIC_KEYS = ['cardBack', 'avatarFrame', 'avatarIcon', 'avatarAccessory', 'title'];
+let fallbackIdCounter = 0;
+let secureRandomIntProvider = null;
+
+export function setSecureRandomIntProvider(provider) {
+  secureRandomIntProvider = typeof provider === 'function' ? provider : null;
+}
+
+function randomInt(maxExclusive) {
+  const maximum = Math.max(1, Math.floor(Number(maxExclusive) || 1));
+  if (secureRandomIntProvider) return secureRandomIntProvider(maximum);
+  const webCrypto = globalThis?.crypto;
+  if (webCrypto?.getRandomValues) {
+    const limit = Math.floor(0x1_0000_0000 / maximum) * maximum;
+    const value = new Uint32Array(1);
+    do webCrypto.getRandomValues(value); while (value[0] >= limit);
+    return value[0] % maximum;
+  }
+  fallbackIdCounter = (fallbackIdCounter + 1) % maximum;
+  return fallbackIdCounter;
+}
 
 export function makeId(prefix = '') {
-  return `${prefix}${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  const values = Array.from({ length: 4 }, () => randomInt(0x1_0000_0000).toString(36).padStart(7, '0'));
+  return `${prefix}${values.join('')}${Date.now().toString(36)}`;
 }
 
 export function sharedPlayerCosmetics(cosmetics) {
@@ -51,7 +72,7 @@ export function createDeck(deckCount = 2) {
   for (let copy = 0; copy < copies; copy += 1) {
     for (const suit of suits) {
       for (const rank of ranks) {
-        deck.push({ id: `${suit}-${rank}-${copy}-${makeId()}`, suit, rank, faceUp: false });
+        deck.push({ id: makeId('card-'), suit, rank, faceUp: false });
       }
     }
   }
@@ -60,7 +81,7 @@ export function createDeck(deckCount = 2) {
 
 export function shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = randomInt(i + 1);
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
@@ -217,6 +238,7 @@ export function revealForPeek(state, playerIndex, r, c) {
   const card = player.grid?.[r]?.[c];
   if (!card || card.faceUp) return { state: next, error: 'Card cannot be peeked.' };
   card.faceUp = true;
+  card.visibleToUserId = player.userId;
   player.peekFlips += 1;
   next.revision = (next.revision || 0) + 1;
   return { state: next };
@@ -247,9 +269,10 @@ export function autoCompleteCurrentPeek(state) {
         if (card && !card.faceUp) coords.push({ r, c });
       }
       while (player.peekFlips < 2 && coords.length) {
-        const index = Math.floor(Math.random() * coords.length);
+        const index = randomInt(coords.length);
         const { r, c } = coords.splice(index, 1)[0];
         player.grid[r][c].faceUp = true;
+        player.grid[r][c].visibleToUserId = player.userId;
         player.peekFlips += 1;
       }
     }
@@ -264,9 +287,10 @@ export function autoCompleteCurrentPeek(state) {
     if (card && !card.faceUp) coords.push({ r, c });
   }
   while (player.peekFlips < 2 && coords.length) {
-    const index = Math.floor(Math.random() * coords.length);
+    const index = randomInt(coords.length);
     const { r, c } = coords.splice(index, 1)[0];
     player.grid[r][c].faceUp = true;
+    player.grid[r][c].visibleToUserId = player.userId;
     player.peekFlips += 1;
   }
   next.revision = (next.revision || 0) + 1;
@@ -467,6 +491,7 @@ export function revealGridCardForDecision(state, playerIndex, r, c) {
   if (!player || !card) return { state: next, error: 'Invalid grid card.' };
   if (card.faceUp) return { state: next, error: 'Card is already face-up.' };
   card.faceUp = true;
+  card.visibleToUserId = player.userId;
   next.pendingDecision = { playerIndex, r, c, cardId: card.id };
   next.revision = (next.revision || 0) + 1;
   return { state: next };
@@ -488,6 +513,7 @@ export function resolvePendingGridDecision(state, playerIndex, heldCard, choice)
   }
 
   if (choice === 'revealed') {
+    delete revealed.visibleToUserId;
     next.discardPile.push({ ...heldCard, faceUp: true });
     next.topDiscard = next.discardPile[next.discardPile.length - 1] || null;
     next.pendingDecision = null;
@@ -530,6 +556,7 @@ export function resolvePendingGridDecisionWithoutHeld(state, playerIndex) {
   }
 
   next.pendingDecision = null;
+  delete revealed.visibleToUserId;
   const cleared = clearThreeOfAKindColumns(next, playerIndex);
   if (cleared) {
     awardExtraTurnInPlace(next, playerIndex);
@@ -677,10 +704,20 @@ export function publicGameState(
   next.players = next.players.map(player => ({
     ...player,
     cosmetics: sharedPlayerCosmetics(player.cosmetics),
-    grid: player.grid.map(row => row.map(card => {
-      if (!card || card.faceUp) return card;
-      return { id: card.id, suit: '♠', rank: 'A', faceUp: false, zeroed: card.zeroed };
+    grid: player.grid.map((row, rowIndex) => row.map((card, columnIndex) => {
+      const privatelyHidden = card?.visibleToUserId && card.visibleToUserId !== viewerUserId;
+      if (!card || (card.faceUp && !privatelyHidden)) {
+        if (card) delete card.visibleToUserId;
+        return card;
+      }
+      return { id: `hidden-${player.userId}-${rowIndex}-${columnIndex}`, suit: '♠', rank: 'A', faceUp: false, zeroed: card.zeroed };
     })),
   }));
+  if (next.pendingDecision) {
+    const decidingPlayer = next.players[next.pendingDecision.playerIndex];
+    if (decidingPlayer?.userId !== viewerUserId) {
+      next.pendingDecision.cardId = `hidden-${decidingPlayer?.userId || 'player'}-${next.pendingDecision.r}-${next.pendingDecision.c}`;
+    }
+  }
   return next;
 }

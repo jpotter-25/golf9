@@ -153,6 +153,27 @@ test('management credentials stop authorizing participant operations after expir
   assert.equal(signup.consentStatus, 'confirmed');
 });
 
+test('a confirmed resubmission cannot revive an expired management credential', () => {
+  const store = openStore();
+  const { signup } = confirmedSignup(store);
+  const originalToken = decryptEarlyAccessContact(signup.contactEncrypted, env).manageToken;
+  signup.manageTokenExpiresAt = 1_049_999;
+
+  const resubmitted = submitEarlyAccessSignup(store, signupBody({ platforms: ['ios'], webFuture: false }), {
+    env,
+    now: 2_000_000,
+  });
+  assert.equal(resubmitted.signup.consentStatus, 'confirmed');
+  assert.deepEqual(resubmitted.signup.platforms, ['android', 'web_future']);
+  assert.match(earlyAccessPreferences(store, originalToken, { env, now: 2_000_001 }).error, /invalid|expired|no longer active/i);
+
+  const confirmed = confirmEarlyAccessSignup(store, resubmitted.confirmationToken, { env, now: 2_001_000 });
+  assert.equal(confirmed.ok, true);
+  const rotatedToken = decryptEarlyAccessContact(confirmed.signup.contactEncrypted, env).manageToken;
+  assert.notEqual(rotatedToken, originalToken);
+  assert.deepEqual(earlyAccessPreferences(store, rotatedToken, { env, now: 2_001_001 }).signup.platforms, ['ios']);
+});
+
 test('controlled campaigns segment recipients, queue once, render unsubscribe headers, and activate invite users', () => {
   const store = openStore();
   const { signup } = confirmedSignup(store);

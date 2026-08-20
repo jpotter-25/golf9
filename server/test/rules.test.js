@@ -479,7 +479,32 @@ test('publicGameState exposes viewer held card while masking draw pile', () => {
   assert.equal(view.viewerHeldCanDiscard, true);
   assert.equal(view.drawPile.length, state.drawPile.length);
   assert.equal(view.drawPile.every(c => c.faceUp === false), true);
+  assert.deepEqual(view.drawPile.map(c => c.id), view.drawPile.map((_, index) => `draw-${index}`));
+  assert.equal(view.drawPile.some(c => state.drawPile.some(privateCard => privateCard.id === c.id)), false);
   assert.notEqual(view.players[0].grid[0][0].rank, state.players[0].grid[0][0].rank);
+  assert.notEqual(view.players[0].grid[0][0].id, state.players[0].grid[0][0].id);
+});
+
+test('temporary private reveals are visible only to the deciding player', () => {
+  let state = createGameState([
+    { userId: 'u1', displayName: 'One' },
+    { userId: 'u2', displayName: 'Two' },
+  ]);
+  state = startTurns(state);
+  state.currentPlayerIndex = 0;
+  state.players[0].grid[0][0] = card('Q', { id: 'secret-queen-id', faceUp: false });
+
+  const reveal = revealGridCardForDecision(state, 0, 0, 0);
+  assert.equal(reveal.error, undefined);
+  const ownerView = publicGameState(reveal.state, 'u1');
+  const opponentView = publicGameState(reveal.state, 'u2');
+
+  assert.equal(ownerView.players[0].grid[0][0].rank, 'Q');
+  assert.equal(ownerView.players[0].grid[0][0].id, 'secret-queen-id');
+  assert.equal(opponentView.players[0].grid[0][0].faceUp, false);
+  assert.equal(opponentView.players[0].grid[0][0].rank, 'A');
+  assert.equal(opponentView.players[0].grid[0][0].id, 'hidden-u1-0-0');
+  assert.equal(JSON.stringify(opponentView).includes('secret-queen-id'), false);
 });
 
 test('extra turns require drawing from the deck', () => {

@@ -8,7 +8,19 @@ import { publicDailyBonus } from './economy.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SEASON_REWARD_GRACE_MS = 30 * DAY_MS;
+const MAX_TOTAL_XP = 100_000_000;
+const MAX_CURRENCY = 100_000_000;
+const MAX_STAT_VALUE = 1_000_000_000;
+const MAX_MATCH_ROUNDS = 200;
+const MAX_MATCH_COLUMN_CLEARS = 100;
+const MAX_MATCH_SCORE = 1_000_000;
 const STARTER_COSMETICS = ['classic-card-back', 'rookie-avatar-frame', 'classic-avatar-icon', 'no-avatar-accessory', 'rookie-title', 'classic-table-theme'];
+
+function boundedInteger(value, minimum, maximum, fallback = 0) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(maximum, Math.max(minimum, Math.floor(numeric)));
+}
 
 export const COSMETIC_CATALOG = [
   { id: 'classic-card-back', type: 'cardBack', name: 'Heritage Deck', description: 'A restrained engraved back inspired by traditional card-room geometry.', rarity: 'starter', price: 0, shopCategory: 'starter' },
@@ -120,7 +132,8 @@ export function xpNeededForLevel(level) {
 
 export function levelSnapshot(totalXp = 0) {
   let level = 1;
-  let remaining = Math.max(0, Math.floor(Number(totalXp) || 0));
+  const normalizedTotalXp = boundedInteger(totalXp, 0, MAX_TOTAL_XP);
+  let remaining = normalizedTotalXp;
   while (remaining >= xpNeededForLevel(level)) {
     remaining -= xpNeededForLevel(level);
     level += 1;
@@ -128,7 +141,7 @@ export function levelSnapshot(totalXp = 0) {
   const nextLevelXp = xpNeededForLevel(level);
   return {
     level,
-    totalXp: Math.max(0, Math.floor(Number(totalXp) || 0)),
+    totalXp: normalizedTotalXp,
     currentLevelXp: remaining,
     nextLevelXp,
     levelProgress: nextLevelXp > 0 ? remaining / nextLevelXp : 0,
@@ -136,7 +149,8 @@ export function levelSnapshot(totalXp = 0) {
 }
 
 function numericOrNull(value) {
-  return Number.isFinite(value) ? value : null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.min(MAX_MATCH_SCORE, Math.max(-MAX_MATCH_SCORE, numeric)) : null;
 }
 
 function utcDayStart(now = Date.now()) {
@@ -347,34 +361,34 @@ export function publicCosmeticCatalog(user, rankedSeason = null, catalog = COSME
 
 function defaultStatistics(user) {
   const legacy = user.stats || {};
-  const gamesPlayed = Number(user.statistics?.gamesPlayed ?? legacy.gamesPlayed ?? 0) || 0;
-  const wins = Number(user.statistics?.wins ?? legacy.wins ?? 0) || 0;
+  const gamesPlayed = boundedInteger(user.statistics?.gamesPlayed ?? legacy.gamesPlayed, 0, MAX_STAT_VALUE);
+  const wins = boundedInteger(user.statistics?.wins ?? legacy.wins, 0, MAX_STAT_VALUE);
   return {
     gamesPlayed,
     wins,
-    losses: Number(user.statistics?.losses ?? Math.max(0, gamesPlayed - wins)) || 0,
-    onlineGames: Number(user.statistics?.onlineGames ?? 0) || 0,
-    soloGames: Number(user.statistics?.soloGames ?? 0) || 0,
-    passPlayGames: Number(user.statistics?.passPlayGames ?? 0) || 0,
-    roundsPlayed: Number(user.statistics?.roundsPlayed ?? 0) || 0,
-    totalScore: Number(user.statistics?.totalScore ?? 0) || 0,
+    losses: boundedInteger(user.statistics?.losses ?? Math.max(0, gamesPlayed - wins), 0, MAX_STAT_VALUE),
+    onlineGames: boundedInteger(user.statistics?.onlineGames, 0, MAX_STAT_VALUE),
+    soloGames: boundedInteger(user.statistics?.soloGames, 0, MAX_STAT_VALUE),
+    passPlayGames: boundedInteger(user.statistics?.passPlayGames, 0, MAX_STAT_VALUE),
+    roundsPlayed: boundedInteger(user.statistics?.roundsPlayed, 0, MAX_STAT_VALUE),
+    totalScore: boundedInteger(user.statistics?.totalScore, -MAX_STAT_VALUE, MAX_STAT_VALUE),
     bestTotal: numericOrNull(user.statistics?.bestTotal),
     bestRound: numericOrNull(user.statistics?.bestRound),
-    columnClears: Number(user.statistics?.columnClears ?? 0) || 0,
-    socialMessagesSent: Number(user.statistics?.socialMessagesSent ?? 0) || 0,
+    columnClears: boundedInteger(user.statistics?.columnClears, 0, MAX_STAT_VALUE),
+    socialMessagesSent: boundedInteger(user.statistics?.socialMessagesSent, 0, MAX_STAT_VALUE),
   };
 }
 
 function defaultCurrency(user) {
-  const coins = Number(user.currency?.coins ?? 0) || 0;
+  const coins = boundedInteger(user.currency?.coins, 0, MAX_CURRENCY);
   const dailyBonus = user.currency?.dailyBonus || {};
   return {
     coins,
-    lifetimeCoins: Number(user.currency?.lifetimeCoins ?? coins) || 0,
+    lifetimeCoins: boundedInteger(user.currency?.lifetimeCoins ?? coins, 0, MAX_CURRENCY),
     dailyBonus: {
-      lastClaimedAt: Number(dailyBonus.lastClaimedAt ?? 0) || null,
-      lastClaimDay: Number(dailyBonus.lastClaimDay ?? 0) || null,
-      streak: Math.max(0, Number(dailyBonus.streak ?? 0) || 0),
+      lastClaimedAt: boundedInteger(dailyBonus.lastClaimedAt, 0, Number.MAX_SAFE_INTEGER) || null,
+      lastClaimDay: boundedInteger(dailyBonus.lastClaimDay, 0, Number.MAX_SAFE_INTEGER) || null,
+      streak: boundedInteger(dailyBonus.streak, 0, 10_000),
     },
   };
 }
@@ -445,11 +459,11 @@ export function publicUserProfile(user, rankedSeason = null, competitiveConfig =
 
 function grantProgression(user, xp, coins, now = Date.now()) {
   normalizeUserProgression(user, now);
-  const safeXp = Math.max(0, Math.floor(Number(xp) || 0));
-  const safeCoins = Math.max(0, Math.floor(Number(coins) || 0));
+  const safeXp = boundedInteger(xp, 0, MAX_TOTAL_XP);
+  const safeCoins = boundedInteger(coins, 0, MAX_CURRENCY);
   user.progression = levelSnapshot(user.progression.totalXp + safeXp);
-  user.currency.coins += safeCoins;
-  user.currency.lifetimeCoins += safeCoins;
+  user.currency.coins = boundedInteger(user.currency.coins + safeCoins, 0, MAX_CURRENCY);
+  user.currency.lifetimeCoins = boundedInteger(user.currency.lifetimeCoins + safeCoins, 0, MAX_CURRENCY);
 }
 
 function unlockEligibleAchievements(user, now = Date.now()) {
@@ -596,26 +610,28 @@ export function applyMatchProgression(user, match, now = Date.now()) {
   const levelBefore = user.progression.level;
   const totalXpBefore = user.progression.totalXp;
   const coinsBefore = user.currency.coins;
-  const total = Number(match.total ?? 0) || 0;
-  const roundScores = Array.isArray(match.roundScores) ? match.roundScores.filter(Number.isFinite) : [];
+  const total = boundedInteger(match.total, -MAX_MATCH_SCORE, MAX_MATCH_SCORE);
+  const roundScores = Array.isArray(match.roundScores)
+    ? match.roundScores.slice(0, MAX_MATCH_ROUNDS).map(value => boundedInteger(value, -MAX_MATCH_SCORE, MAX_MATCH_SCORE))
+    : [];
   const bestRound = roundScores.length ? Math.min(...roundScores) : null;
-  const roundsPlayed = Number(match.totalRounds ?? roundScores.length ?? 0) || 0;
-  const columnClears = Math.max(0, Math.floor(Number(match.columnClears ?? 0) || 0));
+  const roundsPlayed = boundedInteger(match.totalRounds ?? roundScores.length, 0, MAX_MATCH_ROUNDS);
+  const columnClears = boundedInteger(match.columnClears, 0, MAX_MATCH_COLUMN_CLEARS);
   const mode = match.mode === 'solo' || match.mode === 'passplay' ? match.mode : 'online';
   const won = !!match.won;
-  const coinScale = Number.isFinite(match.coinScale) ? Math.max(0, Number(match.coinScale)) : 1;
+  const coinScale = Number.isFinite(match.coinScale) ? Math.min(1, Math.max(0, Number(match.coinScale))) : 1;
 
   user.statistics.gamesPlayed += 1;
   user.statistics.wins += won ? 1 : 0;
   user.statistics.losses += won ? 0 : 1;
   user.statistics[modeKey(mode)] += 1;
-  user.statistics.roundsPlayed += roundsPlayed;
-  user.statistics.totalScore += total;
+  user.statistics.roundsPlayed = boundedInteger(user.statistics.roundsPlayed + roundsPlayed, 0, MAX_STAT_VALUE);
+  user.statistics.totalScore = boundedInteger(user.statistics.totalScore + total, -MAX_STAT_VALUE, MAX_STAT_VALUE);
   user.statistics.bestTotal = user.statistics.bestTotal == null ? total : Math.min(user.statistics.bestTotal, total);
   if (bestRound != null) {
     user.statistics.bestRound = user.statistics.bestRound == null ? bestRound : Math.min(user.statistics.bestRound, bestRound);
   }
-  user.statistics.columnClears += columnClears;
+  user.statistics.columnClears = boundedInteger(user.statistics.columnClears + columnClears, 0, MAX_STAT_VALUE);
 
   let xp = 250 + (roundsPlayed * 25) + (won ? 300 : 0) + (columnClears * 60);
   let coins = 25 + (won ? 50 : 0) + (columnClears * 10);

@@ -13,6 +13,7 @@ import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import { createPostgresStore } from './postgresStore.js';
 import {
+  isPublicHostedEnvironment,
   normalizeCredentialVerifier,
   persistentCredentialVerifier,
 } from './securityTokens.js';
@@ -25,6 +26,7 @@ import {
   flipForPeek,
   pickTarget,
   publicGameState,
+  setSecureRandomIntProvider,
   revealGridCardForDecision,
   replaceGridCard,
   resolvePendingGridDecision,
@@ -36,6 +38,8 @@ import {
   PEEK_DURATION,
   TURN_DURATION,
 } from '../shared/rules.js';
+
+setSecureRandomIntProvider(maxExclusive => crypto.randomInt(maxExclusive));
 import { aiPlayTurn, chooseAiMove } from '../shared/soloAi.js';
 import {
   applyAfkCoinPenalty,
@@ -274,7 +278,7 @@ const ADMIN_PUBLIC_DIR = path.join(__dirname, 'admin-public');
 const PRODUCT_PUBLIC_DIR = path.join(__dirname, 'product-public');
 const ASSET_UPLOAD_DIR = path.join(DATA_DIR, 'uploads', 'cosmetics');
 const RAW_PUBLIC_ENV = (process.env.APP_ENV || process.env.EXPO_PUBLIC_APP_ENV || process.env.NODE_ENV || '').toLowerCase();
-const IS_PRODUCTION = process.env.NODE_ENV === 'production' || RAW_PUBLIC_ENV === 'production';
+const IS_PRODUCTION = isPublicHostedEnvironment(process.env);
 const DATABASE_URL = process.env.DATABASE_URL || '';
 const PUBLIC_API_URL = normalizePublicUrl(process.env.PUBLIC_API_URL || process.env.EXPO_PUBLIC_PROD_SERVER_URL || 'https://ninebelow.potterwell.com');
 const ADMIN_PUBLIC_URL = normalizeAdminPublicUrl(process.env.ADMIN_PUBLIC_URL, PUBLIC_API_URL);
@@ -286,7 +290,11 @@ const GOOGLE_CLIENT_IDS = (process.env.GOOGLE_CLIENT_IDS || process.env.GOOGLE_C
   .filter(Boolean);
 const FACEBOOK_APP_ID = String(process.env.FACEBOOK_APP_ID || '').trim();
 const FACEBOOK_APP_SECRET = String(process.env.FACEBOOK_APP_SECRET || '').trim();
-const SOCIAL_AUTH_TEST_MODE = process.env.SOCIAL_AUTH_TEST_MODE === '1';
+const SOCIAL_AUTH_TEST_MODE_REQUESTED = process.env.SOCIAL_AUTH_TEST_MODE === '1';
+if (IS_PRODUCTION && SOCIAL_AUTH_TEST_MODE_REQUESTED) {
+  throw new Error('SOCIAL_AUTH_TEST_MODE cannot be enabled in hosted environments.');
+}
+const SOCIAL_AUTH_TEST_MODE = SOCIAL_AUTH_TEST_MODE_REQUESTED && !IS_PRODUCTION;
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const EXPO_ACCESS_TOKEN = String(process.env.EXPO_ACCESS_TOKEN || '').trim();
 const PUSH_TEST_MODE = process.env.PUSH_TEST_MODE === '1';
@@ -318,6 +326,7 @@ const ACCOUNT_DELETION_REQUEST_TTL_MS = 1000 * 60 * 60 * 24;
 const ACCOUNT_DELETION_MAX_ATTEMPTS = 5;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const ROOM_TTL_MS = 1000 * 60 * 60 * 2;
+const MAX_ACTIVE_ROOMS = Math.max(100, Math.min(10_000, Number(process.env.MAX_ACTIVE_ROOMS) || 2_000));
 const PORT = String(process.env.PORT || 3001);
 const EXTRA_LISTEN_PORTS = [...new Set(
   (process.env.EXTRA_LISTEN_PORTS || (IS_PRODUCTION ? '3001' : ''))
@@ -325,10 +334,15 @@ const EXTRA_LISTEN_PORTS = [...new Set(
     .map(port => port.trim())
     .filter(port => port && port !== PORT)
 )];
-const CLIENT_ORIGINS = (process.env.CLIENT_ORIGINS || '*')
+const CLIENT_ORIGINS = (process.env.CLIENT_ORIGINS || (IS_PRODUCTION
+  ? 'https://ninebelow.potterwell.com,https://potterwell.com,https://www.potterwell.com'
+  : '*'))
   .split(',')
   .map(origin => origin.trim())
   .filter(Boolean);
+if (IS_PRODUCTION && CLIENT_ORIGINS.includes('*')) {
+  throw new Error('CLIENT_ORIGINS cannot contain a wildcard in hosted environments.');
+}
 const PUBLIC_WEB_ORIGINS = new Set([
   'https://potterwell.com',
   'https://www.potterwell.com',
@@ -462,6 +476,13 @@ app.use((req, res, next) => {
   if (IS_PRODUCTION) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   return next();
 });
+app.use((req, res, next) => {
+  const staleWriter = postgresStore?.runtimeStatus().lastSaveErrorCode === 'STALE_STATE_WRITE';
+  if (staleWriter && !req.path.startsWith('/health')) {
+    return res.status(503).json({ error: 'This server instance has been fenced from persistent writes. Retry shortly.' });
+  }
+  return next();
+});
 
 const adminRequestWindow = new Map();
 app.use('/admin/api', (req, res, next) => {
@@ -478,15 +499,13 @@ app.use('/admin/api', (req, res, next) => {
   }
   if (count > 120) return res.status(429).json({ error: 'Too many admin requests. Slow down and try again.' });
 
-  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
-    const origin = req.headers.origin || '';
-    const host = req.headers.host || '';
-    if (origin) {
-      try {
-        if (new URL(origin).host !== host) return res.status(403).json({ error: 'Invalid admin request origin.' });
-      } catch {
-        return res.status(403).json({ error: 'Invalid admin request origin.' });
-      }
+  const origin = req.headers.origin || '';
+  const host = req.headers.host || '';
+  if (origin) {
+    try {
+      if (new URL(origin).host !== host) return res.status(403).json({ error: 'Invalid admin request origin.' });
+    } catch {
+      return res.status(403).json({ error: 'Invalid admin request origin.' });
     }
   }
   return next();
@@ -497,9 +516,10 @@ function accountDeletionRateLimit(req, res, next) {
   const now = Date.now();
   const currentWindow = Math.floor(now / (10 * 60 * 1000));
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
-  const bucket = `${ip}:${currentWindow}`;
-  const count = (accountDeletionRequestWindow.get(bucket) || 0) + 1;
-  accountDeletionRequestWindow.set(bucket, count);
+  const accountKey = persistentCredentialVerifier(String(req.body?.displayName || '').trim().toLowerCase(), 'account-deletion-rate').slice(-24);
+  const buckets = [`ip:${ip}:${currentWindow}`, `account:${accountKey}:${currentWindow}`];
+  const count = Math.max(...buckets.map(bucket => (accountDeletionRequestWindow.get(bucket) || 0) + 1));
+  for (const bucket of buckets) accountDeletionRequestWindow.set(bucket, (accountDeletionRequestWindow.get(bucket) || 0) + 1);
   if (accountDeletionRequestWindow.size > 1000) {
     for (const key of accountDeletionRequestWindow.keys()) {
       if (!key.endsWith(`:${currentWindow}`)) accountDeletionRequestWindow.delete(key);
@@ -568,6 +588,53 @@ function playerLoginRateLimit(req, res, next) {
     }
   }
   return next();
+}
+
+const signupRequestWindow = new Map();
+const socialAuthRequestWindow = new Map();
+const supportSubmissionWindow = new Map();
+const localResultRequestWindow = new Map();
+
+function boundedRequestLimit(window, keys, maximum, currentWindow, res, message) {
+  if (keys.some(key => (window.get(`${key}:${currentWindow}`) || 0) >= maximum)) {
+    res.status(429).json({ error: message });
+    return false;
+  }
+  for (const key of keys) window.set(`${key}:${currentWindow}`, (window.get(`${key}:${currentWindow}`) || 0) + 1);
+  if (window.size > 4000) {
+    for (const key of window.keys()) if (!key.endsWith(`:${currentWindow}`)) window.delete(key);
+  }
+  return true;
+}
+
+function signupRateLimit(req, res, next) {
+  const currentWindow = Math.floor(Date.now() / (15 * 60 * 1000));
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  if (!boundedRequestLimit(signupRequestWindow, [`ip:${ip}`], 8, currentWindow, res, 'Too many signup attempts. Wait a few minutes and try again.')) return;
+  next();
+}
+
+function socialAuthRateLimit(req, res, next) {
+  const currentWindow = Math.floor(Date.now() / (15 * 60 * 1000));
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const userId = req.auth?.user?.userId || 'anonymous';
+  if (!boundedRequestLimit(socialAuthRequestWindow, [`ip:${ip}`, `user:${userId}`], 20, currentWindow, res, 'Too many social authentication attempts. Wait a few minutes and try again.')) return;
+  next();
+}
+
+function authenticatedSupportRateLimit(req, res, next) {
+  const currentWindow = Math.floor(Date.now() / (60 * 60 * 1000));
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const userId = req.auth?.user?.userId || 'anonymous';
+  if (!boundedRequestLimit(supportSubmissionWindow, [`ip:${ip}`, `user:${userId}`], 12, currentWindow, res, 'Too many support submissions. Try again later.')) return;
+  next();
+}
+
+function localResultRateLimit(req, res, next) {
+  const currentWindow = Math.floor(Date.now() / (60 * 60 * 1000));
+  const userId = req.auth?.user?.userId || 'anonymous';
+  if (!boundedRequestLimit(localResultRequestWindow, [`user:${userId}`], 60, currentWindow, res, 'Too many local result submissions. Try again later.')) return;
+  next();
 }
 
 const server = http.createServer(app);
@@ -1044,7 +1111,7 @@ async function sendAccountDeletionCode({ user, requestId, email, code, expiresAt
   };
   await sendTransactionalEmail(message, {
     type: 'account-deletion',
-    userId: anonymizedDeletedUserId(user.userId),
+    userId: persistentCredentialVerifier(user.userId, 'account-deletion-email-log').slice(-24),
     requestId,
     code,
     expiresAt,
@@ -1082,7 +1149,9 @@ function protectEarlyAccessFeedbackTicket(ticket, signupId) {
     contactName: ticket.contactName,
     contactEmail: ticket.contactEmail,
     website: ticket.website,
+    subject: ticket.subject,
     message: ticket.message,
+    notes: ticket.notes || [],
   }, process.env);
   stored.displayName = 'Early access tester';
   stored.contactName = 'Early access tester';
@@ -1417,6 +1486,7 @@ async function sendExpoPushMessages(messages) {
     method: 'POST',
     headers,
     body: JSON.stringify(messages),
+    signal: AbortSignal.timeout(10_000),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body?.errors?.[0]?.message || body?.error || `Expo push failed: ${response.status}`);
@@ -1612,7 +1682,7 @@ function applyStoreState(parsed = {}) {
   for (const session of parsed.sessions || []) {
     if (session.expiresAt > Date.now()) {
       const token = normalizeCredentialVerifier(session.token, 'player-session');
-      sessions.set(token, { ...session, token });
+      sessions.set(token, { ...session, token, authenticatedAt: Number(session.authenticatedAt) || null });
     }
   }
   results.push(...(parsed.results || []));
@@ -1701,14 +1771,36 @@ function seedAdminAccounts() {
 }
 
 function makeCode() {
-  let code = crypto.randomBytes(3).toString('hex').slice(0, 4).toUpperCase();
-  while (rooms.has(code)) code = crypto.randomBytes(3).toString('hex').slice(0, 4).toUpperCase();
-  return code;
+  for (let attempt = 0; attempt < 128; attempt += 1) {
+    const code = crypto.randomBytes(3).toString('hex').slice(0, 4).toUpperCase();
+    if (!rooms.has(code)) return code;
+  }
+  throw new Error('Room capacity is temporarily unavailable.');
 }
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
   const passwordHash = crypto.pbkdf2Sync(password, salt, 120_000, 32, 'sha256').toString('hex');
   return { salt, passwordHash };
+}
+
+function hashPasswordAsync(password, salt = crypto.randomBytes(16).toString('hex')) {
+  return new Promise((resolve, reject) => {
+    crypto.pbkdf2(String(password || ''), salt, 120_000, 32, 'sha256', (error, derivedKey) => {
+      if (error) reject(error);
+      else resolve({ salt, passwordHash: derivedKey.toString('hex') });
+    });
+  });
+}
+
+function validatePlayerPassword(password) {
+  const value = String(password || '');
+  if (value.length < 12 || value.length > 128) return 'Password must be between 12 and 128 characters.';
+  const compact = value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (['password', 'password123', '123456789012', 'ninebelow', 'potterwell'].includes(compact)) {
+    return 'Choose a less predictable password.';
+  }
+  if (!/[A-Za-z]/.test(value) || !/[0-9]/.test(value)) return 'Password must include letters and numbers.';
+  return null;
 }
 
 function sha256(value) {
@@ -1731,7 +1823,7 @@ function passwordMatches(user, password) {
 function anonymizedDeletedUserId(userId) {
   const clean = String(userId || '');
   if (clean.startsWith('deleted:')) return clean;
-  return `deleted:${sha256(clean).slice(0, 24)}`;
+  return `deleted:${crypto.randomBytes(18).toString('base64url')}`;
 }
 
 function verifiedDeletionEmails(user) {
@@ -1755,7 +1847,7 @@ function findDeletionUser(displayName, email = '') {
 }
 
 function accountDeletionCodeHash(requestId, code) {
-  return sha256(`${requestId}:${String(code || '').trim()}`);
+  return persistentCredentialVerifier(String(code || '').trim(), `account-deletion-code:${requestId}`);
 }
 
 async function verifyAccountDeletionCredential(user, body = {}) {
@@ -1918,7 +2010,7 @@ function deletePlayerAccount(user, req, source = 'authenticated') {
   anonymizeDeletedUserHistory(userId, deletedUserId);
 
   for (let index = mailEntries.length - 1; index >= 0; index -= 1) {
-    if (mailEntries[index]?.userId === userId) mailEntries.splice(index, 1);
+    if (mailEntries[index]?.recipientUserId === userId) mailEntries.splice(index, 1);
   }
   for (let index = accountDeletionRequests.length - 1; index >= 0; index -= 1) {
     if (accountDeletionRequests[index]?.userId === userId) accountDeletionRequests.splice(index, 1);
@@ -2006,7 +2098,14 @@ async function verifyGoogleProfile(body = {}) {
   if (!GOOGLE_CLIENT_IDS.length) throw new Error('Google login is not configured.');
   const idToken = String(body.idToken || '').trim();
   if (!idToken) throw new Error('Google login token is missing.');
-  const ticket = await googleOAuthClient.verifyIdToken({ idToken, audience: GOOGLE_CLIENT_IDS });
+  let verificationTimeout;
+  const ticket = await Promise.race([
+    googleOAuthClient.verifyIdToken({ idToken, audience: GOOGLE_CLIENT_IDS }),
+    new Promise((_, reject) => {
+      verificationTimeout = setTimeout(() => reject(new Error('Google login verification timed out.')), 10_000);
+      verificationTimeout.unref?.();
+    }),
+  ]).finally(() => clearTimeout(verificationTimeout));
   const payload = ticket.getPayload();
   if (!payload?.sub) throw new Error('Google login token is invalid.');
   return {
@@ -2028,7 +2127,7 @@ async function verifyFacebookProfile(body = {}) {
   const debugUrl = new URL('https://graph.facebook.com/debug_token');
   debugUrl.searchParams.set('input_token', accessToken);
   debugUrl.searchParams.set('access_token', appToken);
-  const debugRes = await fetch(debugUrl);
+  const debugRes = await fetch(debugUrl, { signal: AbortSignal.timeout(10_000) });
   const debug = await debugRes.json().catch(() => ({}));
   const data = debug.data || {};
   if (!debugRes.ok || !data.is_valid || String(data.app_id || '') !== FACEBOOK_APP_ID || !data.user_id) {
@@ -2037,7 +2136,7 @@ async function verifyFacebookProfile(body = {}) {
   const profileUrl = new URL('https://graph.facebook.com/me');
   profileUrl.searchParams.set('fields', 'id,name,email');
   profileUrl.searchParams.set('access_token', accessToken);
-  const profileRes = await fetch(profileUrl);
+  const profileRes = await fetch(profileUrl, { signal: AbortSignal.timeout(10_000) });
   const profile = await profileRes.json().catch(() => ({}));
   if (!profileRes.ok || String(profile.id || '') !== String(data.user_id)) throw new Error('Facebook profile lookup failed.');
   return {
@@ -2390,10 +2489,17 @@ function activeMatchConflictForUser(userId) {
     }
   }
   const room = refreshActivePlayingRoomForUser(userId);
-  if (!room) return null;
+  if (room) {
+    return {
+      error: 'Finish your active match before joining another table.',
+      activeRoom: roomSummary(room),
+    };
+  }
+  const lobby = [...rooms.values()].find(item => item.status === 'lobby' && item.players.some(player => player.userId === userId));
+  if (!lobby) return null;
   return {
-    error: 'Finish your active match before joining another table.',
-    activeRoom: roomSummary(room),
+    error: 'Leave your current lobby before joining another table.',
+    activeRoom: roomSummary(lobby),
   };
 }
 
@@ -2415,13 +2521,18 @@ function blockRankedForfeitRestriction(req, res) {
   return true;
 }
 
-function userStatus(userId) {
+function userStatus(userId, viewer = null) {
   const activeSockets = userSockets.get(userId);
   const room = activeRoomForUser(userId);
+  const viewerIsMember = !!room?.players.some(player => player.userId === viewer?.userId);
+  const viewerHasInvite = !!viewer && !!room && (viewer.social?.roomInvites || []).some(invite => (
+    invite.roomCode === room.code && invite.expiresAt > Date.now() && room.players.some(player => player.userId === invite.fromUserId)
+  ));
+  const canSeeRoomCode = !!room && (room.isPublic || viewer?.userId === userId || viewerIsMember || viewerHasInvite);
   return {
     online: !!activeSockets?.size,
     inRoom: !!room,
-    roomCode: room?.code ?? null,
+    roomCode: canSeeRoomCode ? room.code : null,
     roomStatus: room?.status ?? null,
     matchType: room?.matchType ?? null,
   };
@@ -2452,7 +2563,7 @@ function publicPlayerCard(viewer, target, extra = {}) {
     cosmetics: sharedPlayerCosmetics(profile.inventory.equipped),
     club: profile.club,
     relationship: relationshipBetween(viewer, target),
-    status: userStatus(target.userId),
+    status: userStatus(target.userId, viewer),
     ...extra,
   };
 }
@@ -2496,7 +2607,7 @@ function publicViewedProfile(viewer, target) {
     cosmetics: sharedPlayerCosmetics(profile.inventory.equipped),
     club: profile.club,
     relationship: relationshipBetween(viewer, target),
-    status: userStatus(target.userId),
+    status: userStatus(target.userId, viewer),
     recentMatches: publicRecentMatches(target.userId),
   };
 }
@@ -2869,7 +2980,7 @@ function userResults(userId) {
 function createSession(userId) {
   const token = crypto.randomBytes(32).toString('hex');
   const storedToken = persistentCredentialVerifier(token, 'player-session');
-  const session = { token: storedToken, userId, expiresAt: Date.now() + SESSION_TTL_MS };
+  const session = { token: storedToken, userId, expiresAt: Date.now() + SESSION_TTL_MS, authenticatedAt: Date.now() };
   sessions.set(storedToken, session);
   saveStore();
   return { ...session, token };
@@ -3726,6 +3837,13 @@ function syncRoomCountdown(room) {
 
 function addUserToRoom(room, user) {
   if (room.players.some(player => player.userId === user.userId)) return;
+  const reservedElsewhere = [...rooms.values()].find(item => (
+    item.code !== room.code
+    && ['lobby', 'playing'].includes(item.status)
+    && !item.game?.completed
+    && item.players.some(player => player.userId === user.userId)
+  ));
+  if (reservedElsewhere) throw new Error('Leave your current table before joining another room.');
   if (room.players.length >= room.maxPlayers) throw new Error('Room is full.');
   const player = safeUser(user);
   room.players.push(player);
@@ -3743,6 +3861,7 @@ function makeRoom(hostUser, {
   isPublic = false,
   availabilityFeature = null,
 } = {}) {
+  if (rooms.size >= MAX_ACTIVE_ROOMS) throw new Error('Room capacity is temporarily full. Try again shortly.');
   const options = normalizeRoomOptions({ maxPlayers, rounds, buyIn });
   const code = makeCode();
   const host = safeUser(hostUser);
@@ -3893,6 +4012,7 @@ function createRankedRoom(entries) {
   const averageMmr = Math.round(entries.reduce((sum, entry) => sum + entry.mmr, 0) / entries.length);
   const mmrSnapshot = Object.fromEntries(entries.map(entry => [entry.userId, entry.mmr]));
   const clubSnapshot = Object.fromEntries(entries.map(entry => [entry.userId, entry.clubId || null]));
+  if (rooms.size >= MAX_ACTIVE_ROOMS) return null;
   const room = makeRoom(usersForRoom[0], {
     maxPlayers: entries[0].maxPlayers,
     rounds: entries[0].rounds,
@@ -4040,6 +4160,7 @@ function applyClubContributions(room, result) {
 }
 
 function startRoomGame(room, { requireReady = false } = {}) {
+  if (room.status !== 'lobby' || room.game) throw new Error('This game has already started.');
   if (room.players.length < 2) throw new Error('At least two players are required.');
   if (requireReady && !room.players.every(player => room.ready.get(player.userId))) throw new Error('All players must be ready.');
   chargeRoomBuyIns(room);
@@ -4328,14 +4449,7 @@ app.get('/early-access', (_req, res) => sendEarlyAccessPage(res, 'early-access.h
 app.get('/early-access/confirm', (_req, res) => sendEarlyAccessPage(res, 'early-access-confirm.html', { private: true }));
 app.get('/early-access/onboarding', (_req, res) => sendEarlyAccessPage(res, 'early-access-onboarding.html', { private: true }));
 app.get('/early-access/feedback', (_req, res) => sendEarlyAccessPage(res, 'early-access-feedback.html', { private: true }));
-app.get('/early-access/preferences', (req, res) => {
-  if (req.query.token) {
-    const result = earlyAccessPreferences(earlyAccessStore, req.query.token, { env: process.env });
-    if (result.error) return res.status(404).json({ error: result.error });
-    return res.json(result);
-  }
-  return sendEarlyAccessPage(res, 'early-access-preferences.html', { private: true });
-});
+app.get('/early-access/preferences', (_req, res) => sendEarlyAccessPage(res, 'early-access-preferences.html', { private: true }));
 
 app.get('/early-access/config', (_req, res) => {
   const config = publicEarlyAccessConfig(earlyAccessStore);
@@ -4355,14 +4469,14 @@ app.get('/support/ticket', (_req, res) => {
   res.sendFile(path.join(PRODUCT_PUBLIC_DIR, 'support-ticket.html'));
 });
 
-app.get('/health', (_req, res) => res.json({ ok: true, ready: storeReady, env: PUBLIC_ENV, storage: storageStatus() }));
+app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get('/health/ready', (_req, res) => {
-  if (storeReady) return res.json({ ok: true, ready: true, storage: storageStatus() });
+  const staleWriter = postgresStore?.runtimeStatus().lastSaveErrorCode === 'STALE_STATE_WRITE';
+  if (storeReady && !staleWriter) return res.json({ ok: true, ready: true });
   return res.status(503).json({
     ok: false,
     ready: false,
-    error: storeLoadError ? 'Persistence failed to load.' : 'Persistence is still loading.',
-    storage: storageStatus(),
+    error: staleWriter ? 'This instance is fenced from persistent writes.' : storeLoadError ? 'Persistence failed to load.' : 'Persistence is still loading.',
   });
 });
 
@@ -4494,9 +4608,6 @@ app.post('/account/delete/request', accountDeletionRateLimit, async (req, res) =
   if (user && email) {
     const code = String(crypto.randomInt(100000, 1000000));
     const expiresAt = now + ACCOUNT_DELETION_CODE_TTL_MS;
-    for (let index = accountDeletionRequests.length - 1; index >= 0; index -= 1) {
-      if (accountDeletionRequests[index]?.userId === user.userId) accountDeletionRequests.splice(index, 1);
-    }
     accountDeletionRequests.push({
       requestId,
       userId: user.userId,
@@ -4534,8 +4645,7 @@ app.post('/account/delete/password', accountDeletionRateLimit, async (req, res) 
     confirmation: req.body?.confirmation,
   });
   if (verification.error) {
-    const confirmationError = String(req.body?.confirmation || '').trim().toUpperCase() !== 'DELETE';
-    return res.status(confirmationError ? 400 : 401).json({ error: verification.error });
+    return res.status(401).json({ error: 'Account verification failed.' });
   }
   const result = deletePlayerAccount(user, req, 'public-password');
   if (result.error) return res.status(409).json(result);
@@ -4555,6 +4665,9 @@ app.post('/account/delete/confirm', accountDeletionRateLimit, (req, res) => {
     || request.usedAt
     || request.expiresAt <= now
     || request.attempts >= ACCOUNT_DELETION_MAX_ATTEMPTS
+    || accountDeletionRequests
+      .filter(entry => entry.userId === request.userId)
+      .reduce((sum, entry) => sum + entry.attempts, 0) >= ACCOUNT_DELETION_MAX_ATTEMPTS
   ) {
     return res.status(401).json({ error: 'This verification request is invalid or expired.' });
   }
@@ -4604,7 +4717,7 @@ app.use('/assets/cosmetics', express.static(ASSET_UPLOAD_DIR, {
 }));
 
 app.get('/admin/api/auth/recovery/config', (_req, res) => {
-  res.json(adminEmailConfigStatus());
+  res.json({ enabled: adminRecoveryEmailEnabled() });
 });
 
 app.post('/admin/api/auth/recovery/request', async (req, res) => {
@@ -4645,7 +4758,8 @@ app.post('/admin/api/auth/mfa/verify', (req, res) => {
   const cookieToken = String(req.headers.cookie || '').match(/(?:^|;\s*)golf9_admin=([^;]+)/)?.[1];
   const headerToken = req.headers.authorization?.replace(/^Bearer\s+/i, '');
   const result = verifyAdminMfa(adminStore, req, decodeURIComponent(cookieToken || headerToken || ''), req.body?.code);
-  if (result.error) return res.status(403).json({ error: result.error });
+  if (result.changed) saveStore();
+  if (result.error) return res.status(result.status || 403).json({ error: result.error });
   saveStore();
   return res.json(result);
 });
@@ -5312,7 +5426,10 @@ app.post('/admin/api/admins/:adminId/sessions/revoke', requireAdmin(adminStore, 
 app.get('/admin/api/users', requireAdmin(adminStore, 'users:read'), (req, res) => {
   writeAudit(adminStore, req, req.admin.admin, 'admin.users.search', {}, { query: String(req.query.q || ''), archived: req.query.archived === '1' });
   saveStore();
-  return res.json({ users: adminUserList(users, rankedSeason, req.query.q, rankedConfig(), { archived: req.query.archived === '1' }) });
+  return res.json({ users: adminUserList(users, rankedSeason, req.query.q, rankedConfig(), {
+    archived: req.query.archived === '1',
+    includeDevices: adminHasPermission(req.admin.admin, 'users:deviceRead'),
+  }) });
 });
 
 function bulkAdminTargets(rawIds, finder) {
@@ -5458,7 +5575,15 @@ app.get('/admin/api/users/:userId', requireAdmin(adminStore, 'users:read'), (req
   writeAudit(adminStore, req, req.admin.admin, 'admin.users.read', { userId: user.userId });
   saveStore();
   return res.json({
-    user: adminPlayerDetail(user),
+    user: adminUserDetail(
+      user,
+      rankedSeason,
+      results,
+      adminCosmeticCatalogFor(user, rankedSeason, currentCatalog(), rankedConfig()),
+      publicEconomyCatalog(user, economyConfig()),
+      rankedConfig(),
+      { includeDevices: adminHasPermission(req.admin.admin, 'users:deviceRead') },
+    ),
   });
 });
 
@@ -5512,8 +5637,9 @@ app.post('/admin/api/users/:userId/password-reset', requireAdmin(adminStore, 'us
   if (!user) return res.status(404).json({ error: 'Player not found.' });
   const reason = cleanAdminReason(req.body?.reason);
   if (!reason) return res.status(400).json({ error: 'Reason is required.' });
-  const temporaryPassword = String(req.body?.temporaryPassword || crypto.randomBytes(6).toString('base64url'));
-  if (temporaryPassword.length < 6) return res.status(400).json({ error: 'Temporary password must be at least 6 characters.' });
+  const temporaryPassword = String(req.body?.temporaryPassword || `${crypto.randomBytes(12).toString('base64url')}Aa9!`);
+  const temporaryPasswordError = validatePlayerPassword(temporaryPassword);
+  if (temporaryPasswordError) return res.status(400).json({ error: temporaryPasswordError });
   const credentials = hashPassword(temporaryPassword);
   user.salt = credentials.salt;
   user.passwordHash = credentials.passwordHash;
@@ -5730,7 +5856,7 @@ app.post('/admin/api/users/:userId/moderation', requireAdmin(adminStore, 'modera
     adminStore.bans.push({
       banId: crypto.randomUUID(),
       type: action === 'device_ban' ? 'device_ban' : action === 'chat_mute' ? 'chat_mute' : action === 'suspension' ? 'suspension' : 'account_ban',
-      userId: action === 'device_ban' ? null : user.userId,
+      userId: user.userId,
       deviceHash: action === 'device_ban' ? deviceHash : null,
       reason,
       createdAt: Date.now(),
@@ -5745,9 +5871,11 @@ app.post('/admin/api/users/:userId/moderation', requireAdmin(adminStore, 'modera
 });
 
 app.get('/admin/api/support/tickets', requireAdmin(adminStore, 'support:read'), (req, res) => {
-  const includePii = adminHasPermission(req.admin.admin, 'earlyAccess:piiRead');
+  const includePii = adminHasPermission(req.admin.admin, 'support:piiRead');
   return res.json({
-    tickets: adminTickets(adminStore, req.query.status).map(ticket => hydrateEarlyAccessSupportTicket(ticket, { includePii })),
+    tickets: adminTickets(adminStore, req.query.status, { includePii }).map(ticket => hydrateEarlyAccessSupportTicket(ticket, {
+      includePii: includePii && adminHasPermission(req.admin.admin, 'earlyAccess:piiRead'),
+    })),
   });
 });
 
@@ -5755,9 +5883,12 @@ app.patch('/admin/api/support/tickets/:ticketId', requireAdmin(adminStore, 'supp
   const result = updateSupportTicket(adminStore, req.params.ticketId, req.body || {});
   if (result.error) return res.status(404).json({ error: result.error });
   const notificationTicket = hydrateEarlyAccessSupportTicket(result.ticket);
-  result.ticket = hydrateEarlyAccessSupportTicket(result.ticket, {
-    includePii: adminHasPermission(req.admin.admin, 'earlyAccess:piiRead'),
-  });
+  const canReadSupportPii = adminHasPermission(req.admin.admin, 'support:piiRead');
+  result.ticket = canReadSupportPii
+    ? hydrateEarlyAccessSupportTicket(result.ticket, {
+      includePii: adminHasPermission(req.admin.admin, 'earlyAccess:piiRead'),
+    })
+    : adminTickets(adminStore, null, { includePii: false }).find(ticket => ticket.ticketId === result.ticket.ticketId);
   writeAudit(adminStore, req, req.admin.admin, 'admin.support.ticket.update', { ticketId: req.params.ticketId }, req.body || {});
   saveStore();
   if (result.previousStatus !== result.ticket.status && result.ticket.publicAccessEnabled) {
@@ -5776,9 +5907,12 @@ app.post('/admin/api/support/tickets/:ticketId/notes', requireAdmin(adminStore, 
   const result = addSupportNote(adminStore, req.params.ticketId, req.admin.admin, req.body?.note, { public: isPublic });
   if (result.error) return res.status(400).json({ error: result.error });
   const notificationTicket = hydrateEarlyAccessSupportTicket(result.ticket);
-  result.ticket = hydrateEarlyAccessSupportTicket(result.ticket, {
-    includePii: adminHasPermission(req.admin.admin, 'earlyAccess:piiRead'),
-  });
+  const canReadSupportPii = adminHasPermission(req.admin.admin, 'support:piiRead');
+  result.ticket = canReadSupportPii
+    ? hydrateEarlyAccessSupportTicket(result.ticket, {
+      includePii: adminHasPermission(req.admin.admin, 'earlyAccess:piiRead'),
+    })
+    : adminTickets(adminStore, null, { includePii: false }).find(ticket => ticket.ticketId === result.ticket.ticketId);
   writeAudit(adminStore, req, req.admin.admin, 'admin.support.ticket.note', { ticketId: req.params.ticketId }, { public: isPublic });
   saveStore();
   if (isPublic && result.ticket.publicAccessEnabled) {
@@ -5814,6 +5948,18 @@ app.get('/admin/api/mail', requireAdmin(adminStore, 'mail:read'), (_req, res) =>
 app.post('/admin/api/mail', requireAdmin(adminStore, 'mail:write'), (req, res) => {
   const reason = cleanAdminReason(req.body?.reason);
   if (!reason) return res.status(400).json({ error: 'Reason is required.' });
+  const coinReward = Math.trunc(Number(req.body?.coins || req.body?.coinAmount || 0));
+  const cosmeticReward = String(req.body?.cosmeticId || '').trim();
+  if (coinReward > 0 && !adminHasPermission(req.admin.admin, 'economy:write')) {
+    return res.status(403).json({ error: 'Economy permission is required to attach coin rewards.' });
+  }
+  if (cosmeticReward && !adminHasPermission(req.admin.admin, 'cosmetics:write')) {
+    return res.status(403).json({ error: 'Cosmetics permission is required to attach cosmetic rewards.' });
+  }
+  if (String(req.body?.targetType || req.body?.mode || 'all') === 'all'
+    && !adminHasPermission(req.admin.admin, 'notifications:write')) {
+    return res.status(403).json({ error: 'Notification permission is required to message every player.' });
+  }
   const recipientResult = adminMailRecipients(req.body || {});
   if (recipientResult.error) return res.status(400).json({ error: recipientResult.error });
   const result = createSystemMail(mailEntries, recipientResult.recipients, req.admin.admin, req.body || {}, liveCatalog(catalogStore));
@@ -5839,7 +5985,20 @@ app.post('/admin/api/mail', requireAdmin(adminStore, 'mail:write'), (req, res) =
   return res.status(201).json({ ...result, pushQueued: pushed, history: adminMailLog(mailEntries) });
 });
 
-app.get('/admin/api/audit', requireAdmin(adminStore, 'audit:read'), (_req, res) => res.json({ audit: adminStore.adminAudit.slice().reverse().slice(0, 250) }));
+app.get('/admin/api/audit', requireAdmin(adminStore, 'audit:read'), (req, res) => {
+  const includePii = adminHasPermission(req.admin.admin, 'audit:piiRead');
+  const audit = adminStore.adminAudit.slice().reverse().slice(0, 250).map(entry => includePii ? entry : {
+    auditId: entry.auditId,
+    adminId: entry.adminId,
+    adminName: entry.adminName,
+    action: entry.action,
+    target: entry.target,
+    createdAt: entry.createdAt,
+    previousHash: entry.previousHash,
+    entryHash: entry.entryHash,
+  });
+  return res.json({ audit });
+});
 app.get('/admin/api/catalog/cosmetics', requireAdmin(adminStore, 'catalog:read'), (req, res) => {
   const user = req.query.userId ? findUserByIdentifier(req.query.userId) : [...users.values()][0];
   return res.json({
@@ -6191,6 +6350,7 @@ app.delete('/admin/api/clubs/:clubId/members/:userId', requireAdmin(adminStore, 
   club.members = club.members.filter(item => item.userId !== member.userId);
   const user = users.get(member.userId);
   if (user?.clubId === club.clubId) user.clubId = null;
+  io.in(`user:${member.userId}`).socketsLeave(clubSocketRoom(club.clubId));
   club.updatedAt = Date.now();
   normalizeClub(club, Date.now(), rankedSeason);
   writeAudit(adminStore, req, req.admin.admin, 'admin.clubs.member.remove', { clubId: club.clubId, userId: member.userId }, { reason, role: member.role });
@@ -6571,7 +6731,7 @@ app.post('/admin/api/invites/:inviteId/disable', requireAdmin(adminStore, 'invit
   return res.json(result);
 });
 
-app.post('/support/tickets', requireAuth, (req, res) => {
+app.post('/support/tickets', requireAuth, authenticatedSupportRateLimit, (req, res) => {
   const result = createSupportTicket(adminStore, req, req.auth.user, req.body || {});
   if (result.error) return res.status(400).json({ error: result.error });
   saveStore();
@@ -6599,8 +6759,8 @@ app.post('/support/public', publicSupportRateLimit, (req, res) => {
   );
 });
 
-app.get('/support/public/:reference', (req, res) => {
-  const result = publicSupportTicket(adminStore, req.params.reference, req.query.token, { hydrate: hydrateEarlyAccessSupportTicket });
+app.post('/support/public/:reference/access', publicSupportRateLimit, (req, res) => {
+  const result = publicSupportTicket(adminStore, req.params.reference, req.body?.accessToken, { hydrate: hydrateEarlyAccessSupportTicket });
   if (result.error) return res.status(404).json({ error: result.error });
   return res.json(result);
 });
@@ -6742,23 +6902,21 @@ app.post('/early-access/feedback', earlyAccessRateLimit, (req, res) => {
 
 app.get('/auth/config', (_req, res) => {
   res.json({
-    environment: PUBLIC_ENV,
     inviteRequired: signupInvitesRequired(),
-    apiUrl: PUBLIC_API_URL,
-    adminUrl: ADMIN_PUBLIC_URL,
     providers: socialProviderConfig(),
   });
 });
 
-app.post('/auth/signup', (req, res) => {
+app.post('/auth/signup', signupRateLimit, async (req, res) => {
   const displayNameCheck = validateNewDisplayName(req.body.displayName);
   const password = String(req.body.password || '');
   const inviteCheck = validateSignupInvite(adminStore, req.body?.inviteCode, signupInvitesRequired());
   if (inviteCheck.error) return res.status(403).json({ error: inviteCheck.error });
   if (displayNameCheck.error) return res.status(displayNameCheck.error.includes('taken') ? 409 : 400).json({ error: displayNameCheck.error });
-  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+  const passwordError = validatePlayerPassword(password);
+  if (passwordError) return res.status(400).json({ error: passwordError });
   const userId = crypto.randomUUID();
-  const { salt, passwordHash } = hashPassword(password);
+  const { salt, passwordHash } = await hashPasswordAsync(password);
   const user = normalizeUserProgression({ userId, displayName: displayNameCheck.displayName, salt, passwordHash, stats: { gamesPlayed: 0, wins: 0 } });
   const deviceHash = trackUserDevice(user, req, req.body?.deviceId);
   const moderationError = banErrorFor(adminStore, user, deviceHash);
@@ -6802,7 +6960,7 @@ app.post('/auth/login', playerLoginRateLimit, (req, res) => {
   return res.json({ token: session.token, user: safeUser(user) });
 });
 
-app.post('/auth/social/login', async (req, res) => {
+app.post('/auth/social/login', socialAuthRateLimit, async (req, res) => {
   const provider = normalizeProvider(req.body?.provider);
   if (!provider) return res.status(400).json({ error: 'Unsupported social login provider.' });
   let profile;
@@ -6854,7 +7012,10 @@ app.post('/auth/social/login', async (req, res) => {
   return res.json({ token: session.token, user: safeUser(user) });
 });
 
-app.post('/auth/social/link', requireAuth, async (req, res) => {
+app.post('/auth/social/link', requireAuth, socialAuthRateLimit, async (req, res) => {
+  if (!req.auth.session.authenticatedAt || Date.now() - req.auth.session.authenticatedAt > 5 * 60 * 1000) {
+    return res.status(403).json({ error: 'Sign in again before linking a social account.', code: 'RECENT_AUTH_REQUIRED' });
+  }
   const provider = normalizeProvider(req.body?.provider);
   if (!provider) return res.status(400).json({ error: 'Unsupported social login provider.' });
   let profile;
@@ -6949,8 +7110,29 @@ app.post('/mail/:mailId/read', requireAuth, requireFeature('inbox'), (req, res) 
   return res.json({ ...result, summary: mailSummaryForUser(mailEntries, req.auth.user.userId) });
 });
 
-app.post('/mail/:mailId/claim', requireAuth, requireFeature('inbox'), (req, res) => {
-  const result = claimMailForUser(mailEntries, req.auth.user, liveCatalog(catalogStore), String(req.params.mailId || ''));
+app.post('/mail/:mailId/claim', requireAuth, requireFeature('inbox'), async (req, res) => {
+  const mailId = String(req.params.mailId || '');
+  let result;
+  if (postgresStore) {
+    try {
+      const outcome = await postgresStore.mutateMailClaim({ userId: req.auth.user.userId, mailId }, (storedUser, storedMail) => (
+        claimMailForUser([storedMail], storedUser, liveCatalog(catalogStore), mailId)
+      ));
+      if (outcome.error) result = outcome;
+      else {
+        Object.assign(req.auth.user, outcome.user);
+        const mailIndex = mailEntries.findIndex(entry => entry.mailId === mailId);
+        if (mailIndex >= 0) mailEntries[mailIndex] = outcome.mail;
+        result = outcome.result;
+      }
+    } catch (error) {
+      if (error?.code === 'STALE_STATE_WRITE') return res.status(503).json({ error: 'This server instance is no longer the active writer. Retry shortly.' });
+      console.error('Mail reward claim failed:', String(error?.code || 'DATABASE_CLAIM_FAILED'));
+      return res.status(503).json({ error: 'Mail rewards are temporarily unavailable. Try again shortly.' });
+    }
+  } else {
+    result = claimMailForUser(mailEntries, req.auth.user, liveCatalog(catalogStore), mailId);
+  }
   if (result.error) return res.status(result.status || 400).json({ error: result.error });
   saveStore();
   return res.json({
@@ -6968,7 +7150,7 @@ app.delete('/mail/:mailId', requireAuth, requireFeature('inbox'), (req, res) => 
   return res.json({ ...result, summary: mailSummaryForUser(mailEntries, req.auth.user.userId) });
 });
 
-app.post('/mail/feedback', requireAuth, (req, res) => {
+app.post('/mail/feedback', requireAuth, authenticatedSupportRateLimit, (req, res) => {
   const payload = cleanFeedbackPayload(req.body || {});
   if (payload.error) return res.status(400).json({ error: payload.error });
   const result = createSupportTicket(adminStore, req, req.auth.user, payload);
@@ -6981,6 +7163,11 @@ app.post('/mail/feedback', requireAuth, (req, res) => {
 app.post('/push/register', requireAuth, (req, res) => {
   const result = upsertPushToken(req.auth.user, req.body || {});
   if (result.error) return res.status(400).json({ error: result.error });
+  for (const user of users.values()) {
+    if (user.userId === req.auth.user.userId) continue;
+    const push = normalizePushNotifications(user);
+    push.tokens = push.tokens.filter(item => item.token !== result.token);
+  }
   saveStore();
   return res.json({ ok: true, pushTokenCount: result.pushTokenCount });
 });
@@ -7354,6 +7541,7 @@ app.delete('/clubs/:clubId/members/:userId', requireAuth, requireFeature('clubs.
   if (!actor || !target) return res.status(404).json({ error: 'Member not found.' });
   if (!canManageMember(actor.role, target.role, target.role)) return res.status(403).json({ error: 'You cannot remove that member.' });
   removeUserFromClub(club, target.userId);
+  io.in(`user:${target.userId}`).socketsLeave(clubSocketRoom(club.clubId));
   club.updatedAt = Date.now();
   saveStore();
   emitClubUpdate(club.clubId);
@@ -7622,24 +7810,22 @@ app.post('/cosmetics/equip', requireAuth, requireFeature('profile'), (req, res) 
 
 app.get('/results/me', requireAuth, (req, res) => res.json({ results: userResults(req.auth.user.userId) }));
 
-app.post('/results/local', requireAuth, requireFeature(req => req.body?.mode === 'solo' ? 'offline.solo_ai' : 'offline.pass_play'), (req, res) => {
+app.post('/results/local', requireAuth, localResultRateLimit, requireFeature(req => req.body?.mode === 'solo' ? 'offline.solo_ai' : 'offline.pass_play'), (req, res) => {
   const clientResultId = String(req.body?.clientResultId || '').trim();
-  if (clientResultId && !/^[A-Za-z0-9_-]{8,80}$/.test(clientResultId)) {
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(clientResultId)) {
     return res.status(400).json({ error: 'Invalid local result identifier.' });
   }
-  if (clientResultId) {
-    const existing = results.find(result => (
-      result.clientResultId === clientResultId
-      && result.players?.[0]?.userId === req.auth.user.userId
-    ));
-    if (existing) {
-      return res.json({
-        result: existing,
-        progression: existing.players?.[0]?.progression || null,
-        user: safeUser(req.auth.user),
-        duplicate: true,
-      });
-    }
+  const existing = results.find(result => (
+    result.clientResultId === clientResultId
+    && result.players?.[0]?.userId === req.auth.user.userId
+  ));
+  if (existing) {
+    return res.json({
+      result: existing,
+      progression: existing.players?.[0]?.progression || null,
+      user: safeUser(req.auth.user),
+      duplicate: true,
+    });
   }
   const mode = req.body?.mode === 'solo' ? 'solo' : 'passplay';
   const totalRounds = Number(req.body?.totalRounds) === 5 ? 5 : 9;
@@ -7651,35 +7837,49 @@ app.post('/results/local', requireAuth, requireFeature(req => req.body?.mode ===
     ? Math.floor(submittedCompletedAt)
     : now;
   const submittedPlayers = Array.isArray(req.body?.players) ? req.body.players : [];
+  const localScore = value => {
+    const numeric = Number(value);
+    return Number.isSafeInteger(numeric) && numeric >= -100_000 && numeric <= 100_000 ? numeric : null;
+  };
+  if (submittedPlayers.length > 4) return res.status(400).json({ error: 'Local results support at most four players.' });
+  if (submittedPlayers.some(player => localScore(player?.total) === null)) {
+    return res.status(400).json({ error: 'Local result scores are invalid.' });
+  }
+  if (!submittedPlayers.length && localScore(req.body?.total) === null) {
+    return res.status(400).json({ error: 'Local result score is invalid.' });
+  }
   const normalizedPlayers = submittedPlayers.length
     ? submittedPlayers.slice(0, 4).map((player, index) => ({
       userId: index === 0 ? req.auth.user.userId : `local-${index + 1}`,
       displayName: index === 0 ? req.auth.user.displayName : String(player.displayName || `Player ${index + 1}`).slice(0, 32),
-      total: Number(player.total ?? 0) || 0,
+      total: localScore(player.total),
       won: Boolean(player.won),
     }))
     : [{
       userId: req.auth.user.userId,
       displayName: req.auth.user.displayName,
-      total: Number(req.body?.total ?? 0) || 0,
+      total: localScore(req.body?.total),
       won: Boolean(req.body?.won),
     }];
   const winningTotal = Math.min(...normalizedPlayers.map(player => player.total));
   for (const player of normalizedPlayers) player.won = player.total === winningTotal;
   const accountPlayer = normalizedPlayers[0];
-  const progression = applyMatchProgression(req.auth.user, {
-    mode,
-    total: accountPlayer.total,
-    won: accountPlayer.won,
-    totalRounds,
-    roundScores: Array.isArray(req.body?.roundScores) ? req.body.roundScores.filter(Number.isFinite) : [],
-    columnClears: Number(req.body?.columnClears ?? 0) || 0,
-  });
+  normalizeUserRecord(req.auth.user);
+  const progression = {
+    xpGained: 0,
+    coinsGained: 0,
+    levelBefore: req.auth.user.progression.level,
+    levelAfter: req.auth.user.progression.level,
+    totalXp: req.auth.user.progression.totalXp,
+    achievementsUnlocked: [],
+    challengesCompleted: [],
+    unverifiedLocal: true,
+  };
   accountPlayer.progression = progression;
 
   const result = {
     resultId: crypto.randomUUID(),
-    clientResultId: clientResultId || null,
+    clientResultId,
     completedAt,
     roomCode: null,
     mode,
@@ -7688,6 +7888,14 @@ app.post('/results/local', requireAuth, requireFeature(req => req.body?.mode ===
     players: normalizedPlayers,
   };
   results.push(result);
+  let localResultsForUser = results.filter(item => item.mode !== 'online' && item.players?.[0]?.userId === req.auth.user.userId).length;
+  for (let index = 0; localResultsForUser > 250 && index < results.length;) {
+    const item = results[index];
+    if (item.mode !== 'online' && item.players?.[0]?.userId === req.auth.user.userId) {
+      results.splice(index, 1);
+      localResultsForUser -= 1;
+    } else index += 1;
+  }
   saveStore();
   return res.json({ result, progression, user: safeUser(req.auth.user) });
 });
@@ -7696,12 +7904,20 @@ app.get('/rooms/active', requireAuth, (req, res) => res.json(activeRoomPayloadFo
 
 app.post('/rooms', requireAuth, requireFeature('casual.create_room'), (req, res) => {
   if (blockActiveMatch(req, res)) return;
-  const room = makeRoom(req.auth.user, {
-    ...(req.body || {}),
-    isPublic: req.body?.isPublic !== false,
-    availabilityFeature: 'casual.create_room',
-  });
-  return res.json({ room: roomSummary(room) });
+  try {
+    const options = normalizeRoomOptions(req.body || {});
+    const room = makeRoom(req.auth.user, {
+      maxPlayers: options.maxPlayers,
+      rounds: options.rounds,
+      isPublic: req.body?.isPublic !== false,
+      matchType: 'casual',
+      buyIn: 0,
+      availabilityFeature: 'casual.create_room',
+    });
+    return res.json({ room: roomSummary(room) });
+  } catch (error) {
+    return res.status(503).json({ error: error.message });
+  }
 });
 
 app.get('/rooms/open', requireAuth, requireFeature(req => req.query.matchType === 'wager' ? 'casual.wagers' : 'casual'), (req, res) => {
@@ -7728,7 +7944,6 @@ app.get('/rooms/open', requireAuth, requireFeature(req => req.query.matchType ==
 });
 
 app.post('/rooms/quick-play', requireAuth, requireFeature('casual.auto_match'), (req, res) => {
-  if (blockActiveMatch(req, res)) return;
   const options = normalizeRoomOptions(req.body || {});
   const existingForUser = [...rooms.values()].find(room =>
     room.status === 'lobby'
@@ -7738,6 +7953,7 @@ app.post('/rooms/quick-play', requireAuth, requireFeature('casual.auto_match'), 
     && room.rounds === options.rounds
     && room.players.some(player => player.userId === req.auth.user.userId)
   );
+  if (!existingForUser && blockActiveMatch(req, res)) return;
   let room = existingForUser || [...rooms.values()].find(item =>
     item.status === 'lobby'
     && item.isPublic
@@ -7748,7 +7964,13 @@ app.post('/rooms/quick-play', requireAuth, requireFeature('casual.auto_match'), 
     && !item.players.some(player => player.userId === req.auth.user.userId)
   );
 
-  if (!room) room = makeRoom(req.auth.user, { ...options, isPublic: true, availabilityFeature: 'casual.auto_match' });
+  if (!room) {
+    try {
+      room = makeRoom(req.auth.user, { ...options, isPublic: true, availabilityFeature: 'casual.auto_match' });
+    } catch (error) {
+      return res.status(503).json({ error: error.message });
+    }
+  }
   else {
     try {
       addUserToRoom(room, req.auth.user);
@@ -7790,13 +8012,19 @@ app.post('/rooms/wager-play', requireAuth, requireFeature('casual.wagers'), (req
     && !item.players.some(player => player.userId === req.auth.user.userId)
   );
 
-  if (!room) room = makeRoom(req.auth.user, {
-    ...options,
-    matchType: 'wager',
-    buyIn: options.buyIn,
-    isPublic: true,
-    availabilityFeature: 'casual.wagers',
-  });
+  if (!room) {
+    try {
+      room = makeRoom(req.auth.user, {
+        ...options,
+        matchType: 'wager',
+        buyIn: options.buyIn,
+        isPublic: true,
+        availabilityFeature: 'casual.wagers',
+      });
+    } catch (error) {
+      return res.status(503).json({ error: error.message });
+    }
+  }
   else {
     try {
       addUserToRoom(room, req.auth.user);
@@ -7812,11 +8040,20 @@ app.post('/rooms/wager-play', requireAuth, requireFeature('casual.wagers'), (req
 });
 
 app.post('/rooms/:code/join', requireAuth, requireFeature('casual.join_room'), (req, res) => {
-  if (blockActiveMatch(req, res)) return;
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found.' });
+  if (!room.players.some(player => player.userId === req.auth.user.userId) && blockActiveMatch(req, res)) return;
   if (blockRoomFeature(room, req.auth.user.userId, res)) return;
   if (room.status !== 'lobby') return res.status(409).json({ error: 'Game already started.' });
+  normalizeSocial(req.auth.user);
+  const liveInvite = req.auth.user.social.roomInvites.find(invite => (
+    invite.roomCode === room.code
+    && invite.expiresAt > Date.now()
+    && room.players.some(player => player.userId === invite.fromUserId)
+  ));
+  if (!room.isPublic && !room.players.some(player => player.userId === req.auth.user.userId) && !liveInvite) {
+    return res.status(403).json({ error: 'A current invitation is required for this private room.' });
+  }
   if (room.economy?.buyIn) {
     const error = buyInError(req.auth.user, room.economy.buyIn);
     if (error) return res.status(402).json({ error, buyIn: room.economy.buyIn, balance: req.auth.user.currency.coins });
@@ -7879,7 +8116,7 @@ app.post('/rooms/invites/:inviteId/accept', requireAuth, requireFeature('casual.
   if (!invite) return res.status(404).json({ error: 'Invite not found.' });
   const room = rooms.get(invite.roomCode);
   const inviter = users.get(invite.fromUserId);
-  if (!visiblePlayer(inviter)) {
+  if (!visiblePlayer(inviter) || invite.expiresAt <= Date.now()) {
     req.auth.user.social.roomInvites = req.auth.user.social.roomInvites.filter(item => item.id !== invite.id);
     saveStore();
     return res.status(404).json({ error: 'Invite is no longer available.' });
@@ -7888,6 +8125,11 @@ app.post('/rooms/invites/:inviteId/accept', requireAuth, requireFeature('casual.
     req.auth.user.social.roomInvites = req.auth.user.social.roomInvites.filter(item => item.id !== invite.id);
     saveStore();
     return res.status(404).json({ error: 'Room is no longer available.' });
+  }
+  if (!room.players.some(player => player.userId === invite.fromUserId)) {
+    req.auth.user.social.roomInvites = req.auth.user.social.roomInvites.filter(item => item.id !== invite.id);
+    saveStore();
+    return res.status(404).json({ error: 'Invite is no longer available.' });
   }
   if (blockRoomFeature(room, req.auth.user.userId, res)) return;
   if (room.economy?.buyIn) {
@@ -7943,8 +8185,21 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
   const connectedUserId = socket.auth.user.userId;
+  let socketJoinWindowStartedAt = 0;
+  let socketJoinAttempts = 0;
   const connectedReleasePolicy = releasePolicyForClient(socket.releaseClient);
   socket.emit('release-policy:update', connectedReleasePolicy);
+  socket.use((packet, next) => {
+    const freshAuth = authenticateToken(socket.handshake.auth?.token);
+    if (!freshAuth || freshAuth.user.userId !== connectedUserId) return next(new Error('Authentication required.'));
+    const rawDeviceId = socket.handshake.auth?.deviceId || socket.handshake.headers?.['x-golf9-device-id'] || '';
+    const deviceHash = rawDeviceId ? persistentCredentialVerifier(rawDeviceId, 'device-risk-signal') : null;
+    if (banErrorFor(adminStore, freshAuth.user, deviceHash)) return next(new Error('Authentication required.'));
+    socket.auth = freshAuth;
+    if (packet.length === 1 || typeof packet[1] === 'function') packet.splice(1, 0, {});
+    else if (!packet[1] || typeof packet[1] !== 'object' || Array.isArray(packet[1])) packet[1] = {};
+    return next();
+  });
   socket.use(([eventName, payload], next) => {
     const policy = releasePolicyForClient(socket.releaseClient);
     if (!policy || policy.status !== 'required') return next();
@@ -7984,7 +8239,17 @@ io.on('connection', (socket) => {
     emitClubPresence(connectedClub.clubId);
   }
 
-  socket.on('room:join', ({ code }, cb = () => {}) => {
+  const safeSocketPayload = value => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+
+  socket.on('room:join', (rawPayload, cb = () => {}) => {
+    const { code } = safeSocketPayload(rawPayload);
+    const requestAt = Date.now();
+    if (requestAt - socketJoinWindowStartedAt > 60_000) {
+      socketJoinWindowStartedAt = requestAt;
+      socketJoinAttempts = 0;
+    }
+    socketJoinAttempts += 1;
+    if (socketJoinAttempts > 20) return cb({ error: 'Too many room join attempts. Try again shortly.' });
     const room = rooms.get(String(code || '').toUpperCase());
     if (!room) return cb({ error: 'Room not found.' });
     const userId = socket.auth.user.userId;
@@ -8008,7 +8273,8 @@ io.on('connection', (socket) => {
     return cb({ room: roomSummary(room), game: room.game ? gameViewFor(room, userId) : null, chat: publicChatHistory(room) });
   });
 
-  socket.on('room:ready', ({ code }, cb = () => {}) => {
+  socket.on('room:ready', (rawPayload, cb = () => {}) => {
+    const { code } = safeSocketPayload(rawPayload);
     const room = rooms.get(String(code || '').toUpperCase());
     const userId = socket.auth.user.userId;
     if (!room || !room.players.some(player => player.userId === userId)) return cb({ error: 'Room not found.' });
@@ -8021,11 +8287,13 @@ io.on('connection', (socket) => {
     return cb({ room: roomSummary(room) });
   });
 
-  socket.on('room:start', ({ code }, cb = () => {}) => {
+  socket.on('room:start', (rawPayload, cb = () => {}) => {
+    const { code } = safeSocketPayload(rawPayload);
     const room = rooms.get(String(code || '').toUpperCase());
     const userId = socket.auth.user.userId;
     if (!room) return cb({ error: 'Room not found.' });
     if (room.hostUserId !== userId) return cb({ error: 'Only the host can start.' });
+    if (room.status !== 'lobby' || room.game) return cb({ error: 'Game already started.' });
     const unavailable = socketFeatureUnavailable(roomAvailabilityFeature(room), userId);
     if (unavailable) return cb(unavailable);
     try {
@@ -8037,10 +8305,12 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('room:leave', ({ code }, cb = () => {}) => {
+  socket.on('room:leave', (rawPayload, cb = () => {}) => {
+    const { code } = safeSocketPayload(rawPayload);
     const room = rooms.get(String(code || '').toUpperCase());
     const userId = socket.auth.user.userId;
     if (!room) return cb({ ok: true });
+    if (!room.players.some(player => player.userId === userId)) return cb({ error: 'You are not a member of this room.' });
     if (room.status === 'playing' && room.game && !room.game.completed) {
       return cb({
         error: 'Finish your active match before leaving the table.',
@@ -8064,14 +8334,16 @@ io.on('connection', (socket) => {
     return cb({ ok: true });
   });
 
-  socket.on('game:forfeit', ({ code }, cb = () => {}) => {
+  socket.on('game:forfeit', (rawPayload, cb = () => {}) => {
+    const { code } = safeSocketPayload(rawPayload);
     const room = rooms.get(String(code || '').toUpperCase());
     const userId = socket.auth.user.userId;
     if (!room || !room.players.some(player => player.userId === userId)) return cb({ error: 'Game not found.' });
     return cb(forfeitOnlineMatch(room, userId));
   });
 
-  socket.on('presence:state', ({ code, foreground }, cb = () => {}) => {
+  socket.on('presence:state', (rawPayload, cb = () => {}) => {
+    const { code, foreground } = safeSocketPayload(rawPayload);
     const room = rooms.get(String(code || '').toUpperCase());
     const userId = socket.auth.user.userId;
     if (!room || !room.players.some(player => player.userId === userId)) return cb({ error: 'Room not found.' });
@@ -8084,7 +8356,8 @@ io.on('connection', (socket) => {
     return cb({ ok: true });
   });
 
-  socket.on('chat:send', ({ code, type = 'text', text, targetUserId = null }, cb = () => {}) => {
+  socket.on('chat:send', (rawPayload, cb = () => {}) => {
+    const { code, type = 'text', text, targetUserId = null } = safeSocketPayload(rawPayload);
     const room = rooms.get(String(code || '').toUpperCase());
     const userId = socket.auth.user.userId;
     if (!room || !room.players.some(player => player.userId === userId)) return cb({ error: 'Room not found.' });
@@ -8109,7 +8382,8 @@ io.on('connection', (socket) => {
     return cb({ ok: true, message: result.message });
   });
 
-  socket.on('club:join', ({ clubId }, cb = () => {}) => {
+  socket.on('club:join', (rawPayload, cb = () => {}) => {
+    const { clubId } = safeSocketPayload(rawPayload);
     const club = clubById(clubId || socket.auth.user.clubId);
     const userId = socket.auth.user.userId;
     const unavailable = socketFeatureUnavailable('clubs', userId);
@@ -8126,7 +8400,8 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('club:presence:state', ({ foreground }, cb = () => {}) => {
+  socket.on('club:presence:state', (rawPayload, cb = () => {}) => {
+    const { foreground } = safeSocketPayload(rawPayload);
     const user = socket.auth.user;
     const unavailable = socketFeatureUnavailable('clubs', user.userId);
     if (unavailable) return cb(unavailable);
@@ -8141,7 +8416,8 @@ io.on('connection', (socket) => {
     return cb({ ok: true });
   });
 
-  socket.on('club:chat:send', ({ clubId, type = 'text', text }, cb = () => {}) => {
+  socket.on('club:chat:send', (rawPayload, cb = () => {}) => {
+    const { clubId, type = 'text', text } = safeSocketPayload(rawPayload);
     const club = clubById(clubId || socket.auth.user.clubId);
     const user = socket.auth.user;
     const unavailable = socketFeatureUnavailable('clubs.chat', user.userId);
@@ -8160,7 +8436,8 @@ io.on('connection', (socket) => {
     return cb({ ok: true, message: result.message });
   });
 
-  socket.on('game:intent', ({ code, actionId, type, payload }, cb = () => {}) => {
+  socket.on('game:intent', (rawPayload, cb = () => {}) => {
+    const { code, actionId, type, payload } = safeSocketPayload(rawPayload);
     const room = rooms.get(String(code || '').toUpperCase());
     const userId = socket.auth.user.userId;
     if (!room || !room.game) return cb({ error: 'Game not found.' });
@@ -8273,7 +8550,8 @@ io.on('connection', (socket) => {
     return cb({ ok: true, drawn });
   });
 
-  socket.on('game:take-control', ({ code }, cb = () => {}) => {
+  socket.on('game:take-control', (rawPayload, cb = () => {}) => {
+    const { code } = safeSocketPayload(rawPayload);
     const room = rooms.get(String(code || '').toUpperCase());
     const userId = socket.auth.user.userId;
     if (!room?.game || room.game.completed || room.status !== 'playing') return cb({ error: 'Game not found.' });

@@ -102,6 +102,18 @@ test('expired reward mail cannot be claimed', () => {
   assert.equal(account.currency.coins, 0);
 });
 
+test('system mail rejects economy grants above the bounded reward limit', () => {
+  const entries = [];
+  const result = createSystemMail(entries, [player()], { displayName: 'Admin' }, {
+    title: 'Oversized grant',
+    message: 'This reward exceeds the administrative safety limit.',
+    coins: 100_001,
+  });
+
+  assert.match(result.error, /cannot exceed 100000/i);
+  assert.equal(entries.length, 0);
+});
+
 test('mail can be marked read and deleted without removing history', () => {
   const entries = [];
   createSystemMail(entries, [player()], { displayName: 'Admin' }, {

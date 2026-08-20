@@ -51,6 +51,22 @@ test('xp curve uses roadmap level bands', () => {
   assert.equal(xpNeededForLevel(50), 5750);
 });
 
+test('non-finite and extreme persisted progression values normalize without unbounded work', () => {
+  const corrupted = user({
+    progression: { totalXp: Number.POSITIVE_INFINITY, level: Number.MAX_SAFE_INTEGER },
+    currency: { coins: Number.POSITIVE_INFINITY, lifetimeCoins: Number.MAX_SAFE_INTEGER },
+    statistics: { gamesPlayed: Number.POSITIVE_INFINITY, wins: Number.MAX_SAFE_INTEGER },
+  });
+
+  normalizeUserProgression(corrupted);
+
+  assert.equal(Number.isFinite(corrupted.progression.totalXp), true);
+  assert.equal(corrupted.progression.level <= 100, true);
+  assert.equal(Number.isFinite(corrupted.currency.coins), true);
+  assert.equal(corrupted.currency.coins <= 1_000_000_000, true);
+  assert.equal(Number.isFinite(corrupted.statistics.gamesPlayed), true);
+});
+
 test('match progression grants xp, currency, stats, and achievements once', () => {
   const account = user();
   const first = applyMatchProgression(account, {

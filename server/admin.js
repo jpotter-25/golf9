@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { publicEconomyCatalog } from './economy.js';
+import { decryptEarlyAccessContact, encryptEarlyAccessContact } from './earlyAccess.js';
 import { publicCosmeticCatalog, publicUserProfile } from './progression.js';
 import {
   buildTotpUri,
@@ -7,12 +8,13 @@ import {
   encryptMfaSecret,
   generateRecoveryCodes,
   generateTotpSecret,
+  matchingTotpCounter,
   normalizeRecoveryCode,
   totpQrDataUrl,
-  verifyTotp,
 } from './adminMfa.js';
 import {
   credentialVerifierMatches,
+  isPublicHostedEnvironment,
   normalizeCredentialVerifier,
   persistentCredentialVerifier,
 } from './securityTokens.js';
@@ -20,11 +22,18 @@ import {
 const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 8;
 const ADMIN_MFA_TTL_MS = 1000 * 60 * 5;
 const ADMIN_MFA_ENROLLMENT_TTL_MS = 1000 * 60 * 10;
+const ADMIN_PRE_MFA_SESSION_TTL_MS = 1000 * 60 * 10;
+const ADMIN_MFA_FAILURE_THRESHOLD = 8;
+const ADMIN_MFA_LOCK_MS = 1000 * 60 * 15;
 const ADMIN_LOGIN_LOCK_THRESHOLD = 5;
 const ADMIN_LOGIN_LOCK_MS = 1000 * 60 * 15;
 const ADMIN_RECOVERY_TTL_MS = 1000 * 60 * 15;
 const ADMIN_RECOVERY_MAX_ATTEMPTS = 5;
+const ADMIN_RECOVERY_COOLDOWN_MS = 1000 * 60 * 10;
 const SUPPORT_TICKET_MAX_LENGTH = 3000;
+const SUPPORT_ACTIVE_TICKET_LIMIT_PER_USER = 25;
+const SUPPORT_TOTAL_TICKET_LIMIT_PER_USER = 250;
+const SUPPORT_ACCESS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const ADMIN_REASON_MAX_LENGTH = 240;
 const ADMIN_PASSWORD_MIN_LENGTH = 12;
 
@@ -37,6 +46,9 @@ const ROLE_PERMISSIONS = {
     'invites:write',
     'support:read',
     'support:write',
+    'support:piiRead',
+    'users:deviceRead',
+    'audit:piiRead',
     'economy:write',
     'cosmetics:write',
     'moderation:write',
@@ -60,7 +72,7 @@ const ROLE_PERMISSIONS = {
     'earlyAccess:export',
     'earlyAccess:send',
   ],
-  support: ['users:read', 'invites:read', 'support:read', 'support:write', 'catalog:read', 'mail:read', 'mail:write', 'availability:read', 'metrics:read', 'earlyAccess:read', 'earlyAccess:write'],
+  support: ['users:read', 'invites:read', 'support:read', 'support:write', 'support:piiRead', 'catalog:read', 'mail:read', 'mail:write', 'availability:read', 'metrics:read', 'earlyAccess:read', 'earlyAccess:write'],
   moderator: ['users:read', 'support:read', 'moderation:write', 'audit:read', 'catalog:read', 'availability:read', 'metrics:read'],
   economy: ['users:read', 'economy:write', 'cosmetics:write', 'catalog:read', 'catalog:write', 'competitive:read', 'mail:read', 'mail:write', 'availability:read', 'metrics:read'],
   readOnly: ['users:read', 'support:read', 'audit:read', 'catalog:read', 'competitive:read', 'mail:read', 'availability:read', 'metrics:read'],
@@ -124,7 +136,7 @@ function safeHashEqual(left, right) {
 }
 
 function recoveryMfaHash(adminId, code) {
-  return hashValue(`${adminId}:${normalizeRecoveryCode(code)}`);
+  return persistentCredentialVerifier(normalizeRecoveryCode(code), `admin-mfa-recovery:${adminId}`);
 }
 
 function resetAuthenticator(admin) {
@@ -135,6 +147,33 @@ function resetAuthenticator(admin) {
   admin.mfaRecoveryCodeHashes = [];
   admin.mfaEnrolledAt = null;
   admin.mfaMethod = admin.mfaEnabled === false ? 'none' : 'pending';
+}
+
+function supportPrivatePayload(ticket) {
+  const protectedPayload = decryptEarlyAccessContact(ticket?.protectedPayloadEncrypted, process.env) || {};
+  return {
+    displayName: safeString(protectedPayload.displayName ?? ticket?.displayName, 40),
+    contactName: safeString(protectedPayload.contactName ?? ticket?.contactName ?? ticket?.displayName, 80),
+    contactEmail: normalizeEmail(protectedPayload.contactEmail ?? ticket?.contactEmail),
+    website: safeString(protectedPayload.website ?? ticket?.website, 160),
+    subject: safeString(protectedPayload.subject ?? ticket?.subject ?? 'Player support request', 100),
+    message: safeString(protectedPayload.message ?? ticket?.message, SUPPORT_TICKET_MAX_LENGTH),
+    notes: Array.isArray(protectedPayload.notes)
+      ? protectedPayload.notes
+      : (Array.isArray(ticket?.notes) ? ticket.notes : []),
+  };
+}
+
+function protectSupportPrivatePayload(ticket, payload) {
+  ticket.protectedPayloadEncrypted = encryptEarlyAccessContact(payload, process.env);
+  ticket.displayName = '';
+  ticket.contactName = '';
+  ticket.contactEmail = '';
+  ticket.website = '';
+  ticket.subject = 'Protected support request';
+  ticket.message = '';
+  ticket.notes = [];
+  return ticket;
 }
 
 function rolePermissions(role) {
@@ -170,6 +209,15 @@ function publicAdmin(admin) {
   };
 }
 
+function publicPreMfaAdmin(admin) {
+  return {
+    displayName: admin.displayName,
+    mfaEnabled: admin.mfaEnabled !== false,
+    mfaMethod: admin.mfaEnabled === false ? 'none' : admin.mfaMethod,
+    authenticatorConfigured: admin.mfaMethod === 'totp' && !!admin.mfaSecretEncrypted,
+  };
+}
+
 function ensureArray(store, key) {
   if (!Array.isArray(store[key])) store[key] = [];
   return store[key];
@@ -187,9 +235,13 @@ export function normalizeAdminStore(store) {
   store.admins = store.admins
     .filter(admin => admin?.adminId && admin?.displayName)
     .map(admin => {
+      const adminId = String(admin.adminId);
       const mfaEnabled = admin.mfaEnabled !== false;
       const mfaSecretEncrypted = String(admin.mfaSecretEncrypted || '');
-      const mfaSecretHash = String(admin.mfaSecretHash || '');
+      const rawMfaSecretHash = String(admin.mfaSecretHash || '');
+      const mfaSecretHash = rawMfaSecretHash
+        ? normalizeCredentialVerifier(rawMfaSecretHash, `admin-legacy-mfa:${adminId}`)
+        : '';
       const inferredMfaMethod = !mfaEnabled
         ? 'none'
         : mfaSecretEncrypted
@@ -198,7 +250,7 @@ export function normalizeAdminStore(store) {
             ? 'legacy'
             : 'pending';
       return {
-        adminId: String(admin.adminId),
+        adminId,
         displayName: safeString(admin.displayName, 40),
         email: normalizeEmail(admin.email),
         role: VALID_ROLES.includes(admin.role) ? admin.role : 'readOnly',
@@ -209,13 +261,19 @@ export function normalizeAdminStore(store) {
         mfaPendingSecretEncrypted: String(admin.mfaPendingSecretEncrypted || ''),
         mfaPendingCreatedAt: Number(admin.mfaPendingCreatedAt) || null,
         mfaRecoveryCodeHashes: Array.isArray(admin.mfaRecoveryCodeHashes)
-          ? admin.mfaRecoveryCodeHashes.map(value => String(value)).filter(Boolean).slice(0, 20)
+          ? admin.mfaRecoveryCodeHashes.map(value => String(value)).filter(value => value.startsWith('v1:')).slice(0, 20)
           : [],
         mfaEnrolledAt: Number(admin.mfaEnrolledAt) || null,
         mfaMethod: ['none', 'pending', 'legacy', 'totp'].includes(admin.mfaMethod)
           ? admin.mfaMethod
           : inferredMfaMethod,
         mfaEnabled,
+        mfaFailedAttempts: Math.max(0, Number(admin.mfaFailedAttempts) || 0),
+        mfaLockedUntil: Number(admin.mfaLockedUntil) || null,
+        lastAcceptedTotpCounter: Number.isSafeInteger(admin.lastAcceptedTotpCounter) ? admin.lastAcceptedTotpCounter : null,
+        authVersion: Math.max(1, Number(admin.authVersion) || 1),
+        recoveryFailedAttempts: Math.max(0, Number(admin.recoveryFailedAttempts) || 0),
+        recoveryLockedUntil: Number(admin.recoveryLockedUntil) || null,
         createdAt: Number(admin.createdAt) || now(),
         lastLoginAt: Number(admin.lastLoginAt) || null,
         disabledAt: Number(admin.disabledAt) || null,
@@ -234,14 +292,15 @@ export function normalizeAdminStore(store) {
       expiresAt: Number(session.expiresAt),
       mfaVerifiedAt: Number(session.mfaVerifiedAt) || null,
       mfaEnrollmentRequired: !!session.mfaEnrollmentRequired,
+      challengeExpiresAt: Number(session.challengeExpiresAt) || Number(session.createdAt) + ADMIN_PRE_MFA_SESSION_TTL_MS,
+      authVersion: Math.max(1, Number(session.authVersion) || 1),
       createdAt: Number(session.createdAt) || now(),
       ipHash: String(session.ipHash || ''),
       userAgent: safeString(session.userAgent, 180),
     }));
 
   store.adminAudit = store.adminAudit
-    .filter(entry => entry?.auditId)
-    .slice(-2000);
+    .filter(entry => entry?.auditId);
 
   store.adminRecoveryRequests = store.adminRecoveryRequests
     .filter(request => request?.requestId && request?.adminId)
@@ -274,6 +333,8 @@ export function normalizeAdminStore(store) {
       website: safeString(ticket.website, 160),
       publicReference: safeString(ticket.publicReference, 24).toUpperCase() || null,
       publicAccessTokenHash: ticket.publicAccessTokenHash ? String(ticket.publicAccessTokenHash) : null,
+      publicAccessExpiresAt: Number(ticket.publicAccessExpiresAt) || null,
+      publicAccessRevokedAt: Number(ticket.publicAccessRevokedAt) || null,
       category: safeString(ticket.category || 'general', 40),
       status: VALID_TICKET_STATUSES.has(ticket.status) ? ticket.status : 'open',
       subject: safeString(ticket.subject || 'Player support request', 100),
@@ -295,6 +356,13 @@ export function normalizeAdminStore(store) {
         createdAt: Number(note?.createdAt) || now(),
       })).filter(note => note.text) : [],
     }));
+
+  for (const ticket of store.supportTickets) {
+    const payload = supportPrivatePayload(ticket);
+    if (!ticket.protectedPayloadEncrypted || ticket.notes.length > 0 || ticket.message || ticket.contactEmail || ticket.contactName || ticket.displayName || ticket.website) {
+      protectSupportPrivatePayload(ticket, payload);
+    }
+  }
 
   store.bans = store.bans
     .filter(ban => ban?.banId)
@@ -473,7 +541,7 @@ export function ensureBootstrapAdmin(store, env = process.env) {
   const username = safeString(env.ADMIN_BOOTSTRAP_USER || '', 40);
   const password = String(env.ADMIN_BOOTSTRAP_PASSWORD || '');
   const email = normalizeEmail(env.ADMIN_BOOTSTRAP_EMAIL);
-  const mfaCode = String(env.ADMIN_BOOTSTRAP_MFA_CODE || '000000');
+  const mfaCode = String(env.ADMIN_BOOTSTRAP_MFA_CODE || '').trim();
   if (store.admins.length) {
     if (!email) return false;
     const target = store.admins.find(admin => admin.adminId === 'admin-owner')
@@ -483,6 +551,10 @@ export function ensureBootstrapAdmin(store, env = process.env) {
     return true;
   }
   if (!username || !password) return false;
+  const passwordError = validateAdminPassword(password);
+  if (passwordError) throw new Error(`ADMIN_BOOTSTRAP_PASSWORD is invalid: ${passwordError}`);
+  if (mfaCode && !/^\d{6}$/.test(mfaCode)) throw new Error('ADMIN_BOOTSTRAP_MFA_CODE must be exactly six digits when configured.');
+  if (isPublicHostedEnvironment(env) && mfaCode === '000000') throw new Error('ADMIN_BOOTSTRAP_MFA_CODE cannot use a known default in hosted environments.');
   const credentials = hashPassword(password);
   store.admins.push({
     adminId: 'admin-owner',
@@ -491,8 +563,8 @@ export function ensureBootstrapAdmin(store, env = process.env) {
     role: 'owner',
     salt: credentials.salt,
     passwordHash: credentials.passwordHash,
-    mfaSecretHash: hashValue(mfaCode),
-    mfaMethod: 'legacy',
+    mfaSecretHash: mfaCode ? persistentCredentialVerifier(hashValue(mfaCode), 'admin-legacy-mfa:admin-owner') : '',
+    mfaMethod: mfaCode ? 'legacy' : 'pending',
     mfaEnabled: true,
     createdAt: now(),
     lastLoginAt: null,
@@ -507,7 +579,7 @@ export function ensureBootstrapAdmin(store, env = process.env) {
 
 export function seedDevelopmentAdmin(store, env = process.env) {
   normalizeAdminStore(store);
-  if (env.SEED_ADMIN_ACCOUNT === '0' || env.NODE_ENV === 'production' || store.admins.length) return false;
+  if (env.SEED_ADMIN_ACCOUNT === '0' || isPublicHostedEnvironment(env) || store.admins.length) return false;
   const credentials = hashPassword('admin9');
   store.admins.push({
     adminId: 'dev-admin-owner',
@@ -516,7 +588,7 @@ export function seedDevelopmentAdmin(store, env = process.env) {
     role: 'owner',
     salt: credentials.salt,
     passwordHash: credentials.passwordHash,
-    mfaSecretHash: hashValue('000000'),
+    mfaSecretHash: persistentCredentialVerifier(hashValue('000000'), 'admin-legacy-mfa:dev-admin-owner'),
     mfaMethod: 'legacy',
     mfaEnabled: true,
     createdAt: now(),
@@ -553,7 +625,6 @@ export function writeAudit(store, req, admin, action, target = {}, details = {})
   };
   entry.entryHash = hashValue(JSON.stringify(entry));
   store.adminAudit.push(entry);
-  if (store.adminAudit.length > 2000) store.adminAudit.splice(0, store.adminAudit.length - 2000);
   return entry;
 }
 
@@ -588,6 +659,16 @@ function revokeAdminSessions(store, adminId) {
   return before - store.adminSessions.length;
 }
 
+function rotateAdminCredentials(store, admin, keepSession = null) {
+  admin.authVersion = Math.max(1, Number(admin.authVersion) || 1) + 1;
+  const revoked = revokeAdminSessions(store, admin.adminId);
+  if (keepSession) {
+    keepSession.authVersion = admin.authVersion;
+    store.adminSessions.push(keepSession);
+  }
+  return Math.max(0, revoked - (keepSession ? 1 : 0));
+}
+
 export function adminAccounts(store) {
   normalizeAdminStore(store);
   return store.admins
@@ -608,6 +689,7 @@ export function createAdminAccount(store, req, actor, body = {}) {
   if (passwordError) return { error: passwordError };
   const credentials = hashPassword(temporaryPassword);
   const mfaEnabled = body.mfaEnabled !== false;
+  if (!mfaEnabled && isPublicHostedEnvironment(process.env)) return { error: 'MFA is required for hosted admin accounts.' };
   const admin = {
     adminId: crypto.randomUUID(),
     displayName: nameCheck.displayName,
@@ -669,6 +751,7 @@ export function updateAdminAccount(store, req, actor, adminId, patch = {}) {
   }
   if (patch.mfaEnabled !== undefined) {
     const enabled = patch.mfaEnabled !== false;
+    if (!enabled && isPublicHostedEnvironment(process.env)) return { error: 'MFA is required for hosted admin accounts.' };
     if (admin.mfaEnabled !== enabled) {
       admin.mfaEnabled = enabled;
       resetAuthenticator(admin);
@@ -719,6 +802,8 @@ export function createAdminSession(store, req, admin) {
     token: persistentCredentialVerifier(token, 'admin-session'),
     adminId: admin.adminId,
     expiresAt: now() + ADMIN_SESSION_TTL_MS,
+    challengeExpiresAt: now() + ADMIN_PRE_MFA_SESSION_TTL_MS,
+    authVersion: Math.max(1, Number(admin.authVersion) || 1),
     mfaVerifiedAt: null,
     mfaEnrollmentRequired: admin.mfaEnabled !== false && admin.mfaMethod === 'pending',
     createdAt: now(),
@@ -737,21 +822,19 @@ export function authenticateAdmin(store, token) {
   ));
   if (!session) return null;
   const admin = store.admins.find(item => item.adminId === session.adminId && !item.disabledAt);
-  return admin ? { session, admin } : null;
+  if (!admin || session.authVersion !== admin.authVersion) return null;
+  if (!session.mfaVerifiedAt && session.challengeExpiresAt <= now()) return null;
+  return { session, admin };
 }
 
 export function loginAdmin(store, req, displayName, password) {
   normalizeAdminStore(store);
   const admin = store.admins.find(item => item.displayName.toLowerCase() === safeString(displayName, 40).toLowerCase() && !item.disabledAt);
   if (!admin) return { error: 'Invalid admin credentials.' };
-  if (admin.lockedUntil && admin.lockedUntil > now()) {
-    return { error: 'Too many failed attempts. Try again later.', status: 429 };
-  }
   if (!verifyPassword(password, admin.salt, admin.passwordHash)) {
     admin.failedLoginCount = Math.max(0, Number(admin.failedLoginCount) || 0) + 1;
     admin.lastFailedLoginAt = now();
     if (admin.failedLoginCount >= ADMIN_LOGIN_LOCK_THRESHOLD) {
-      admin.lockedUntil = now() + ADMIN_LOGIN_LOCK_MS;
       writeAudit(store, req, admin, 'admin.login.locked', { adminId: admin.adminId }, { failedLoginCount: admin.failedLoginCount });
     } else {
       writeAudit(store, req, admin, 'admin.login.failed', { adminId: admin.adminId }, { failedLoginCount: admin.failedLoginCount });
@@ -768,7 +851,7 @@ export function loginAdmin(store, req, displayName, password) {
     token: session.token,
     mfaRequired: admin.mfaEnabled !== false && ['legacy', 'totp'].includes(admin.mfaMethod),
     mfaEnrollmentRequired: admin.mfaEnabled !== false && admin.mfaMethod === 'pending',
-    admin: publicAdmin(admin),
+    admin: publicPreMfaAdmin(admin),
     changed: true,
   };
 }
@@ -782,7 +865,7 @@ function findRecoveryAdmin(store, identifier) {
 }
 
 function recoveryCodeHash(adminId, code) {
-  return hashValue(`${adminId}:${String(code || '').trim()}`);
+  return persistentCredentialVerifier(String(code || '').trim(), `admin-password-recovery:${adminId}`);
 }
 
 function pruneRecoveryRequests(store) {
@@ -797,6 +880,12 @@ export async function requestAdminPasswordRecovery(store, req, identifier, sendR
   pruneRecoveryRequests(store);
   const admin = findRecoveryAdmin(store, identifier);
   if (!admin || !admin.email) return { ok: true, changed: false };
+  const recentRequest = store.adminRecoveryRequests
+    .filter(item => item.adminId === admin.adminId && !item.usedAt && item.expiresAt > now())
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
+  if (recentRequest && now() - recentRequest.createdAt < ADMIN_RECOVERY_COOLDOWN_MS) {
+    return { ok: true, changed: false };
+  }
   const code = generateMfaCode();
   const request = {
     requestId: crypto.randomUUID(),
@@ -810,7 +899,7 @@ export async function requestAdminPasswordRecovery(store, req, identifier, sendR
     ...requestMeta(req),
   };
   store.adminRecoveryRequests.push(request);
-  writeAudit(store, req, admin, 'admin.password_recovery.requested', { adminId: admin.adminId }, { email: admin.email });
+  writeAudit(store, req, admin, 'admin.password_recovery.requested', { adminId: admin.adminId });
   await sendRecoveryCode({ admin: publicAdmin(admin), code, expiresAt: request.expiresAt });
   return { ok: true, changed: true };
 }
@@ -824,14 +913,21 @@ export function completeAdminPasswordRecovery(store, req, body = {}) {
   const passwordError = validateAdminPassword(newPassword);
   if (passwordError) return { error: passwordError };
   if (!admin) return { error: 'Invalid or expired recovery code.' };
+  if (admin.recoveryLockedUntil && admin.recoveryLockedUntil > now()) {
+    return { error: 'Invalid or expired recovery code.' };
+  }
   const request = store.adminRecoveryRequests
     .filter(item => item.adminId === admin.adminId && !item.usedAt && item.expiresAt > now())
     .sort((a, b) => b.createdAt - a.createdAt)[0];
   if (!request) return { error: 'Invalid or expired recovery code.' };
-  if (request.attempts >= ADMIN_RECOVERY_MAX_ATTEMPTS) return { error: 'Invalid or expired recovery code.' };
-  if (request.codeHash !== recoveryCodeHash(admin.adminId, code)) {
+  if (request.attempts >= ADMIN_RECOVERY_MAX_ATTEMPTS || admin.recoveryFailedAttempts >= ADMIN_RECOVERY_MAX_ATTEMPTS) {
+    return { error: 'Invalid or expired recovery code.' };
+  }
+  if (!safeHashEqual(request.codeHash, recoveryCodeHash(admin.adminId, code))) {
     request.attempts += 1;
+    admin.recoveryFailedAttempts += 1;
     if (request.attempts >= ADMIN_RECOVERY_MAX_ATTEMPTS) request.usedAt = now();
+    if (admin.recoveryFailedAttempts >= ADMIN_RECOVERY_MAX_ATTEMPTS) admin.recoveryLockedUntil = now() + ADMIN_RECOVERY_TTL_MS;
     return { error: 'Invalid or expired recovery code.', changed: true };
   }
   const credentials = hashPassword(newPassword);
@@ -841,10 +937,12 @@ export function completeAdminPasswordRecovery(store, req, body = {}) {
   admin.failedLoginCount = 0;
   admin.lastFailedLoginAt = null;
   admin.lockedUntil = null;
+  admin.recoveryFailedAttempts = 0;
+  admin.recoveryLockedUntil = null;
   if (admin.mfaEnabled !== false) resetAuthenticator(admin);
   request.usedAt = now();
   request.attempts += 1;
-  const revokedSessions = revokeAdminSessions(store, admin.adminId);
+  const revokedSessions = rotateAdminCredentials(store, admin);
   writeAudit(store, req, admin, 'admin.password_recovery.completed', { adminId: admin.adminId }, { revokedSessions });
   return { ok: true, admin: publicAdmin(admin), changed: true };
 }
@@ -855,9 +953,15 @@ export function verifyAdminMfa(store, req, token, code, env = process.env) {
   const normalizedCode = String(code || '').trim();
   let valid = false;
   let usedRecoveryCode = false;
+  let acceptedTotpCounter = null;
+  if (auth.admin.mfaLockedUntil && auth.admin.mfaLockedUntil > now()) {
+    return { error: 'Invalid authenticator or recovery code.', status: 429 };
+  }
   if (auth.admin.mfaMethod === 'totp' && auth.admin.mfaSecretEncrypted) {
     try {
-      valid = verifyTotp(decryptMfaSecret(auth.admin.mfaSecretEncrypted, env), normalizedCode);
+      acceptedTotpCounter = matchingTotpCounter(decryptMfaSecret(auth.admin.mfaSecretEncrypted, env), normalizedCode);
+      valid = acceptedTotpCounter !== null
+        && (auth.admin.lastAcceptedTotpCounter === null || acceptedTotpCounter > auth.admin.lastAcceptedTotpCounter);
     } catch {
       return { error: 'Authenticator configuration is unavailable. Contact an owner administrator.' };
     }
@@ -871,10 +975,27 @@ export function verifyAdminMfa(store, req, token, code, env = process.env) {
       }
     }
   } else if (auth.admin.mfaMethod === 'legacy' && auth.admin.mfaSecretHash) {
-    valid = safeHashEqual(auth.admin.mfaSecretHash, hashValue(normalizedCode));
+    valid = credentialVerifierMatches(
+      auth.admin.mfaSecretHash,
+      hashValue(normalizedCode),
+      `admin-legacy-mfa:${auth.admin.adminId}`,
+    );
     if (valid) auth.session.mfaEnrollmentRequired = true;
   }
-  if (!valid) return { error: 'Invalid authenticator or recovery code.' };
+  if (!valid) {
+    auth.admin.mfaFailedAttempts += 1;
+    if (auth.admin.mfaFailedAttempts >= ADMIN_MFA_FAILURE_THRESHOLD) {
+      auth.admin.mfaLockedUntil = now() + ADMIN_MFA_LOCK_MS;
+      store.adminSessions = store.adminSessions.filter(session => session !== auth.session);
+    }
+    writeAudit(store, req, auth.admin, 'admin.login.mfa_failed', { adminId: auth.admin.adminId }, {
+      attempts: auth.admin.mfaFailedAttempts,
+    });
+    return { error: 'Invalid authenticator or recovery code.', changed: true };
+  }
+  auth.admin.mfaFailedAttempts = 0;
+  auth.admin.mfaLockedUntil = null;
+  if (acceptedTotpCounter !== null) auth.admin.lastAcceptedTotpCounter = acceptedTotpCounter;
   auth.session.mfaVerifiedAt = now();
   writeAudit(store, req, auth.admin, usedRecoveryCode ? 'admin.login.recovery_code' : 'admin.login.completed', { adminId: auth.admin.adminId });
   return {
@@ -887,7 +1008,7 @@ export function verifyAdminMfa(store, req, token, code, env = process.env) {
 export async function startAdminMfaEnrollment(store, req, token, env = process.env) {
   const auth = authenticateAdmin(store, token);
   if (!auth) return { error: 'Admin authentication required.', status: 401 };
-  if (auth.admin.mfaMethod === 'totp' && !auth.session.mfaVerifiedAt) {
+  if (['totp', 'legacy'].includes(auth.admin.mfaMethod) && !auth.session.mfaVerifiedAt) {
     return { error: 'Verify the current authenticator before replacing it.', status: 403 };
   }
   try {
@@ -927,7 +1048,8 @@ export function confirmAdminMfaEnrollment(store, req, token, code, env = process
   }
   try {
     const secret = decryptMfaSecret(auth.admin.mfaPendingSecretEncrypted, env);
-    if (!verifyTotp(secret, code)) return { error: 'Invalid authenticator code.' };
+    const acceptedCounter = matchingTotpCounter(secret, code);
+    if (acceptedCounter === null) return { error: 'Invalid authenticator code.' };
     const recoveryCodes = generateRecoveryCodes();
     auth.admin.mfaSecretEncrypted = auth.admin.mfaPendingSecretEncrypted;
     auth.admin.mfaPendingSecretEncrypted = '';
@@ -937,6 +1059,10 @@ export function confirmAdminMfaEnrollment(store, req, token, code, env = process
     auth.admin.mfaEnrolledAt = now();
     auth.admin.mfaMethod = 'totp';
     auth.admin.mfaEnabled = true;
+    auth.admin.lastAcceptedTotpCounter = acceptedCounter;
+    auth.admin.mfaFailedAttempts = 0;
+    auth.admin.mfaLockedUntil = null;
+    rotateAdminCredentials(store, auth.admin, auth.session);
     auth.session.mfaVerifiedAt = now();
     auth.session.mfaEnrollmentRequired = false;
     writeAudit(store, req, auth.admin, 'admin.mfa.enrollment.completed', { adminId: auth.admin.adminId }, {
@@ -961,7 +1087,7 @@ export function requireAdmin(store, permission = null) {
     if (auth.session.mfaEnrollmentRequired) {
       return res.status(403).json({ error: 'Authenticator enrollment required.', code: 'ADMIN_MFA_ENROLLMENT_REQUIRED' });
     }
-    if (auth.admin.mfaEnabled !== false && (!auth.session.mfaVerifiedAt || now() - auth.session.mfaVerifiedAt > ADMIN_MFA_TTL_MS + ADMIN_SESSION_TTL_MS)) {
+    if (auth.admin.mfaEnabled !== false && (!auth.session.mfaVerifiedAt || now() - auth.session.mfaVerifiedAt > ADMIN_MFA_TTL_MS)) {
       return res.status(403).json({ error: 'Admin MFA verification required.' });
     }
     if (permission && !adminHasPermission(auth.admin, permission)) return res.status(403).json({ error: 'Admin permission denied.' });
@@ -1004,7 +1130,7 @@ export function trackUserDevice(user, req, rawDeviceId = null) {
   normalizeUserAdminFields(user);
   const source = rawDeviceId || req.headers['x-golf9-device-id'] || req.headers['x-device-id'] || '';
   if (!source) return null;
-  const deviceHash = hashValue(source);
+  const deviceHash = persistentCredentialVerifier(source, 'device-risk-signal');
   const platform = safeString(req.headers['x-golf9-platform'] || req.headers['user-agent'] || 'unknown', 80);
   const existing = user.knownDevices.find(device => device.deviceHash === deviceHash);
   if (existing) {
@@ -1017,13 +1143,13 @@ export function trackUserDevice(user, req, rawDeviceId = null) {
   return deviceHash;
 }
 
-function publicUserForAdmin(user, rankedSeason, extras = {}, competitiveConfig = null) {
+function publicUserForAdmin(user, rankedSeason, extras = {}, competitiveConfig = null, options = {}) {
   normalizeUserAdminFields(user);
   const lastSeenAt = user.knownDevices.reduce((latest, device) => Math.max(latest, Number(device.lastSeenAt) || 0), 0) || null;
   return {
     ...publicUserProfile(user, rankedSeason, competitiveConfig),
     clubId: user.clubId || null,
-    knownDevices: user.knownDevices,
+    knownDevices: options.includeDevices === true ? user.knownDevices : [],
     deviceCount: user.knownDevices.length,
     lastSeenAt,
     authProviderCount: Object.keys(user.authProviders || {}).length,
@@ -1041,15 +1167,15 @@ export function adminUserList(users, rankedSeason, query = '', competitiveConfig
     .filter(user => includeArchived ? isUserArchived(user) : !isUserArchived(user))
     .filter(user => !needle || user.displayName.toLowerCase().includes(needle) || user.userId.toLowerCase().includes(needle))
     .slice(0, 100)
-    .map(user => publicUserForAdmin(user, rankedSeason, {}, competitiveConfig));
+    .map(user => publicUserForAdmin(user, rankedSeason, {}, competitiveConfig, options));
 }
 
-export function adminUserDetail(user, rankedSeason, results, cosmeticCatalog, economyCatalog, competitiveConfig = null) {
+export function adminUserDetail(user, rankedSeason, results, cosmeticCatalog, economyCatalog, competitiveConfig = null, options = {}) {
   return publicUserForAdmin(user, rankedSeason, {
     results: results.filter(result => result.players?.some(player => player.userId === user.userId)).slice(-25).reverse(),
     cosmetics: cosmeticCatalog,
     economy: economyCatalog,
-  }, competitiveConfig);
+  }, competitiveConfig, options);
 }
 
 export function cleanAdminReason(reason) {
@@ -1061,6 +1187,16 @@ export function createSupportTicket(store, req, user, body = {}) {
   normalizeAdminStore(store);
   const message = safeString(body.message, SUPPORT_TICKET_MAX_LENGTH);
   if (message.length < 6) return { error: 'Support message must be at least 6 characters.' };
+  if (user?.userId) {
+    const userTickets = store.supportTickets.filter(ticket => ticket.userId === user.userId);
+    if (userTickets.length >= SUPPORT_TOTAL_TICKET_LIMIT_PER_USER) {
+      return { error: 'Your support history has reached its limit. Reply to an existing case or contact Potterwell support.' };
+    }
+    const activeTickets = userTickets.filter(ticket => !['resolved', 'closed'].includes(ticket.status));
+    if (activeTickets.length >= SUPPORT_ACTIVE_TICKET_LIMIT_PER_USER) {
+      return { error: 'You have too many active support cases. Reply to an existing case before opening another.' };
+    }
+  }
   const ticket = {
     ticketId: crypto.randomUUID(),
     userId: user?.userId || null,
@@ -1071,6 +1207,8 @@ export function createSupportTicket(store, req, user, body = {}) {
     website: '',
     publicReference: null,
     publicAccessTokenHash: null,
+    publicAccessExpiresAt: null,
+    publicAccessRevokedAt: null,
     category: safeString(body.category || 'general', 40),
     status: 'open',
     subject: safeString(body.subject || 'Player support request', 100),
@@ -1081,6 +1219,15 @@ export function createSupportTicket(store, req, user, body = {}) {
     assignedAdminId: null,
     notes: [],
   };
+  protectSupportPrivatePayload(ticket, {
+    displayName: ticket.displayName,
+    contactName: ticket.contactName,
+    contactEmail: '',
+    website: '',
+    subject: ticket.subject,
+    message: ticket.message,
+    notes: [],
+  });
   store.supportTickets.push(ticket);
   return { ticket: publicTicket(ticket) };
 }
@@ -1121,6 +1268,8 @@ export function createPublicSupportTicket(store, req, body = {}) {
     website,
     publicReference: supportReference(store, source),
     publicAccessTokenHash: persistentCredentialVerifier(accessToken, 'support-access'),
+    publicAccessExpiresAt: now() + SUPPORT_ACCESS_TTL_MS,
+    publicAccessRevokedAt: null,
     category,
     status: 'open',
     subject,
@@ -1131,30 +1280,41 @@ export function createPublicSupportTicket(store, req, body = {}) {
     assignedAdminId: null,
     notes: [],
   };
+  protectSupportPrivatePayload(ticket, {
+    displayName: contactName,
+    contactName,
+    contactEmail,
+    website,
+    subject,
+    message,
+    notes: [],
+  });
   store.supportTickets.push(ticket);
   return { ticket: publicTicket(ticket), accessToken };
 }
 
-function publicTicket(ticket) {
+function publicTicket(ticket, options = {}) {
+  const includePii = options.includePii !== false;
+  const payload = supportPrivatePayload(ticket);
   return {
     ticketId: ticket.ticketId,
     userId: ticket.userId,
-    displayName: ticket.displayName,
-    contactName: ticket.contactName || ticket.displayName,
-    contactEmail: ticket.contactEmail || null,
+    displayName: includePii ? payload.displayName : 'Protected requester',
+    contactName: includePii ? payload.contactName : 'Protected requester',
+    contactEmail: includePii ? (payload.contactEmail || null) : null,
     earlyAccessSignupId: ticket.earlyAccessSignupId || null,
     source: ticket.source || 'in_app',
-    website: ticket.website || null,
+    website: includePii ? (payload.website || null) : null,
     publicReference: ticket.publicReference || null,
-    publicAccessEnabled: !!ticket.publicAccessTokenHash,
+    publicAccessEnabled: !!ticket.publicAccessTokenHash && !ticket.publicAccessRevokedAt && (!ticket.publicAccessExpiresAt || ticket.publicAccessExpiresAt > now()),
     category: ticket.category,
     status: ticket.status,
-    subject: ticket.subject,
-    message: ticket.message,
+    subject: includePii ? payload.subject : 'Protected support request',
+    message: includePii ? payload.message : 'Requester content is limited to authorized support staff.',
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
     assignedAdminId: ticket.assignedAdminId,
-    notes: ticket.notes || [],
+    notes: includePii ? payload.notes : [],
   };
 }
 
@@ -1162,7 +1322,8 @@ function findPublicTicket(store, reference, accessToken) {
   normalizeAdminStore(store);
   const normalizedReference = safeString(reference, 24).toUpperCase();
   const ticket = store.supportTickets.find(item => item.publicReference === normalizedReference);
-  if (!ticket?.publicAccessTokenHash || !accessToken) return null;
+  if (!ticket?.publicAccessTokenHash || !accessToken || ticket.publicAccessRevokedAt) return null;
+  if (ticket.publicAccessExpiresAt && ticket.publicAccessExpiresAt <= now()) return null;
   return credentialVerifierMatches(ticket.publicAccessTokenHash, accessToken, 'support-access') ? ticket : null;
 }
 
@@ -1210,28 +1371,30 @@ export function addRequesterSupportReply(store, reference, accessToken, body = {
   if (ticket.status === 'closed') return { error: 'This support case is closed.' };
   const text = safeString(body.message, 1200);
   if (text.length < 2) return { error: 'Reply cannot be empty.' };
-  ticket.notes.push({
+  const payload = supportPrivatePayload(ticket);
+  payload.notes.push({
     noteId: crypto.randomUUID(),
     authorType: 'requester',
     adminId: null,
     adminName: '',
-    requesterName: ticket.contactName,
+    requesterName: payload.contactName,
     text,
     public: true,
     createdAt: now(),
   });
   ticket.status = 'open';
   ticket.updatedAt = now();
+  protectSupportPrivatePayload(ticket, payload);
   return { ticket: publicTicket(ticket) };
 }
 
-export function adminTickets(store, status = null) {
+export function adminTickets(store, status = null, options = {}) {
   normalizeAdminStore(store);
   return store.supportTickets
     .filter(ticket => !status || ticket.status === status)
     .slice()
     .sort((a, b) => b.updatedAt - a.updatedAt)
-    .map(publicTicket);
+    .map(ticket => publicTicket(ticket, options));
 }
 
 export function updateSupportTicket(store, ticketId, patch = {}) {
@@ -1254,7 +1417,8 @@ export function addSupportNote(store, ticketId, admin, note, options = {}) {
   if (!ticket) return { error: 'Support ticket not found.' };
   const text = safeString(note, 800);
   if (!text) return { error: 'Note cannot be empty.' };
-  ticket.notes.push({
+  const payload = supportPrivatePayload(ticket);
+  payload.notes.push({
     noteId: crypto.randomUUID(),
     authorType: 'admin',
     adminId: admin.adminId,
@@ -1265,6 +1429,7 @@ export function addSupportNote(store, ticketId, admin, note, options = {}) {
   });
   if (options.public === true && ticket.status !== 'closed') ticket.status = 'waiting_on_player';
   ticket.updatedAt = now();
+  protectSupportPrivatePayload(ticket, payload);
   return { ticket: publicTicket(ticket) };
 }
 

@@ -171,7 +171,7 @@ test('catalog asset uploads validate dimensions and metadata before saving', () 
   assert.equal(uploaded.asset.width, 512);
   assert.equal(uploaded.asset.height, 768);
   assert.equal(uploaded.asset.mimeType, 'image/png');
-  assert.match(uploaded.asset.url, /\/uploads\/catalog\/classic-card-back\/preview-/);
+  assert.match(uploaded.asset.url, /\/uploads\/catalog\/classic-card-back\/asset-[0-9a-f-]+\.png$/);
 
   const rejected = uploadCatalogAsset(store, uploadRoot, '/uploads/catalog', 'classic-card-back', {
     mimeType: 'image/png',

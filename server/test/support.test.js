@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
   addRequesterSupportReply,
   addSupportNote,
+  adminTickets,
+  createSupportTicket,
   createPublicSupportTicket,
   publicSupportTicket,
 } from '../admin.js';
@@ -32,6 +34,13 @@ test('public support tickets use private token links and expose only public conv
   assert.equal(created.ticket.publicAccessTokenHash, undefined);
   assert.match(store.supportTickets[0].publicAccessTokenHash, /^v1:/);
   assert.equal(JSON.stringify(store).includes(created.accessToken), false);
+  assert.match(store.supportTickets[0].protectedPayloadEncrypted, /^v1\./);
+  assert.equal(JSON.stringify(store).includes('player@example.com'), false);
+  assert.equal(JSON.stringify(store).includes('Question about a match'), false);
+  const redacted = adminTickets(store, null, { includePii: false })[0];
+  assert.equal(redacted.contactEmail, null);
+  assert.equal(redacted.subject, 'Protected support request');
+  assert.equal(redacted.notes.length, 0);
   assert.equal(publicSupportTicket(store, created.ticket.publicReference, 'wrong-token').error.length > 0, true);
 
   const admin = { adminId: 'support-admin', displayName: 'Support Admin' };
@@ -80,4 +89,23 @@ test('requester replies are blocked after a support case is closed', () => {
   );
 
   assert.equal(result.error, 'This support case is closed.');
+});
+
+test('authenticated users cannot allocate an unbounded number of active support tickets', () => {
+  const store = {};
+  const user = { userId: 'user-one', displayName: 'Player One' };
+  for (let index = 0; index < 25; index += 1) {
+    const created = createSupportTicket(store, request(), user, {
+      subject: `Case ${index + 1}`,
+      message: 'A legitimate support request with enough detail.',
+    });
+    assert.equal(created.error, undefined);
+  }
+
+  const refused = createSupportTicket(store, request(), user, {
+    subject: 'One too many',
+    message: 'This request should be refused by the active-case storage bound.',
+  });
+  assert.match(refused.error, /too many active support cases/i);
+  assert.equal(store.supportTickets.length, 25);
 });
