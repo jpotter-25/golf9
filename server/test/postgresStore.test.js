@@ -253,6 +253,32 @@ test('postgres snapshot writes are fenced when another process advanced state', 
   assert.equal(queries.includes('COMMIT'), false);
 });
 
+test('queued stale snapshot writes notify the fatal-save handler once', async () => {
+  const fatalCodes = [];
+  const client = {
+    async query(sql) {
+      if (/SELECT value FROM golf9_meta/.test(sql)) return { rows: [{ value: 2 }] };
+      return { rows: [] };
+    },
+    release() {},
+  };
+  const store = new PostgresStore({
+    query: async () => ({ rows: [] }),
+    connect: async () => client,
+  }, {
+    onFatalSaveError: error => fatalCodes.push(error.code),
+  });
+  store.stateRevision = 1;
+
+  store.scheduleSave(() => ({}));
+  await store.flush();
+  store.scheduleSave(() => ({}));
+  await store.flush();
+
+  assert.deepEqual(fatalCodes, ['STALE_STATE_WRITE']);
+  assert.equal(store.runtimeStatus().lastSaveErrorCode, 'STALE_STATE_WRITE');
+});
+
 test('mail reward claim locks and updates the user and mail entry in one transaction', async () => {
   const queries = [];
   const client = {

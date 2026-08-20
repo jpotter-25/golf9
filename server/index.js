@@ -481,6 +481,10 @@ app.use((req, res, next) => {
   if (staleWriter && !req.path.startsWith('/health')) {
     return res.status(503).json({ error: 'This server instance has been fenced from persistent writes. Retry shortly.' });
   }
+  const readOnlyRequest = ['GET', 'HEAD', 'OPTIONS'].includes(req.method);
+  if (!persistenceWriterReady && !readOnlyRequest && !req.path.startsWith('/health')) {
+    return res.status(503).json({ error: 'Persistent storage is completing a deployment handoff. Retry shortly.' });
+  }
   return next();
 });
 
@@ -675,10 +679,19 @@ let afkConfigStore = normalizeAfkConfig({});
 let forfeitConfigStore = normalizeForfeitConfig({});
 let releasePolicyStore = normalizeReleasePolicyStore({});
 const earlyAccessStore = normalizeEarlyAccessStore({});
-const postgresStore = createPostgresStore(DATABASE_URL);
+const postgresStore = createPostgresStore(DATABASE_URL, process.env, {
+  onFatalSaveError: handleFatalPersistenceSaveError,
+});
+const RAILWAY_WRITER_HANDOFF_REQUIRED = !!postgresStore
+  && IS_PRODUCTION
+  && !!String(process.env.RAILWAY_DEPLOYMENT_ID || '').trim();
+const WRITER_HANDOFF_DELAY_MS = Math.max(1_500, Math.min(30_000, Number(process.env.DATABASE_WRITER_HANDOFF_DELAY_MS) || 5_000));
 const googleOAuthClient = new OAuth2Client();
 let storeReady = false;
 let storeLoadError = null;
+let persistenceWriterReady = !RAILWAY_WRITER_HANDOFF_REQUIRED;
+let writerHandoffTimer = null;
+let fatalPersistenceExitScheduled = false;
 let databaseHealthCache = { checkedAt: 0, result: null, pending: null };
 let smtpHealthCache = { checkedAt: 0, result: null, pending: null };
 const operationalHealthStates = new Map();
@@ -688,6 +701,30 @@ let storeMigrationPending = false;
 let earlyAccessDeliveryRunning = false;
 let lastEarlyAccessDeliveryAt = 0;
 let lastEarlyAccessRetentionAt = 0;
+
+function handleFatalPersistenceSaveError(error) {
+  if (fatalPersistenceExitScheduled || error?.code !== 'STALE_STATE_WRITE') return;
+  fatalPersistenceExitScheduled = true;
+  storeReady = false;
+  persistenceWriterReady = false;
+  storeLoadError = error;
+  console.error('Fatal persistence writer fence detected; exiting so the platform can replace this instance.', {
+    code: 'STALE_STATE_WRITE',
+  });
+  clearInterval(maintenanceTimer);
+  if (writerHandoffTimer) {
+    clearTimeout(writerHandoffTimer);
+    writerHandoffTimer = null;
+  }
+  for (const activeServer of listeningServers) {
+    try {
+      activeServer.close();
+    } catch {
+      // A forced non-zero exit below handles listeners that are already closing.
+    }
+  }
+  setTimeout(() => process.exit(1), 100).unref();
+}
 
 function storageStatus() {
   return {
@@ -1751,11 +1788,15 @@ async function loadStore() {
 }
 
 function saveStore() {
-  const snapshot = storeSnapshot();
   if (postgresStore) {
+    if (!persistenceWriterReady) {
+      storeMigrationPending = true;
+      return;
+    }
     postgresStore.scheduleSave(storeSnapshot);
     return;
   }
+  const snapshot = storeSnapshot();
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(DATA_FILE, JSON.stringify(snapshot, null, 2));
 }
@@ -4469,14 +4510,23 @@ app.get('/support/ticket', (_req, res) => {
   res.sendFile(path.join(PRODUCT_PUBLIC_DIR, 'support-ticket.html'));
 });
 
-app.get('/health', (_req, res) => res.json({ ok: true }));
+app.get('/health', (_req, res) => {
+  scheduleRailwayWriterHandoff();
+  return res.json({ ok: true });
+});
 app.get('/health/ready', (_req, res) => {
   const staleWriter = postgresStore?.runtimeStatus().lastSaveErrorCode === 'STALE_STATE_WRITE';
-  if (storeReady && !staleWriter) return res.json({ ok: true, ready: true });
+  if (storeReady && persistenceWriterReady && !staleWriter) return res.json({ ok: true, ready: true });
   return res.status(503).json({
     ok: false,
     ready: false,
-    error: staleWriter ? 'This instance is fenced from persistent writes.' : storeLoadError ? 'Persistence failed to load.' : 'Persistence is still loading.',
+    error: staleWriter
+      ? 'This instance is fenced from persistent writes.'
+      : storeLoadError
+        ? 'Persistence failed to load.'
+        : !persistenceWriterReady
+          ? 'Persistence writer handoff is still settling.'
+          : 'Persistence is still loading.',
   });
 });
 
@@ -8176,6 +8226,7 @@ function socketAuth(socket) {
 }
 
 io.use((socket, next) => {
+  if (!persistenceWriterReady) return next(new Error('Persistent storage is completing a deployment handoff.'));
   const auth = socketAuth(socket);
   if (!auth) return next(new Error('Authentication required.'));
   socket.auth = auth;
@@ -8594,7 +8645,7 @@ io.on('connection', (socket) => {
   });
 });
 
-setInterval(async () => {
+const maintenanceTimer = setInterval(async () => {
   if (!storeReady) return;
   const now = Date.now();
   const scheduleResult = processAvailabilitySchedules(availabilityStore, { now });
@@ -8673,6 +8724,47 @@ function startHttpListeners() {
   }
 }
 
+function prepareLoadedPersistenceState() {
+  seedLocalTestAccounts();
+  seedAdminAccounts();
+  const scheduleResult = processAvailabilitySchedules(availabilityStore, { now: Date.now() });
+  availabilityStore = scheduleResult.store;
+  if (scheduleResult.changes.length) storeMigrationPending = true;
+  const releaseScheduleResult = processReleasePolicySchedules(releasePolicyStore, { now: Date.now() });
+  releasePolicyStore = releaseScheduleResult.store;
+  if (releaseScheduleResult.changes.length) storeMigrationPending = true;
+  reconcileAvailabilityState();
+  const saveRequired = storeMigrationPending;
+  storeMigrationPending = false;
+  return saveRequired;
+}
+
+function scheduleRailwayWriterHandoff() {
+  if (!RAILWAY_WRITER_HANDOFF_REQUIRED || persistenceWriterReady || writerHandoffTimer) return;
+  console.log(`Railway persistence writer handoff requested; reloading authoritative state in ${WRITER_HANDOFF_DELAY_MS} ms.`);
+  writerHandoffTimer = setTimeout(async () => {
+    writerHandoffTimer = null;
+    try {
+      storeMigrationPending = false;
+      await loadStore();
+      const saveRequired = prepareLoadedPersistenceState();
+      persistenceWriterReady = true;
+      storeReady = true;
+      storeLoadError = null;
+      if (saveRequired) saveStore();
+      console.log('Railway persistence writer handoff completed.');
+    } catch (error) {
+      storeReady = false;
+      persistenceWriterReady = false;
+      storeLoadError = error;
+      console.error('Railway persistence writer handoff failed; exiting for a clean replacement.', {
+        code: safeHealthErrorCode(error?.code),
+      });
+      setTimeout(() => process.exit(1), 100).unref();
+    }
+  }, WRITER_HANDOFF_DELAY_MS);
+}
+
 async function initializePersistence() {
   if (IS_PRODUCTION && !postgresStore && !ALLOW_UNSAFE_JSON_IN_PRODUCTION) {
     throw new Error('DATABASE_URL is required in production. Set ALLOW_JSON_STORE_IN_PRODUCTION=1 only for an emergency temporary fallback.');
@@ -8680,21 +8772,18 @@ async function initializePersistence() {
 
   try {
     await loadStore();
-    seedLocalTestAccounts();
-    seedAdminAccounts();
-    const scheduleResult = processAvailabilitySchedules(availabilityStore, { now: Date.now() });
-    availabilityStore = scheduleResult.store;
-    if (scheduleResult.changes.length) storeMigrationPending = true;
-    const releaseScheduleResult = processReleasePolicySchedules(releasePolicyStore, { now: Date.now() });
-    releasePolicyStore = releaseScheduleResult.store;
-    if (releaseScheduleResult.changes.length) storeMigrationPending = true;
-    reconcileAvailabilityState();
-    if (storeMigrationPending) {
-      storeMigrationPending = false;
-      saveStore();
+    if (RAILWAY_WRITER_HANDOFF_REQUIRED) {
+      storeReady = false;
+      persistenceWriterReady = false;
+      storeLoadError = null;
+      console.log('Nine Below persistence loaded for Railway handoff; waiting for the deployment health probe.');
+      return;
     }
+    const saveRequired = prepareLoadedPersistenceState();
     storeReady = true;
+    persistenceWriterReady = true;
     storeLoadError = null;
+    if (saveRequired) saveStore();
     console.log('Nine Below persistence loaded.');
   } catch (error) {
     storeReady = false;
@@ -8706,6 +8795,7 @@ async function initializePersistence() {
       seedLocalTestAccounts();
       seedAdminAccounts();
       storeReady = true;
+      persistenceWriterReady = true;
       storeLoadError = null;
       return;
     }
@@ -8719,6 +8809,11 @@ async function startServer() {
 }
 
 async function shutdown() {
+  clearInterval(maintenanceTimer);
+  if (writerHandoffTimer) {
+    clearTimeout(writerHandoffTimer);
+    writerHandoffTimer = null;
+  }
   try {
     if (storeReady) saveStore();
     if (postgresStore) await postgresStore.close();

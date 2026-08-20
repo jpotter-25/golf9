@@ -145,7 +145,7 @@ export function createDatabaseSslConfig(databaseUrl, env = process.env) {
   return ssl;
 }
 
-export function createPostgresStore(databaseUrl = process.env.DATABASE_URL, env = process.env) {
+export function createPostgresStore(databaseUrl = process.env.DATABASE_URL, env = process.env, options = {}) {
   if (!databaseUrl) return null;
   const ssl = createDatabaseSslConfig(databaseUrl, env);
   const configuredConnectionTimeout = Number(env.DATABASE_POOL_CONNECTION_TIMEOUT_MS || 5_000);
@@ -157,12 +157,14 @@ export function createPostgresStore(databaseUrl = process.env.DATABASE_URL, env 
       ? configuredConnectionTimeout
       : 5_000,
   });
-  return new PostgresStore(pool);
+  return new PostgresStore(pool, options);
 }
 
 export class PostgresStore {
-  constructor(pool) {
+  constructor(pool, { onFatalSaveError = null } = {}) {
     this.pool = pool;
+    this.onFatalSaveError = typeof onFatalSaveError === 'function' ? onFatalSaveError : null;
+    this.fatalSaveErrorNotified = false;
     this.pendingSave = null;
     this.pendingStateFactory = null;
     this.lastSave = Promise.resolve();
@@ -232,6 +234,14 @@ export class PostgresStore {
   recordSaveFailure(error) {
     this.lastFailedSaveAt = Date.now();
     this.lastSaveErrorCode = String(error?.code || 'DATABASE_SAVE_FAILED').slice(0, 80);
+    if (error?.code === 'STALE_STATE_WRITE' && this.onFatalSaveError && !this.fatalSaveErrorNotified) {
+      this.fatalSaveErrorNotified = true;
+      try {
+        this.onFatalSaveError(error);
+      } catch (callbackError) {
+        console.error('Postgres fatal-save handler failed:', callbackError);
+      }
+    }
   }
 
   async migrate() {

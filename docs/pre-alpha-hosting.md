@@ -25,6 +25,8 @@ For the server service:
 - Start command: `npm --prefix server start`
 - Health check path: `/health`
 
+`railway.json` sets deployment overlap to zero and allows two seconds for graceful shutdown. The `/health` deployment probe starts a five-second persistence handoff: the incoming process waits for the previous process to flush and stop, reloads the authoritative PostgreSQL state, and only then accepts state-changing HTTP requests or Socket.IO connections. `/health/ready` remains the operational readiness check. A process that ever encounters `STALE_STATE_WRITE` exits nonzero so Railway's `ON_FAILURE` policy replaces it instead of leaving a fenced instance online. Keep the server at one replica until persistence is migrated away from whole-state snapshot writes.
+
 Railway can expose a service publicly from the service settings under Networking. Railway custom domains require the DNS records Railway shows, usually a CNAME plus a TXT verification record.
 
 Required staging environment variables:
