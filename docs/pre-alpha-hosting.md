@@ -35,7 +35,10 @@ APP_ENV=staging
 PORT=<provided by host>
 DATABASE_URL=<managed postgres url>
 DATABASE_SSL=1
-DATABASE_SSL_REJECT_UNAUTHORIZED=0
+DATABASE_SSL_REJECT_UNAUTHORIZED=1
+DATABASE_SSL_CA=<public Railway root.crt PEM, with line breaks stored by Railway>
+DATABASE_SSL_CA_SHA256=<verified SHA-256 fingerprint of root.crt>
+DATABASE_SSL_RAILWAY_PRIVATE_HOSTNAME_COMPAT=1
 TRUST_PROXY_HOPS=1
 CLIENT_ORIGINS=*
 PUBLIC_API_URL=https://ninebelow.potterwell.com
@@ -61,7 +64,9 @@ EARLY_ACCESS_EMAILS_PER_MINUTE=60
 
 Do not use local defaults such as `admin`, `admin9`, or `000000` in staging or production.
 
-The Railway Postgres private-network connection still uses TLS. Railway's current database certificate is self-signed, so this deployment uses the explicit `DATABASE_SSL_REJECT_UNAUTHORIZED=0` exception instead of disabling encryption. If Railway supplies a trusted CA, place it in `DATABASE_SSL_CA` and change `DATABASE_SSL_REJECT_UNAUTHORIZED=1`; that is the preferred authenticated-TLS configuration. The service refuses to start in production when `DATABASE_SSL=0`.
+The Railway Postgres private-network connection uses authenticated TLS with the database service's public `root.crt` pinned in `DATABASE_SSL_CA`. The server verifies that certificate's SHA-256 fingerprint before connecting and lets Node verify the presented server certificate against that pinned CA. Railway's generated server certificate currently names `localhost` rather than `postgres.railway.internal`, so `DATABASE_SSL_RAILWAY_PRIVATE_HOSTNAME_COMPAT=1` permits only that exact certificate-name substitution and only for the configured `*.railway.internal` database host. An unrelated hostname or certificate is still rejected. The service refuses to start in production when `DATABASE_SSL=0`, the pin is malformed, or the compatibility mode is incomplete.
+
+Retrieve only `/var/lib/postgresql/data/certs/root.crt` from the Railway Postgres service and verify its fingerprint independently before configuring it. Never retrieve, download, or expose `root.key` or `server.key`. If Railway regenerates the database certificates, obtain and verify the new public CA, update `DATABASE_SSL_CA` and `DATABASE_SSL_CA_SHA256` together, and confirm `/health/ready` immediately after deployment.
 
 Keep `SERVER_TOKEN_SECRET`, `EARLY_ACCESS_PII_KEY`, and `EARLY_ACCESS_TOKEN_SECRET` independent and stable. Rotating the server-token secret invalidates stored sessions, invite verifiers, and public support links. Never place their values in source control, screenshots, exports, or documentation.
 

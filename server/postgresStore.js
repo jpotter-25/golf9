@@ -1,3 +1,5 @@
+import { X509Certificate } from 'node:crypto';
+import { checkServerIdentity as checkTlsServerIdentity } from 'node:tls';
 import { Pool } from 'pg';
 import { isProductionEnvironment } from './securityTokens.js';
 
@@ -23,6 +25,8 @@ const COLLECTION_TABLES = [
   ['early_access_deliveries', 'delivery_id'],
 ];
 const META_KEYS = ['rankedSeason', 'competitiveConfig', 'economyConfig', 'notificationConfig', 'availabilityConfig', 'afkConfig', 'forfeitConfig', 'releasePolicy', 'earlyAccessConfig'];
+const DATABASE_URL_TLS_PARAMETERS = ['ssl', 'sslmode', 'sslcert', 'sslkey', 'sslrootcert'];
+const RAILWAY_PRIVATE_HOST_SUFFIX = '.railway.internal';
 
 function json(value) {
   return JSON.stringify(value ?? null);
@@ -47,21 +51,103 @@ function itemId(item, key) {
   return item[key];
 }
 
-export function createPostgresStore(databaseUrl = process.env.DATABASE_URL) {
-  if (!databaseUrl) return null;
-  const sslDisabled = process.env.DATABASE_SSL === '0';
-  if (sslDisabled && isProductionEnvironment(process.env)) {
+function normalizeSha256Fingerprint(value) {
+  const normalized = String(value || '').replace(/[:\s]/g, '').toUpperCase();
+  if (normalized && !/^[A-F0-9]{64}$/.test(normalized)) {
+    throw new Error('DATABASE_SSL_CA_SHA256 must be a SHA-256 certificate fingerprint.');
+  }
+  return normalized;
+}
+
+function parseDatabaseUrl(databaseUrl) {
+  let parsed;
+  try {
+    parsed = new URL(databaseUrl);
+  } catch {
+    throw new Error('DATABASE_URL must be a valid PostgreSQL URL.');
+  }
+  if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) {
+    throw new Error('DATABASE_URL must use the postgres or postgresql protocol.');
+  }
+  const tlsOverrides = DATABASE_URL_TLS_PARAMETERS.filter(name => parsed.searchParams.has(name));
+  if (tlsOverrides.length) {
+    throw new Error(`DATABASE_URL cannot contain TLS parameters (${tlsOverrides.join(', ')}); use DATABASE_SSL_* variables.`);
+  }
+  return parsed;
+}
+
+export function createDatabaseSslConfig(databaseUrl, env = process.env) {
+  const parsedDatabaseUrl = parseDatabaseUrl(databaseUrl);
+  const sslDisabled = env.DATABASE_SSL === '0';
+  if (sslDisabled && isProductionEnvironment(env)) {
     throw new Error('DATABASE_SSL cannot be disabled in production.');
   }
-  const sslCa = String(process.env.DATABASE_SSL_CA || '').replace(/\\n/g, '\n').trim();
-  const rejectUnauthorized = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== '0';
+  if (sslDisabled) return false;
+
+  const sslCa = String(env.DATABASE_SSL_CA || '').replace(/\\n/g, '\n').trim();
+  const expectedCaFingerprint = normalizeSha256Fingerprint(env.DATABASE_SSL_CA_SHA256);
+  const rejectUnauthorized = env.DATABASE_SSL_REJECT_UNAUTHORIZED !== '0';
+  const railwayHostnameCompatibility = env.DATABASE_SSL_RAILWAY_PRIVATE_HOSTNAME_COMPAT === '1';
+
+  if (expectedCaFingerprint && !rejectUnauthorized) {
+    throw new Error('DATABASE_SSL_CA_SHA256 requires DATABASE_SSL_REJECT_UNAUTHORIZED=1.');
+  }
+  if (expectedCaFingerprint && !sslCa) {
+    throw new Error('DATABASE_SSL_CA_SHA256 requires DATABASE_SSL_CA.');
+  }
+  if (sslCa) {
+    let caCertificate;
+    try {
+      caCertificate = new X509Certificate(sslCa);
+    } catch {
+      throw new Error('DATABASE_SSL_CA must contain a valid PEM certificate.');
+    }
+    if (!caCertificate.ca) {
+      throw new Error('DATABASE_SSL_CA must contain a CA certificate.');
+    }
+    if (expectedCaFingerprint) {
+      const actualFingerprint = normalizeSha256Fingerprint(caCertificate.fingerprint256);
+      if (actualFingerprint !== expectedCaFingerprint) {
+        throw new Error('DATABASE_SSL_CA does not match DATABASE_SSL_CA_SHA256.');
+      }
+    }
+  }
+
+  const ssl = {
+    rejectUnauthorized,
+    ...(sslCa ? { ca: sslCa } : {}),
+  };
+
+  if (railwayHostnameCompatibility) {
+    if (!rejectUnauthorized || !sslCa || !expectedCaFingerprint) {
+      throw new Error('Railway private-hostname compatibility requires verified TLS, a CA certificate, and its SHA-256 fingerprint.');
+    }
+    const databaseHostname = parsedDatabaseUrl.hostname.toLowerCase();
+    if (!databaseHostname.endsWith(RAILWAY_PRIVATE_HOST_SUFFIX)) {
+      throw new Error('Railway private-hostname compatibility is limited to *.railway.internal database hosts.');
+    }
+    ssl.checkServerIdentity = (hostname, certificate) => {
+      const standardError = checkTlsServerIdentity(hostname, certificate);
+      if (!standardError) return undefined;
+      const normalizedHostname = String(hostname || '').replace(/\.$/, '').toLowerCase();
+      if (standardError.code !== 'ERR_TLS_CERT_ALTNAME_INVALID' || normalizedHostname !== databaseHostname) {
+        return standardError;
+      }
+      const railwayCertificateError = checkTlsServerIdentity('localhost', certificate);
+      return railwayCertificateError || undefined;
+    };
+  }
+
+  return ssl;
+}
+
+export function createPostgresStore(databaseUrl = process.env.DATABASE_URL, env = process.env) {
+  if (!databaseUrl) return null;
+  const ssl = createDatabaseSslConfig(databaseUrl, env);
   const pool = new Pool({
     connectionString: databaseUrl,
-    ssl: sslDisabled ? false : {
-      rejectUnauthorized,
-      ...(sslCa ? { ca: sslCa } : {}),
-    },
-    max: Number(process.env.DATABASE_POOL_SIZE || 5),
+    ssl,
+    max: Number(env.DATABASE_POOL_SIZE || 5),
   });
   return new PostgresStore(pool);
 }

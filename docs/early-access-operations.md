@@ -165,6 +165,8 @@ The NineBelow service uses these early-access variables:
 | `EARLY_ACCESS_EMAILS_PER_MINUTE` | Campaign throttle | `60` unless deliberately changed |
 | `REQUIRE_INVITE_CODE` | Requires a valid game invitation during signup | `1` before any access wave |
 
+The production PostgreSQL connection also uses `DATABASE_SSL=1`, `DATABASE_SSL_REJECT_UNAUTHORIZED=1`, the public Railway `root.crt` in `DATABASE_SSL_CA`, its independently verified SHA-256 fingerprint in `DATABASE_SSL_CA_SHA256`, and `DATABASE_SSL_RAILWAY_PRIVATE_HOSTNAME_COMPAT=1`. That compatibility flag is intentionally limited to the configured `*.railway.internal` database host and Railway's `localhost` certificate name; it does not turn off certificate-chain validation. Never copy either database private key (`root.key` or `server.key`) into application variables or local operating files.
+
 SMTP uses the existing `ADMIN_SMTP_*` variables. In production, both `ADMIN_SMTP_USER` and `ADMIN_SMTP_FROM` should be `donotreply@potterwell.com`, backed by that mailbox's unique password. `SUPPORT_INBOX_EMAIL` remains the monitored `app-developer@potterwell.com` destination for support submissions; it is not the public sender. Production readiness also requires the public/admin URLs and database configuration already used by the service.
 
 The no-reply address makes expectations clear and separates the public sending credential from the support inbox. It does not replace mailbox access controls, a unique SMTP password, SPF, DKIM, or DMARC.
