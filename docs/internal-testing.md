@@ -1,20 +1,20 @@
 # Nine Below Internal Testing Checklist
 
 ## Latest Nine Below Google Play build
-- Release date: `2026-08-19`
+- Release date: `2026-09-02`
 - Package: `com.potterwell.ninebelow`
 - App version: `0.1.0`
-- Android versionCode: `57`
+- Android versionCode: `59`
 - EAS profile: `playtest`
-- EAS build ID: `6c3a458c-ec56-4d8d-9a8d-805b0cd2e76e`
-- Source commit: `107dbb382062fbd7b73998d1b441b145f4451ccd`
-- AAB: `https://expo.dev/artifacts/eas/JhVdopj-UObgnzzvFR7KAmmYgqi50iGZ1_v_XwNKB_E.aab`
-- Local verified file: `client/dist/nine-below-playtest-v57.aab`
-- SHA-256: `AE49A8346CB67F169FD97E5F2C6C95BADC7401635DB76CC2AFCDFD363F2351ED`
+- EAS build ID: `4c1f57ae-37a4-4bab-9157-9d0a104d12c9`
+- Source commit: `c764d520c1cb3cc183d029ba6095d09fe6003f15`
+- AAB: `https://expo.dev/artifacts/eas/ovQ3vTDaBQ-8Um5h6bMdMDeTZ9yBikN3-N-DbNqEs7E.aab`
+- Local verified file: `client/dist/nine-below-playtest-v59.aab`
+- SHA-256: `2AD6702648299EC0444D3DF2704F76D69E73FF1779A4513B7DD2379F54165AD3`
 - Play app ID: `4976320176871747708`
 - Closed track ID: `4700919917437591631`
 - Internal track ID: `4701595510712306572`
-- Planned release: `Nine Below closed test 57`
+- Planned release: `Nine Below closed test 59`
 - Release status: `AAB integrity and upload signature verified; Play closed-test submission pending`
 - Tester audience: `Family/Friends` (`9` users)
 - Tester opt-in URL: `https://play.google.com/apps/internaltest/4701595510712306572`
