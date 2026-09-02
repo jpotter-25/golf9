@@ -9,7 +9,7 @@ import { Bell, Bot, Gem, LockKeyhole, MessageCircle, Settings, ShoppingBag, Trop
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import type { GameState, Card, Grid, PlayerIdentity } from '../game/types';
-import { aiPlayTurn, chooseAiMove } from '../game/ai';
+import { chooseAiPeekTargets, executeAiTurn, planAiTurn } from '../game/ai';
 import {
   deal,
   drawFromDeck,
@@ -838,7 +838,7 @@ export default function GameScreen({ route, navigation }: Props) {
       soloAiPeekKey.current = peekKey;
 
       const needed = Math.max(0, 2 - (state.players[idx]?.peekFlips ?? 0));
-      const targets = firstFaceDownCells(state.players[idx]?.grid).slice(0, needed);
+      const targets = chooseAiPeekTargets(state, idx, needed);
       if (!targets.length) {
         soloAiPeekKey.current = null;
         setState(s => advancePeek(s));
@@ -897,7 +897,7 @@ export default function GameScreen({ route, navigation }: Props) {
     if (soloAiTurnTimer.current) clearTimeout(soloAiTurnTimer.current);
     soloAiTurnKey.current = turnKey;
 
-    const move = chooseAiMove(state, i, aiDifficulty);
+    const move = planAiTurn(state, i, aiDifficulty);
     setLocked(true);
     setActiveSource(move.source);
     setHeld(null);
@@ -914,7 +914,7 @@ export default function GameScreen({ route, navigation }: Props) {
       soloAiTurnTimer.current = setTimeout(() => {
         soloAiTurnTimer.current = null;
         soloAiTurnKey.current = null;
-        setState(s => aiPlayTurn(s, i, aiDifficulty));
+        setState(s => executeAiTurn(s, move));
         setHeld(null);
         setActiveSource(null);
         setPending(null);
@@ -2944,16 +2944,6 @@ function visibleGridScore(grid: Grid | undefined): number {
   return grid.reduce((total, row) => (
     total + row.reduce((rowTotal, card) => rowTotal + (card?.faceUp ? value(card) : 0), 0)
   ), 0);
-}
-
-function firstFaceDownCells(grid: Grid | undefined): Array<{ r: number; c: number }> {
-  if (!grid) return [];
-  const cells: Array<{ r: number; c: number }> = [];
-  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
-    const card = grid[r][c];
-    if (card && !card.faceUp) cells.push({ r, c });
-  }
-  return cells;
 }
 
 function revealHiddenForDisplay(state: GameState): GameState {

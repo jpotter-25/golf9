@@ -40,7 +40,7 @@ import {
 } from '../shared/rules.js';
 
 setSecureRandomIntProvider(maxExclusive => crypto.randomInt(maxExclusive));
-import { aiPlayTurn, chooseAiMove } from '../shared/soloAi.js';
+import { executeAiTurn, planAiTurn } from '../shared/soloAi.js';
 import {
   applyAfkCoinPenalty,
   autoplayCueFromMove,
@@ -3366,13 +3366,19 @@ function cancelAllAutoplaySchedules(room) {
   for (const userId of room.autoplaySchedules?.keys?.() || []) cancelAutoplaySchedule(room, userId);
 }
 
-function autoplayCueFor(room, userId, window) {
+function autoplayPlanFor(room, userId, window) {
+  if (window.phase === 'peek') {
+    return null;
+  }
+  const playerIndex = getRoomPlayerIndex(room, userId);
+  return planAiTurn(room.game, playerIndex, 'afk');
+}
+
+function autoplayCueForPlan(plan, window) {
   if (window.phase === 'peek') {
     return { source: 'peek', intent: 'complete-initial-peek', target: null, action: 'wait' };
   }
-  const playerIndex = getRoomPlayerIndex(room, userId);
-  const move = chooseAiMove(room.game, playerIndex, 'easy');
-  return autoplayCueFromMove(move);
+  return autoplayCueFromMove(plan);
 }
 
 function emitAutoplayCue(room, userId, window, stage = 'source') {
@@ -3415,7 +3421,7 @@ function commitAutoplayWindow(room, userId, window) {
   const beforeGame = room.game;
   let next = room.game;
   if (window.phase === 'turn') {
-    next = aiPlayTurn(room.game, playerIndex, 'easy');
+    next = executeAiTurn(room.game, scheduled.plan);
   } else {
     for (let r = 0; r < 3 && next.phase === 'peek' && next.players[playerIndex]?.peekFlips < 2; r += 1) {
       for (let c = 0; c < 3 && next.phase === 'peek' && next.players[playerIndex]?.peekFlips < 2; c += 1) {
@@ -3439,7 +3445,8 @@ function commitAutoplayWindow(room, userId, window) {
 
 function scheduleAutoplayWindow(room, userId, window) {
   const config = normalizeAfkConfig(afkConfigStore);
-  const cue = autoplayCueFor(room, userId, window);
+  const plan = autoplayPlanFor(room, userId, window);
+  const cue = autoplayCueForPlan(plan, window);
   const cueTimer = setTimeout(() => emitAutoplayCue(room, userId, window, 'source'), config.sourceCueMs);
   const targetCueTimer = window.phase === 'turn'
     ? setTimeout(() => emitAutoplayCue(room, userId, window, 'target'), autoplayTargetCueMs(config))
@@ -3448,7 +3455,7 @@ function scheduleAutoplayWindow(room, userId, window) {
   cueTimer.unref?.();
   targetCueTimer?.unref?.();
   commitTimer.unref?.();
-  room.autoplaySchedules.set(userId, { ...window, cue, cueTimer, targetCueTimer, commitTimer });
+  room.autoplaySchedules.set(userId, { ...window, plan, cue, cueTimer, targetCueTimer, commitTimer });
 }
 
 function ensureAutoplaySchedules(room) {

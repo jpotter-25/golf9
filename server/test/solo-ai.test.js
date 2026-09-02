@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { aiPlayTurn, chooseAiMove } from '../../shared/soloAi.js';
+import {
+  aiPlayTurn,
+  chooseAiMove,
+  chooseAiPeekTargets,
+  executeAiTurn,
+  planAiTurn,
+} from '../../shared/soloAi.js';
+import {
+  createGameState,
+  flipForPeek,
+  resolveExpiredTimers,
+} from '../../shared/rules.js';
 
 let sequence = 0;
 
@@ -24,10 +35,12 @@ function baseState({
   discardRank = 'Q',
   mustDrawOnly = false,
   sweepActive = false,
+  id,
+  turnSerial = 1,
 } = {}) {
   const discard = discardRank ? card(discardRank) : null;
   return {
-    id: `state-${sequence}`,
+    id: id || `state-${sequence}`,
     players: [
       {
         id: 'P1',
@@ -62,7 +75,7 @@ function baseState({
     pendingDecision: null,
     completed: false,
     revision: 1,
-    turnSerial: 1,
+    turnSerial,
   };
 }
 
@@ -151,10 +164,14 @@ test('hard solo AI uses reveal decisions to keep a better hidden card', () => {
     discardRank: 'Q',
   });
 
-  const next = aiPlayTurn(state, 0, 'hard');
+  const plan = planAiTurn(state, 0, 'hard');
+  const target = plan.target;
+  assert.ok(target);
+  const original = state.players[0].grid[target.r][target.c];
+  const next = executeAiTurn(state, plan);
 
-  assert.equal(next.players[0].grid[0][0].rank, '5');
-  assert.equal(next.players[0].grid[0][0].faceUp, true);
+  assert.equal(next.players[0].grid[target.r][target.c].rank, original.rank);
+  assert.equal(next.players[0].grid[target.r][target.c].faceUp, true);
   assert.equal(next.topDiscard.rank, '9');
 });
 
@@ -249,11 +266,212 @@ test('easy solo AI reveals a hidden card and keeps its lower value instead of bl
   const move = chooseAiMove(state, 0, 'easy');
   assert.equal(move.source, 'draw');
   assert.equal(move.revealThenDecide, true);
+  assert.ok(move.target);
+  const original = state.players[0].grid[move.target.r][move.target.c];
 
-  const next = aiPlayTurn(state, 0, 'easy');
-  assert.equal(next.players[0].grid[0][0].rank, 'K');
-  assert.equal(next.players[0].grid[0][0].faceUp, true);
+  const next = executeAiTurn(state, move);
+  assert.equal(next.players[0].grid[move.target.r][move.target.c].rank, original.rank);
+  assert.equal(next.players[0].grid[move.target.r][move.target.c].faceUp, true);
   assert.equal(next.topDiscard.rank, 'Q');
+});
+
+test('strategically equal hidden targets vary by game while the same turn stays deterministic', () => {
+  const selected = new Set();
+  for (let index = 0; index < 40; index += 1) {
+    const state = baseState({
+      id: `varied-game-${index}`,
+      aiGrid: Array.from({ length: 3 }, () => row(card('7', false), card('7', false), card('7', false))),
+      drawRank: '9',
+      discardRank: 'Q',
+    });
+    const first = planAiTurn(state, 0, 'hard');
+    const second = planAiTurn(state, 0, 'hard');
+    assert.deepEqual(second, first);
+    assert.ok(first.target);
+    selected.add(`${first.target.r}:${first.target.c}`);
+  }
+  assert.ok(selected.size >= 4, `expected varied targets, received ${[...selected].join(', ')}`);
+});
+
+test('strategic tie-breaking never displaces a uniquely better column completion', () => {
+  for (let index = 0; index < 30; index += 1) {
+    const state = baseState({
+      id: `completion-game-${index}`,
+      aiGrid: [
+        row(card('8', false), card('A'), card('7', false)),
+        row(card('6', false), card('A'), card('5', false)),
+        row(card('4', false), card('9', false), card('3', false)),
+      ],
+      discardRank: 'A',
+    });
+    const plan = planAiTurn(state, 0, 'hard');
+    assert.equal(plan.source, 'discard');
+    assert.deepEqual(plan.target, { playerIndex: 0, r: 2, c: 1 });
+  }
+});
+
+test('easy and hard share tactical choices outside final-card aggression', () => {
+  const state = baseState({
+    id: 'shared-tactics',
+    aiGrid: [
+      row(card('10'), card('2'), card('6', false)),
+      row(card('9', false), card('3', false), card('7', false)),
+      row(card('4', false), card('8', false), card('2', false)),
+    ],
+    drawRank: '4',
+    discardRank: 'Q',
+  });
+  const easy = planAiTurn(state, 0, 'easy');
+  const hard = planAiTurn(state, 0, 'hard');
+  assert.equal(easy.source, hard.source);
+  assert.deepEqual(easy.target, hard.target);
+  assert.equal(easy.discardDrawn, hard.discardDrawn);
+  assert.equal(easy.revealThenDecide, hard.revealThenDecide);
+});
+
+test('easy hesitates on twenty percent of eligible final-card opportunities without making a worse play', () => {
+  let hesitationCount = 0;
+  let hesitationExample = null;
+  let decisiveExample = null;
+  for (let index = 0; index < 500; index += 1) {
+    const state = baseState({
+      id: `easy-final-${index}`,
+      aiGrid: [
+        row(card('3'), card('9'), card('5')),
+        row(card('A'), card('A'), card('5')),
+        row(card('6'), card('8'), card('7', false)),
+      ],
+      opponentGrid: [
+        row(card('10'), card('K'), card('Q')),
+        row(card('9'), card('8'), card('7')),
+        row(card('6'), card('5'), card('4')),
+      ],
+      drawRank: '2',
+      discardRank: 'Q',
+    });
+    const plan = planAiTurn(state, 0, 'easy');
+    if (plan.finalCardHesitation) {
+      hesitationCount += 1;
+      hesitationExample ||= { state, plan };
+      assert.notDeepEqual(plan.target, { playerIndex: 0, r: 2, c: 2 });
+    } else {
+      decisiveExample ||= { state, plan };
+      assert.deepEqual(plan.target, { playerIndex: 0, r: 2, c: 2 });
+    }
+  }
+  assert.ok(hesitationCount >= 85 && hesitationCount <= 115, `expected about 20%, received ${hesitationCount}/500`);
+  assert.ok(hesitationExample);
+  assert.ok(decisiveExample);
+  const delayed = executeAiTurn(hesitationExample.state, hesitationExample.plan);
+  assert.equal(delayed.players[0].grid[2][2].faceUp, false);
+  const finished = executeAiTurn(decisiveExample.state, decisiveExample.plan);
+  assert.equal(finished.players[0].grid[2][2].faceUp, true);
+});
+
+test('easy never hesitates during the final sweep', () => {
+  const state = baseState({
+    id: 'easy-final-sweep',
+    aiGrid: [
+      row(card('6', false), card('5'), card('K')),
+      row(card('5'), card('K'), card('5')),
+      row(card('K'), card('5'), card('5')),
+    ],
+    opponentGrid: Array.from({ length: 3 }, () => row(card('5'), card('5'), card('5'))),
+    drawRank: 'Q',
+    discardRank: '9',
+    sweepActive: true,
+  });
+  state.sweepStarterIndex = 1;
+  const plan = planAiTurn(state, 0, 'easy');
+  assert.equal(plan.finalCardHesitation, false);
+  assert.deepEqual(plan.target, { playerIndex: 0, r: 0, c: 0 });
+});
+
+test('opening peek targets are distinct, stable, and varied across games', () => {
+  const pairs = new Set();
+  for (let index = 0; index < 30; index += 1) {
+    const state = baseState({
+      id: `peek-game-${index}`,
+      aiGrid: Array.from({ length: 3 }, () => row(card('7', false), card('7', false), card('7', false))),
+    });
+    state.phase = 'peek';
+    state.peekTurnIndex = 0;
+    state.players[0].peekFlips = 0;
+    const first = chooseAiPeekTargets(state, 0, 2);
+    const second = chooseAiPeekTargets(state, 0, 2);
+    assert.deepEqual(second, first);
+    assert.equal(first.length, 2);
+    assert.notDeepEqual(first[0], first[1]);
+    pairs.add(first.map(target => `${target.r}:${target.c}`).join('|'));
+  }
+  assert.ok(pairs.size >= 5, `expected varied peek pairs, received ${[...pairs].join(', ')}`);
+});
+
+test('easy and hard AI complete 2-, 3-, and 4-player Solo rounds', () => {
+  for (const playerCount of [2, 3, 4]) {
+    for (const difficulty of ['easy', 'hard']) {
+      let state = createGameState(
+        Array.from({ length: playerCount }, (_, index) => ({
+          userId: `simulation-${playerCount}-${difficulty}-${index}`,
+          displayName: `AI ${index + 1}`,
+        })),
+        { totalRounds: 1 }
+      );
+      let steps = 0;
+      while (state.phase === 'peek' && steps < 100) {
+        const playerIndex = state.peekTurnIndex ?? 0;
+        const targets = chooseAiPeekTargets(state, playerIndex, 2 - state.players[playerIndex].peekFlips);
+        assert.ok(targets.length > 0);
+        for (const target of targets) {
+          const result = flipForPeek(state, playerIndex, target.r, target.c);
+          assert.equal(result.error, undefined);
+          state = result.state;
+          if (state.phase !== 'peek' || state.peekTurnIndex !== playerIndex) break;
+        }
+        steps += 1;
+      }
+      while (state.phase === 'turn' && steps < 500) {
+        const plan = planAiTurn(state, state.currentPlayerIndex, difficulty);
+        const next = executeAiTurn(state, plan);
+        assert.notEqual(next, state);
+        assert.ok((next.revision || 0) > (state.revision || 0));
+        state = next;
+        steps += 1;
+      }
+      assert.equal(state.phase, 'roundReveal', `${playerCount}P ${difficulty} stopped after ${steps} actions`);
+      state = resolveExpiredTimers({ ...state, roundRevealEndsAt: Date.now() - 1 });
+      assert.equal(state.phase, 'roundEnd');
+      assert.equal(state.completed, true);
+    }
+  }
+});
+
+test('a planned move executes the displayed target and stale plans are rejected', () => {
+  const state = baseState({
+    id: 'planned-target',
+    aiGrid: Array.from({ length: 3 }, () => row(card('7', false), card('7', false), card('7', false))),
+    drawRank: '9',
+    discardRank: 'Q',
+  });
+  const plan = planAiTurn(state, 0, 'hard');
+  assert.ok(plan.target);
+  const next = executeAiTurn(state, plan);
+  assert.equal(next.players[0].grid[plan.target.r][plan.target.c].faceUp, true);
+
+  const changed = { ...state, revision: state.revision + 1 };
+  assert.equal(executeAiTurn(changed, plan), changed);
+});
+
+test('online AFK keeps the legacy conservative policy separate from smarter Solo Easy', () => {
+  const state = baseState({
+    id: 'afk-policy',
+    aiGrid: Array.from({ length: 3 }, () => row(card('7', false), card('7', false), card('7', false))),
+    drawRank: '9',
+    discardRank: 'Q',
+  });
+  const afk = planAiTurn(state, 0, 'afk');
+  assert.equal(afk.policy, 'afk');
+  assert.deepEqual(afk.target, { playerIndex: 0, r: 0, c: 0 });
 });
 
 test('hard solo AI prioritizes a hidden card over a one-point visible improvement late in a round', () => {

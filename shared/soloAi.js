@@ -15,18 +15,57 @@ const HARD_DIRECT_KEEP_MAX = 2;
 const HARD_SETUP_MAX = 7;
 const HARD_REVEAL_MAX = 7;
 const HARD_HIDDEN_BYPASS_IMPROVEMENT = 5;
+const EASY_FINAL_HESITATION_PERCENT = 20;
+
+export function planAiTurn(state, playerIndex, policy = 'easy') {
+  const normalizedPolicy = normalizePolicy(policy);
+  const context = decisionContext(state, playerIndex);
+  const move = normalizedPolicy === 'afk'
+    ? chooseAfkAiMove(state, playerIndex)
+    : chooseStrategicAiMove(state, playerIndex, normalizedPolicy, context);
+  return {
+    ...move,
+    playerIndex,
+    policy: normalizedPolicy,
+    fingerprint: turnFingerprint(state, playerIndex),
+    cardId: move.card?.id || null,
+  };
+}
+
+export function executeAiTurn(state, plan) {
+  if (!isCurrentTurnPlan(state, plan)) return state;
+  return plan.policy === 'afk'
+    ? playPlannedAfkTurn(state, plan)
+    : playPlannedStrategicTurn(state, plan);
+}
 
 export function chooseAiMove(state, playerIndex, difficulty = 'easy') {
-  return difficulty === 'hard'
-    ? chooseHardAiMove(state, playerIndex)
-    : chooseEasyAiMove(state, playerIndex);
+  return planAiTurn(state, playerIndex, difficulty);
 }
 
 export function aiPlayTurn(state, playerIndex, difficulty = 'easy') {
-  if (state?.phase !== 'turn' || state.currentPlayerIndex !== playerIndex) return state;
+  return executeAiTurn(state, planAiTurn(state, playerIndex, difficulty));
+}
 
-  if (difficulty !== 'hard') return playEasyTurn(state, playerIndex);
-  return playHardTurn(state, playerIndex);
+export function chooseAiPeekTargets(state, playerIndex, count = 2) {
+  const grid = state?.players?.[playerIndex]?.grid;
+  if (!grid) return [];
+  const candidates = [];
+  for (let r = 0; r < ROWS; r += 1) {
+    for (let c = 0; c < COLS; c += 1) {
+      const card = grid[r]?.[c];
+      if (card && !card.faceUp) candidates.push({ r, c });
+    }
+  }
+  const context = decisionContext(state, playerIndex);
+  return candidates
+    .map(target => ({
+      target,
+      order: stableHash(`${context.seed}|opening-peek|${target.r}:${target.c}`),
+    }))
+    .sort((left, right) => right.order - left.order || targetKey(left.target).localeCompare(targetKey(right.target)))
+    .slice(0, Math.max(0, Math.min(candidates.length, Math.floor(Number(count) || 0))))
+    .map(entry => entry.target);
 }
 
 export function countFaceDownCards(grid) {
@@ -40,26 +79,24 @@ export function countFaceDownCards(grid) {
   return total;
 }
 
-function playEasyTurn(state, playerIndex) {
+function playPlannedAfkTurn(state, plan) {
   let working = state;
-  const source = chooseEasySource(working, playerIndex);
+  const playerIndex = plan.playerIndex;
 
-  if (source === 'discard') {
+  if (plan.source === 'discard') {
     const taken = takeDiscard(working);
-    if (taken.error || !taken.drawn) return working;
+    if (taken.error || !plannedCardMatches(taken.drawn, plan)) return state;
     working = taken.state;
-    const target = chooseEasyTarget(working.players[playerIndex].grid, taken.drawn);
-    return playEasyCardAtTarget(working, playerIndex, taken.drawn, target);
+    return playAfkCardAtTarget(working, playerIndex, taken.drawn, plan.target);
   }
 
   const drawn = drawFromDeck(working);
-  if (drawn.error || !drawn.drawn) return working;
+  if (drawn.error || !plannedCardMatches(drawn.drawn, plan)) return state;
   working = drawn.state;
-  const target = chooseEasyTarget(working.players[playerIndex].grid, drawn.drawn);
-  return playEasyCardAtTarget(working, playerIndex, drawn.drawn, target);
+  return playAfkCardAtTarget(working, playerIndex, drawn.drawn, plan.target);
 }
 
-function playEasyCardAtTarget(state, playerIndex, drawn, target) {
+function playAfkCardAtTarget(state, playerIndex, drawn, target) {
   const grid = state.players[playerIndex]?.grid;
   if (canRevealForDecision(grid, target?.r, target?.c)) {
     const revealed = revealGridCardForDecision(state, playerIndex, target.r, target.c);
@@ -68,36 +105,34 @@ function playEasyCardAtTarget(state, playerIndex, drawn, target) {
       return resolvePendingGridDecision(revealed.state, playerIndex, drawn, choice).state;
     }
   }
+  if (!target) return state;
   return replaceGridCard(state, playerIndex, target.r, target.c, drawn).state;
 }
 
-function playHardTurn(state, playerIndex) {
+function playPlannedStrategicTurn(state, plan) {
   let working = state;
-  const source = chooseHardSource(working, playerIndex);
+  const playerIndex = plan.playerIndex;
 
-  if (source === 'discard') {
+  if (plan.source === 'discard') {
     const taken = takeDiscard(working);
-    if (taken.error || !taken.drawn) return working;
+    if (taken.error || !plannedCardMatches(taken.drawn, plan)) return state;
     working = taken.state;
-    const target = chooseDirectTargetForKeptCard(working.players[playerIndex].grid, taken.drawn, {
-      avoidFinalHidden: shouldAvoidFinalHiddenTarget(working, playerIndex),
-    });
+    const target = plan.target;
+    if (!target) return state;
     return replaceGridCard(working, playerIndex, target.r, target.c, taken.drawn).state;
   }
 
   const drawn = drawFromDeck(working);
-  if (drawn.error || !drawn.drawn) return working;
+  if (drawn.error || !plannedCardMatches(drawn.drawn, plan)) return state;
   working = drawn.state;
-  const move = chooseHardDrawnCardMove(working, playerIndex, drawn.drawn);
 
-  if (move.discardDrawn) {
+  if (plan.discardDrawn) {
     return discardDrawn(working, playerIndex, drawn.drawn).state;
   }
 
-  const target = move.target || chooseDirectTargetForKeptCard(working.players[playerIndex].grid, drawn.drawn, {
-    avoidFinalHidden: shouldAvoidFinalHiddenTarget(working, playerIndex),
-  });
-  if (move.revealThenDecide) {
+  const target = plan.target;
+  if (!target) return state;
+  if (plan.revealThenDecide) {
     const revealed = revealGridCardForDecision(working, playerIndex, target.r, target.c);
     if (!revealed.error) {
       const choice = chooseRevealDecision(revealed.state, playerIndex, drawn.drawn, target);
@@ -108,7 +143,7 @@ function playHardTurn(state, playerIndex) {
   return replaceGridCard(working, playerIndex, target.r, target.c, drawn.drawn).state;
 }
 
-function chooseEasyAiMove(state, playerIndex) {
+function chooseAfkAiMove(state, playerIndex) {
   const source = chooseEasySource(state, playerIndex);
   const card = source === 'discard' ? state.topDiscard : peekDrawCard(state);
   const grid = state.players[playerIndex]?.grid;
@@ -126,12 +161,28 @@ function chooseEasyAiMove(state, playerIndex) {
   };
 }
 
-function chooseHardAiMove(state, playerIndex) {
-  const source = chooseHardSource(state, playerIndex);
+function chooseStrategicAiMove(state, playerIndex, policy, context) {
+  const grid = state.players[playerIndex]?.grid;
+  const oneHidden = !state.sweepActive && countFaceDownCards(grid) === 1;
+  const avoidBecauseTrailing = oneHidden && !hasLowestRoundScore(state, playerIndex);
+  let move = buildStrategicAiMove(state, playerIndex, context, avoidBecauseTrailing);
+  const wouldEndRound = oneHidden
+    && move.target
+    && !grid?.[move.target.r]?.[move.target.c]?.faceUp;
+  const hesitate = policy === 'easy'
+    && wouldEndRound
+    && stableHash(`${context.seed}|easy-final-hesitation`) % 100 < EASY_FINAL_HESITATION_PERCENT;
+  if (hesitate) move = buildStrategicAiMove(state, playerIndex, context, true);
+  return { ...move, finalCardHesitation: hesitate };
+}
+
+function buildStrategicAiMove(state, playerIndex, context, avoidFinalHidden) {
+  const source = chooseHardSource(state, playerIndex, context, avoidFinalHidden);
   if (source === 'discard') {
     const card = state.topDiscard;
     const target = card ? chooseDirectTargetForKeptCard(state.players[playerIndex].grid, card, {
-      avoidFinalHidden: shouldAvoidFinalHiddenTarget(state, playerIndex),
+      avoidFinalHidden,
+      context,
     }) : null;
     return {
       source,
@@ -146,7 +197,7 @@ function chooseHardAiMove(state, playerIndex) {
   if (!card) {
     return { source: 'draw', card: null, target: null, discardDrawn: false, intent: 'no-card' };
   }
-  return chooseHardDrawnCardMove(state, playerIndex, card);
+  return chooseHardDrawnCardMove(state, playerIndex, card, context, avoidFinalHidden);
 }
 
 function chooseEasySource(state, playerIndex) {
@@ -169,7 +220,7 @@ function chooseEasyTarget(grid, card) {
   return legacyPickTarget(grid, card);
 }
 
-function chooseHardSource(state, playerIndex) {
+function chooseHardSource(state, playerIndex, context, avoidFinalHidden) {
   if (mustDrawOnly(state, playerIndex)) return 'draw';
   const top = state.topDiscard;
   const grid = state.players[playerIndex]?.grid;
@@ -177,10 +228,9 @@ function chooseHardSource(state, playerIndex) {
 
   const topValue = cardValue(top);
   const hiddenCount = countFaceDownCards(grid);
-  const worst = worstFaceUp(grid);
-  const avoidFinalHidden = shouldAvoidFinalHiddenTarget(state, playerIndex);
-  const completion = visibleColumnCompletionTarget(grid, top);
-  const setup = visibleColumnSetupTarget(grid, top);
+  const worst = worstFaceUp(grid, context, 'source-worst-visible');
+  const completion = visibleColumnCompletionTarget(grid, top, context, 'source-column-completion');
+  const setup = visibleColumnSetupTarget(grid, top, context, 'source-column-setup');
 
   if (completion && !targetIsFinalHidden(grid, completion, avoidFinalHidden)) return 'discard';
   if (avoidFinalHidden && (!worst || topValue >= worst.score)) return 'draw';
@@ -191,18 +241,20 @@ function chooseHardSource(state, playerIndex) {
   return 'draw';
 }
 
-function chooseHardDrawnCardMove(state, playerIndex, card) {
+function chooseHardDrawnCardMove(state, playerIndex, card, context, avoidFinalHidden) {
   const grid = state.players[playerIndex]?.grid;
   if (!grid || !card) {
     return { source: 'draw', card, target: null, discardDrawn: false, intent: 'missing-grid' };
   }
 
-  if (shouldDiscardDrawnHard(state, playerIndex, card)) {
+  if (shouldDiscardDrawnHard(state, playerIndex, card, context, avoidFinalHidden)) {
     return { source: 'draw', card, target: null, discardDrawn: true, intent: 'discard-low-utility-draw' };
   }
 
-  const target = chooseHardTargetForDraw(state, playerIndex, card);
-  const shouldReveal = target && canRevealForDecision(grid, target.r, target.c) && shouldRevealBeforeChoosing(grid, card, target);
+  const target = chooseHardTargetForDraw(state, playerIndex, card, context, avoidFinalHidden);
+  const shouldReveal = target
+    && canRevealForDecision(grid, target.r, target.c)
+    && shouldRevealBeforeChoosing(grid, card, target);
   return {
     source: 'draw',
     card,
@@ -213,16 +265,15 @@ function chooseHardDrawnCardMove(state, playerIndex, card) {
   };
 }
 
-function shouldDiscardDrawnHard(state, playerIndex, card) {
+function shouldDiscardDrawnHard(state, playerIndex, card, context, avoidFinalHidden) {
   if (!canDiscardDrawnForAi(state, playerIndex)) return false;
   const grid = state.players[playerIndex]?.grid;
   if (!grid) return false;
 
   const incomingValue = cardValue(card);
-  const worst = worstFaceUp(grid);
-  const avoidFinalHidden = shouldAvoidFinalHiddenTarget(state, playerIndex);
-  const completion = visibleColumnCompletionTarget(grid, card);
-  const setup = visibleColumnSetupTarget(grid, card);
+  const worst = worstFaceUp(grid, context, 'draw-worst-visible');
+  const completion = visibleColumnCompletionTarget(grid, card, context, 'draw-column-completion');
+  const setup = visibleColumnSetupTarget(grid, card, context, 'draw-column-setup');
   if (completion && !targetIsFinalHidden(grid, completion, avoidFinalHidden)) return false;
   if (setup && !targetIsFinalHidden(grid, setup, avoidFinalHidden) && incomingValue <= HARD_SETUP_MAX) return false;
   if (avoidFinalHidden && (!worst || incomingValue >= worst.score)) {
@@ -239,22 +290,21 @@ function canDiscardDrawnForAi(state, playerIndex) {
     || (countFaceDownCards(state.players[playerIndex]?.grid) === 1 && !state.sweepActive);
 }
 
-function chooseHardTargetForDraw(state, playerIndex, card) {
+function chooseHardTargetForDraw(state, playerIndex, card, context, avoidFinalHidden) {
   const grid = state.players[playerIndex]?.grid;
   if (!grid) return null;
-  const avoidFinalHidden = shouldAvoidFinalHiddenTarget(state, playerIndex);
-  const completion = visibleColumnCompletionTarget(grid, card);
+  const completion = visibleColumnCompletionTarget(grid, card, context, 'target-column-completion');
   if (completion && !targetIsFinalHidden(grid, completion, avoidFinalHidden)) return completion;
 
-  const setup = visibleColumnSetupTarget(grid, card);
+  const setup = visibleColumnSetupTarget(grid, card, context, 'target-column-setup');
   const incomingValue = cardValue(card);
   const hiddenCount = countFaceDownCards(grid);
   if (setup && !targetIsFinalHidden(grid, setup, avoidFinalHidden) && (incomingValue <= HARD_SETUP_MAX || hiddenCount >= 4)) {
     return setup;
   }
 
-  const hidden = bestHiddenTarget(grid, card);
-  const worst = worstFaceUp(grid);
+  const hidden = bestHiddenTarget(grid, card, context, 'target-hidden');
+  const worst = worstFaceUp(grid, context, 'target-worst-visible');
   const canUseHidden = hidden && !targetIsFinalHidden(grid, hidden, avoidFinalHidden);
   if (canUseHidden) {
     if (hiddenCount >= 3 || hiddenCount === 1) return hidden;
@@ -267,17 +317,22 @@ function chooseHardTargetForDraw(state, playerIndex, card) {
 }
 
 function chooseDirectTargetForKeptCard(grid, card, options = {}) {
-  const completion = visibleColumnCompletionTarget(grid, card);
+  const completion = visibleColumnCompletionTarget(
+    grid,
+    card,
+    options.context,
+    'kept-column-completion'
+  );
   if (completion && !targetIsFinalHidden(grid, completion, options.avoidFinalHidden)) return completion;
 
   const incomingValue = cardValue(card);
-  const setup = visibleColumnSetupTarget(grid, card);
+  const setup = visibleColumnSetupTarget(grid, card, options.context, 'kept-column-setup');
   if (setup && !targetIsFinalHidden(grid, setup, options.avoidFinalHidden) && incomingValue <= HARD_SETUP_MAX) {
     return setup;
   }
 
-  const hidden = bestHiddenTarget(grid, card);
-  const worst = worstFaceUp(grid);
+  const hidden = bestHiddenTarget(grid, card, options.context, 'kept-hidden');
+  const worst = worstFaceUp(grid, options.context, 'kept-worst-visible');
   if (incomingValue <= HARD_DIRECT_KEEP_MAX && hidden && !targetIsFinalHidden(grid, hidden, options.avoidFinalHidden)) {
     return hidden;
   }
@@ -285,13 +340,6 @@ function chooseDirectTargetForKeptCard(grid, card, options = {}) {
   if (hidden && !targetIsFinalHidden(grid, hidden, options.avoidFinalHidden)) return hidden;
   if (worst) return { r: worst.r, c: worst.c };
   return legacyPickTarget(grid, card);
-}
-
-function shouldAvoidFinalHiddenTarget(state, playerIndex) {
-  const grid = state.players[playerIndex]?.grid;
-  return !state.sweepActive
-    && countFaceDownCards(grid) === 1
-    && !hasLowestRoundScore(state, playerIndex);
 }
 
 function targetIsFinalHidden(grid, target, shouldAvoid) {
@@ -362,34 +410,37 @@ function chooseLowerValueRevealDecision(state, playerIndex, drawn, target) {
   return cardValue(drawn) < cardValue(revealed) ? 'drawn' : 'revealed';
 }
 
-function visibleColumnCompletionTarget(grid, incoming) {
+function visibleColumnCompletionTarget(grid, incoming, context, scope = 'column-completion') {
+  const candidates = [];
   for (let c = 0; c < COLS; c += 1) {
     const column = columnCards(grid, c);
     const visibleMatches = column.filter(card => card && card.faceUp && card.rank === incoming.rank).length;
     if (visibleMatches < 2) continue;
     for (let r = 0; r < ROWS; r += 1) {
       const card = grid[r]?.[c];
-      if (card && (!card.faceUp || card.rank !== incoming.rank)) return { r, c };
+      if (card && (!card.faceUp || card.rank !== incoming.rank)) candidates.push({ r, c });
     }
   }
-  return null;
+  return stableTargetChoice(candidates, context, scope);
 }
 
-function visibleColumnSetupTarget(grid, incoming) {
+function visibleColumnSetupTarget(grid, incoming, context, scope = 'column-setup') {
+  const candidates = [];
   for (let c = 0; c < COLS; c += 1) {
     const column = columnCards(grid, c);
     const visibleMatches = column.filter(card => card && card.faceUp && card.rank === incoming.rank).length;
     if (visibleMatches !== 1) continue;
     for (let r = 0; r < ROWS; r += 1) {
       const card = grid[r]?.[c];
-      if (card && !card.faceUp) return { r, c };
+      if (card && !card.faceUp) candidates.push({ r, c });
     }
   }
-  return null;
+  return stableTargetChoice(candidates, context, scope);
 }
 
-function bestHiddenTarget(grid, incoming) {
-  let best = null;
+function bestHiddenTarget(grid, incoming, context, scope = 'hidden-target') {
+  const candidates = [];
+  let bestScore = Number.NEGATIVE_INFINITY;
   for (let r = 0; r < ROWS; r += 1) {
     for (let c = 0; c < COLS; c += 1) {
       const card = grid[r]?.[c];
@@ -400,10 +451,16 @@ function bestHiddenTarget(grid, incoming) {
       const visibleScore = visible.reduce((total, item) => total + cardValue(item), 0);
       const duplicateVisible = visible.length >= 2 && visible.every(item => item.rank === visible[0].rank);
       const score = matchingVisible * 12 + visible.length * 4 + (duplicateVisible ? 4 : 0) + Math.max(0, visibleScore) / 3;
-      if (!best || score > best.score) best = { r, c, score };
+      if (score > bestScore) {
+        bestScore = score;
+        candidates.length = 0;
+        candidates.push({ r, c });
+      } else if (score === bestScore) {
+        candidates.push({ r, c });
+      }
     }
   }
-  return best ? { r: best.r, c: best.c } : null;
+  return stableTargetChoice(candidates, context, scope);
 }
 
 function cardDangerToOpponents(state, playerIndex, card) {
@@ -435,17 +492,24 @@ function columnAlreadyClears(grid, col) {
     && column.every(card => card.rank === column[0].rank);
 }
 
-function worstFaceUp(grid) {
-  let out = null;
+function worstFaceUp(grid, context, scope = 'worst-visible') {
+  const candidates = [];
+  let worstScore = Number.NEGATIVE_INFINITY;
   for (let r = 0; r < ROWS; r += 1) {
     for (let c = 0; c < COLS; c += 1) {
       const cell = grid[r]?.[c];
       if (!cell || !cell.faceUp || cell.zeroed) continue;
       const score = cardValue(cell);
-      if (!out || score > out.score) out = { r, c, score };
+      if (score > worstScore) {
+        worstScore = score;
+        candidates.length = 0;
+        candidates.push({ r, c, score });
+      } else if (score === worstScore) {
+        candidates.push({ r, c, score });
+      }
     }
   }
-  return out;
+  return stableTargetChoice(candidates, context, scope);
 }
 
 function firstFaceDown(grid) {
@@ -473,4 +537,85 @@ function peekDrawCard(state) {
 
 function columnCards(grid, c) {
   return Array.from({ length: ROWS }, (_, r) => grid[r]?.[c] || null);
+}
+
+function normalizePolicy(policy) {
+  if (policy === 'hard' || policy === 'afk') return policy;
+  return 'easy';
+}
+
+function decisionContext(state, playerIndex) {
+  const player = state?.players?.[playerIndex];
+  const identity = player?.userId || player?.id || `player-${playerIndex}`;
+  return {
+    seed: [
+      state?.id || 'game',
+      state?.round || 1,
+      state?.turnSerial || 0,
+      identity,
+    ].join('|'),
+  };
+}
+
+function turnFingerprint(state, playerIndex) {
+  const player = state?.players?.[playerIndex];
+  return {
+    gameId: state?.id || null,
+    round: state?.round || 1,
+    turnSerial: state?.turnSerial || 0,
+    revision: state?.revision || 0,
+    playerId: player?.userId || player?.id || `player-${playerIndex}`,
+  };
+}
+
+function isCurrentTurnPlan(state, plan) {
+  if (!state || !plan || state.phase !== 'turn') return false;
+  if (!Number.isInteger(plan.playerIndex) || state.currentPlayerIndex !== plan.playerIndex) return false;
+  if (!plan.fingerprint || normalizePolicy(plan.policy) !== plan.policy) return false;
+  const current = turnFingerprint(state, plan.playerIndex);
+  if (current.gameId !== plan.fingerprint.gameId
+    || current.round !== plan.fingerprint.round
+    || current.turnSerial !== plan.fingerprint.turnSerial
+    || current.revision !== plan.fingerprint.revision
+    || current.playerId !== plan.fingerprint.playerId) return false;
+  const sourceCard = plan.source === 'discard' ? state.topDiscard : peekDrawCard(state);
+  if ((sourceCard?.id || null) !== (plan.cardId || null)) return false;
+  if (plan.target) {
+    if (plan.target.playerIndex !== plan.playerIndex) return false;
+    if (!state.players?.[plan.playerIndex]?.grid?.[plan.target.r]?.[plan.target.c]) return false;
+  }
+  return plan.source === 'draw' || plan.source === 'discard';
+}
+
+function plannedCardMatches(card, plan) {
+  return !!card && (card.id || null) === (plan.cardId || null);
+}
+
+function stableTargetChoice(candidates, context, scope) {
+  if (!candidates.length) return null;
+  if (!context?.seed) return candidates[0];
+  let chosen = candidates[0];
+  let chosenOrder = stableHash(`${context.seed}|${scope}|${targetKey(chosen)}`);
+  for (let index = 1; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    const order = stableHash(`${context.seed}|${scope}|${targetKey(candidate)}`);
+    if (order > chosenOrder || (order === chosenOrder && targetKey(candidate) < targetKey(chosen))) {
+      chosen = candidate;
+      chosenOrder = order;
+    }
+  }
+  return chosen;
+}
+
+function targetKey(target) {
+  return `${target.r}:${target.c}`;
+}
+
+function stableHash(value) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
 }
