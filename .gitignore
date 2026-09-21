@@ -12,6 +12,11 @@ expo-export-smoke/
 client/.expo/
 client/dist/
 client/.codex-export-android/
+client/.codex-export-ios/
+client/ios/
+client/android/
+server/game-public/
+artifacts/
 
 .env
 .env.local

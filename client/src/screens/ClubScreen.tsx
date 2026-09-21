@@ -3,7 +3,6 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -17,6 +16,7 @@ import {
 import type { StyleProp, ViewStyle } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Alert } from '../utils/alert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Check,

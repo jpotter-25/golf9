@@ -3,6 +3,7 @@ const googleIosUrlScheme = process.env.EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME || '';
 const facebookAppId = process.env.EXPO_PUBLIC_FACEBOOK_APP_ID || '';
 const facebookClientToken = process.env.EXPO_PUBLIC_FACEBOOK_CLIENT_TOKEN || '';
 const facebookDisplayName = process.env.EXPO_PUBLIC_FACEBOOK_DISPLAY_NAME || 'Nine Below';
+const isIosBuild = process.env.EAS_BUILD_PLATFORM === 'ios' || process.env.EXPO_PUBLIC_APP_TARGET === 'ios';
 const releaseChannel = process.env.EXPO_PUBLIC_RELEASE_CHANNEL
   || (process.env.EXPO_PUBLIC_APP_ENV === 'production' ? 'production' : 'playtest');
 
@@ -20,14 +21,14 @@ plugins.push([
   },
 ]);
 
-if (googleWebClientId && googleIosUrlScheme) {
+if (!isIosBuild && googleWebClientId && googleIosUrlScheme) {
   plugins.push([
     '@react-native-google-signin/google-signin',
     { iosUrlScheme: googleIosUrlScheme },
   ]);
 }
 
-if (facebookAppId && facebookClientToken) {
+if (!isIosBuild && facebookAppId && facebookClientToken) {
   plugins.push([
     'react-native-fbsdk-next',
     {
@@ -60,8 +61,17 @@ module.exports = {
     },
     ios: {
       supportsTablet: true,
-      bundleIdentifier: 'com.golf9.app',
-      buildNumber: '2',
+      bundleIdentifier: 'com.potterwell.ninebelow',
+      buildNumber: '1',
+      config: { usesNonExemptEncryption: false },
+      privacyManifests: {
+        NSPrivacyTracking: false,
+        NSPrivacyTrackingDomains: [],
+        NSPrivacyAccessedAPITypes: [
+          { NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryFileTimestamp', NSPrivacyAccessedAPITypeReasons: ['C617.1'] },
+          { NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryUserDefaults', NSPrivacyAccessedAPITypeReasons: ['CA92.1'] },
+        ],
+      },
     },
     android: {
       package: 'com.potterwell.ninebelow',
@@ -83,9 +93,11 @@ module.exports = {
       bundler: 'metro',
       output: 'single',
     },
+    experiments: process.env.EXPO_PUBLIC_APP_TARGET === 'web' ? { baseUrl: '/play' } : {},
     plugins,
     extra: {
       releaseChannel,
+      webBuildNumber: 1,
       eas: {
         projectId: 'b8c31c6b-71b9-497d-984c-d59a4871e84b',
       },

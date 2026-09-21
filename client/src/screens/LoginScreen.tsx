@@ -2,7 +2,8 @@
 // Purpose: Real signup/login screen backed by server sessions.
 
 import React, { useEffect, useState } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert } from '../utils/alert';
 import { BookOpen, GraduationCap, LogIn, Sparkles, UserPlus } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';

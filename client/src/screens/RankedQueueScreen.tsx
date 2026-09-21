@@ -2,7 +2,8 @@
 // Purpose: Premium ranked matchmaking queue with season/rank context.
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Alert } from '../utils/alert';
 import { ChevronLeft, Radar, Sparkles, Trophy, Users, type LucideIcon } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';

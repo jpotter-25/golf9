@@ -2,7 +2,8 @@
 // Purpose: Player-facing system mailbox, reward claims, and feedback reports.
 
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert } from '../utils/alert';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CheckCircle2, Gift, Mail, Send, Trash2 } from 'lucide-react-native';

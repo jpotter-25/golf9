@@ -12,6 +12,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import { createPostgresStore } from './postgresStore.js';
+import { createGameWebRouter } from './gameWeb.js';
 import {
   isPublicHostedEnvironment,
   normalizeCredentialVerifier,
@@ -3120,7 +3121,7 @@ function blockRoomFeature(room, userId, res) {
 function normalizeReleasePlatform(value) {
   const platform = String(value || '').trim().toLowerCase();
   if (platform === 'mobile') return 'android';
-  return ['android', 'ios'].includes(platform) ? platform : null;
+  return ['android', 'ios', 'web'].includes(platform) ? platform : null;
 }
 
 function normalizeReleaseChannel(value) {
@@ -4470,6 +4471,8 @@ function sendLegalPage(res, title, sections, canonicalPath) {
   res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
   res.send(legalPage(title, sections, canonicalPath));
 }
+
+app.use('/play', createGameWebRouter());
 
 app.use('/brand', express.static(PRODUCT_PUBLIC_DIR, {
   fallthrough: false,

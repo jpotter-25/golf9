@@ -11,7 +11,8 @@
     "verify-deps": "expo install --check",
     "eas-build-post-install": "npm run verify-deps",
     "lint": "eslint . --ext .ts,.tsx --max-warnings=0",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:browser": "node --test test/browserAlert.test.cjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
@@ -33,7 +34,7 @@
     "expo-status-bar": "~3.0.9",
     "lucide-react-native": "^1.20.0",
     "react": "19.1.0",
-    "react-dom": "^19.1.0",
+    "react-dom": "19.1.0",
     "react-native": "0.81.5",
     "react-native-fbsdk-next": "^13.4.3",
     "react-native-gesture-handler": "~2.28.0",
@@ -41,6 +42,7 @@
     "react-native-screens": "~4.16.0",
     "react-native-svg": "15.12.1",
     "react-native-svg-transformer": "^1.5.1",
+    "react-native-web": "^0.21.0",
     "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
@@ -49,6 +51,17 @@
     "eslint": "^9.9.0",
     "eslint-config-universe": "^15.0.3",
     "typescript": "~5.9.2"
+  },
+  "expo": {
+    "autolinking": {
+      "ios": {
+        "exclude": [
+          "@react-native-google-signin/google-signin",
+          "react-native-fbsdk-next",
+          "expo-in-app-updates"
+        ]
+      }
+    }
   },
   "engines": {
     "node": ">=18"

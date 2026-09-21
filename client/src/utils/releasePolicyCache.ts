@@ -12,6 +12,10 @@ export async function loadReleasePolicyCache(): Promise<ReleasePolicyResponse | 
   if (!raw) return null;
   try {
     const cached = JSON.parse(raw) as ReleasePolicyResponse;
+    if (cached.platform !== releaseInfo.platform || cached.channel !== releaseInfo.channel) {
+      await AsyncStorage.removeItem(POLICY_KEY);
+      return null;
+    }
     let status: ReleasePolicyResponse['status'] = 'current';
     if (cached.storeReady && cached.minimumBuild > releaseInfo.build) status = 'required';
     else if (cached.storeReady && cached.latestBuild > releaseInfo.build) status = 'recommended';
@@ -38,11 +42,11 @@ export async function saveReleasePolicyCache(policy: ReleasePolicyResponse): Pro
 }
 
 export async function deferRecommendedBuild(build: number): Promise<void> {
-  await AsyncStorage.setItem(`${LATER_KEY_PREFIX}.${build}`, String(Date.now()));
+  await AsyncStorage.setItem(`${LATER_KEY_PREFIX}.${releaseInfo.platform}.${releaseInfo.channel}.${build}`, String(Date.now()));
 }
 
 export async function isRecommendedBuildDeferred(build: number, now = Date.now()): Promise<boolean> {
-  const raw = await AsyncStorage.getItem(`${LATER_KEY_PREFIX}.${build}`);
+  const raw = await AsyncStorage.getItem(`${LATER_KEY_PREFIX}.${releaseInfo.platform}.${releaseInfo.channel}.${build}`);
   const deferredAt = Number(raw || 0);
   return Number.isFinite(deferredAt) && now - deferredAt < 24 * 60 * 60 * 1000;
 }

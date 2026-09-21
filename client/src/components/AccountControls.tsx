@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert } from '../utils/alert';
 import { CheckCircle2, Link, LogOut, ShieldAlert, Trash2 } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import type { AuthProviderKey } from '../services/api';
@@ -19,6 +20,7 @@ export function AccountControls({ onSessionEnd }: AccountControlsProps) {
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteError, setDeleteError] = useState('');
+  const availableProviders = (['google', 'facebook'] as AuthProviderKey[]).filter(isProviderConfigured);
 
   const linkProvider = async (provider: AuthProviderKey) => {
     if (busy) return;
@@ -68,26 +70,25 @@ export function AccountControls({ onSessionEnd }: AccountControlsProps) {
   return (
     <View style={styles.root}>
       <View style={styles.sectionCopy}>
-        <Text style={styles.sectionTitle}>Linked accounts</Text>
-        <Text style={styles.sectionMeta}>Connect Google or Facebook to use the same player profile.</Text>
+        <Text style={styles.sectionTitle}>{availableProviders.length ? 'Linked accounts' : 'Your Nine Below account'}</Text>
+        <Text style={styles.sectionMeta}>
+          {availableProviders.length
+            ? 'Connect Google or Facebook to use the same player profile.'
+            : 'Use your Nine Below display name and password to keep the same player profile across devices.'}
+        </Text>
       </View>
 
-      <ProviderRow
-        provider="google"
-        linked={!!user?.authProviders?.google}
-        enabled={isProviderConfigured('google')}
-        busy={busy === 'link-google'}
-        disabled={!!busy}
-        onPress={() => linkProvider('google')}
-      />
-      <ProviderRow
-        provider="facebook"
-        linked={!!user?.authProviders?.facebook}
-        enabled={isProviderConfigured('facebook')}
-        busy={busy === 'link-facebook'}
-        disabled={!!busy}
-        onPress={() => linkProvider('facebook')}
-      />
+      {availableProviders.map(provider => (
+        <ProviderRow
+          key={provider}
+          provider={provider}
+          linked={!!user?.authProviders?.[provider]}
+          enabled
+          busy={busy === `link-${provider}`}
+          disabled={!!busy}
+          onPress={() => linkProvider(provider)}
+        />
+      ))}
 
       <Pressable
         accessibilityRole="button"

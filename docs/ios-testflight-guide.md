@@ -1,0 +1,279 @@
+# Nine Below: iOS and TestFlight setup guide
+
+Prepared September 21, 2026. Product: **Nine Below by Potterwell**.
+
+This guide prepares the first iOS beta and explains how to give selected people access. The release configuration is prepared for **version 0.1.0, iOS build 1**. A signed IPA and its upload are **pending Apple signing credentials and App Store Connect setup**. The first noninteractive EAS attempt stopped because iOS signing credentials have not been configured; **no iOS build was queued by that attempt**. This document does not claim that a build has finished, that Apple has approved it, or that the app is publicly available.
+
+## What is already shared across platforms
+
+Nine Below uses the same game account, server, rooms, game rules, and durable account data across Android, iOS, and the browser. Apple and Google distribute their respective app packages; the Nine Below server synchronizes play. A second database or copies of each player's account are not required merely to add iOS.
+
+The iOS `testflight` build profile connects to `https://ninebelow.potterwell.com`, using the same `playtest` channel and backend as the Google Play testing build. It inherits the `playtest` environment, despite the environment label being `staging`. This is a shared service, so a tester's real account changes affect that account wherever it is used.
+
+The browser build is configured to deploy at [ninebelow.potterwell.com/play/](https://ninebelow.potterwell.com/play/), with independent browser build number `1`. The Railway build now exports and serves the browser game. Verify that address after each deployment before inviting a wave; the existing homepage alone does not establish browser-game availability.
+
+Use the same **Nine Below display name and password** to access the same account on another device. Use separate player accounts when testing a match between multiple devices. A TestFlight invitation, a Google Play tester invitation, and a Nine Below account invite code each serve different purposes.
+
+The initial iOS and browser releases support Nine Below's own display-name/password login. Google and Facebook integrations remain Android-only. **Sign in with Apple is not implemented in this release.** See the existing-account section below if someone originally created an account only through Google or Facebook.
+
+## 1. Finish the Apple account prerequisites
+
+1. Sign in to [Apple Developer](https://developer.apple.com/account/) using the account enrolled in the paid Apple Developer Program.
+2. Confirm the correct team is selected and enrollment is active.
+3. If Apple shows an updated agreement, the Account Holder must review and accept it before Apple will allow app creation or signing.
+4. Keep a trusted Apple device or phone available for two-factor authentication.
+5. Find the **Team ID** under Apple Developer membership details. This is the development team's identifier; it is not your email address, bundle ID, or App Store Connect app number.
+
+Do not paste your Apple password, verification codes, signing certificates, or private API keys into chat, GitHub, or this guide. Enter credentials directly into the interactive Apple/EAS prompt when setup reaches that point.
+
+## 2. Register the app's identifier if it is missing
+
+If `com.potterwell.ninebelow` already appears in the New App bundle-ID list, skip this section.
+
+1. Open [Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources/identifiers/list).
+2. Choose **Identifiers**, then **+**.
+3. Choose **App IDs**, then the **App** type, and continue.
+4. Description: `Nine Below`.
+5. Select an **Explicit** bundle ID and enter `com.potterwell.ninebelow` exactly.
+6. Enable capabilities that this build uses. Push Notifications is needed if iOS push notifications will be configured. EAS can synchronize the project's required capabilities during signing setup. Do not enable Sign in with Apple solely because this is an iOS app; this build does not implement it.
+7. Continue, inspect the identifier, then **Register**.
+8. Return to App Store Connect and refresh the New App dialog.
+
+The bundle ID must match `ios.bundleIdentifier` in `client/app.config.js`. Apple binds uploaded builds to that identity. [Apple's identifier guide](https://developer.apple.com/help/account/identifiers/register-an-app-id/)
+
+## 3. Fill in the New App screen
+
+Open [App Store Connect](https://appstoreconnect.apple.com/) → **Apps** → **+** → **New App**. Use these values:
+
+| Field | Enter or select |
+| --- | --- |
+| Platforms | **iOS** |
+| Name | **Nine Below** |
+| Primary language | **English (U.S.)** |
+| Bundle ID | **com.potterwell.ninebelow** |
+| SKU | **ninebelow-ios** |
+| User Access | **Limited Access** for only the trusted staff who need this app |
+
+If Apple reports that the name is unavailable, stop at that field and choose an approved alternative with Potterwell; do not change the bundle identifier to solve a name conflict. The SKU is your private inventory identifier and cannot be changed after app creation. Limited Access controls developer-console access, not who can play the game.
+
+Click **Create**. Open the app's **App Information** page and copy its numeric **Apple ID**. We need that number for EAS submission. If Apple shows a developer-name field for an organization account, use the legal branding supported by your membership; the game name is still Nine Below.
+
+| Identifier | Meaning | Example/value |
+| --- | --- | --- |
+| Apple account | Your Apple login | Your account email; enter it privately when requested |
+| Team ID | Your enrolled developer team | Read it from your Apple membership |
+| Bundle ID | The app's technical identity | `com.potterwell.ninebelow` |
+| App Store Connect Apple ID | Numeric identifier assigned to the app | Read it from App Information; use as `ascAppId` |
+| SKU | Your private app inventory label | `ninebelow-ios` |
+| EAS project ID | Existing Expo project | `b8c31c6b-71b9-497d-984c-d59a4871e84b` |
+
+[Apple's New App instructions](https://developer.apple.com/help/app-store-connect/create-an-app-record/add-a-new-app) and [field definitions](https://developer.apple.com/help/app-store-connect/reference/app-information/app-information).
+
+## 4. Build the signed iOS package from Windows
+
+The upload package is an **IPA (`.ipa`)**. EAS Build compiles and signs it on a hosted Mac, and EAS Submit uploads it to Apple from this Windows computer. The New App webpage is for the app record; it is not a place to drag an AAB or IPA into a browser upload box.
+
+The configured profile is `testflight`, with `distribution: "store"`, `simulator: false`, and the image `macos-sequoia-15.6-xcode-26.0`. Apple has required Xcode 26 and the iOS 26 SDK or newer for uploads since April 28, 2026. The build SDK is different from the oldest iOS version on which the app can run.
+
+EAS's `distribution: "internal"` creates an ad hoc build for registered devices. It is not Apple's TestFlight internal-testing workflow. Use `testflight` for this release, not `staging` or `ios-simulator`.
+
+For a guided shortcut, run the checked-in helper from the repository root:
+
+```powershell
+& .\scripts\build-ios-testflight.ps1
+```
+
+The helper starts the interactive EAS build; it does not itself upload to Apple or invite testers. If your PowerShell execution policy blocks the script, keep that policy in place and use the direct commands below. [Build helper](../scripts/build-ios-testflight.ps1)
+
+Run these commands in PowerShell from the repository's `client` folder:
+
+```powershell
+Set-Location 'C:\Users\johnp\Documents\Codex\2026-06-04\prior-conversation-with-codex-conversation-role-3\work\golf9\client'
+npx.cmd --yes eas-cli@latest whoami
+```
+
+If Expo asks for login, authenticate to the existing project owner/team. Then start the build interactively:
+
+```powershell
+npx.cmd --yes eas-cli@latest build --platform ios --profile testflight
+```
+
+During first-time signing setup:
+
+1. Sign in to the Apple account directly in the terminal prompt.
+2. Enter Apple's verification code directly in that prompt when requested.
+3. Select the correct Apple developer team.
+4. Confirm the bundle identifier is `com.potterwell.ninebelow`.
+5. Let EAS use or generate the Apple distribution certificate and App Store provisioning profile for this app. Do not revoke an existing certificate as a troubleshooting shortcut.
+6. If push credentials are requested, configure the appropriate APNs key for the same team. A successful app build alone does not prove push delivery is configured.
+7. Retain the EAS build ID and build page. Wait for **Finished**, inspect any warnings, and download the IPA if a local archive is wanted.
+
+Apple credentials may require this interactive step even if Expo is already signed in. A noninteractive build cannot create missing signing credentials by itself. A failed or queued build is not an upload-ready package.
+
+[Expo signing setup](https://docs.expo.dev/app-signing/managed-credentials/), [Expo build images](https://docs.expo.dev/build-reference/infrastructure/), [Apple SDK requirement](https://developer.apple.com/news/upcoming-requirements/).
+
+## 5. Upload the exact finished build
+
+Once App Store Connect has assigned the numeric Apple ID, put that number in the existing submission profile in `client/eas.json`. Preserve the other build and submission profiles. The relevant fragment will look like this, with the placeholder replaced:
+
+```json
+{
+  "submit": {
+    "testflight": {
+      "ios": {
+        "ascAppId": "REPLACE_WITH_APP_STORE_CONNECT_NUMERIC_APPLE_ID"
+      }
+    }
+  }
+}
+```
+
+This is a configuration illustration, not a file to paste over all of `eas.json`. Do not submit with the placeholder still present.
+
+Configure the upload credential interactively:
+
+```powershell
+npx.cmd --yes eas-cli@latest credentials --platform ios
+```
+
+Select the `testflight` profile and use **App Store Connect: Manage your API Key** → **Set up your project to use an API Key for EAS Submit** when those menu choices appear. EAS can guide an authorized Apple account through setup. An alternative is a privately configured app-specific password; neither secret belongs in source control.
+
+Submit the build ID whose version, build number, and source you checked:
+
+```powershell
+npx.cmd --yes eas-cli@latest submit --platform ios --profile testflight --id REPLACE_WITH_FINISHED_EAS_BUILD_ID
+```
+
+In App Store Connect → Nine Below → **TestFlight**, wait for Apple to process **0.1.0 (1)**. Processing time varies. Resolve any **Missing Compliance**, invalid-binary, or signing messages before inviting testers. A successful EAS upload does not by itself mean Apple's processing succeeded.
+
+This uploads for TestFlight. It does **not** publish the app publicly in the App Store. Public release is a separate submission and review. [Expo iOS submission guide](https://docs.expo.dev/submit/ios/)
+
+## 6. Choose the right kind of private testing
+
+Apple's word **internal** means an App Store Connect team member, not simply someone you personally selected.
+
+| Testers | Recommended group | Developer-console access | Review |
+| --- | --- | --- | --- |
+| You and trusted Potterwell staff | Internal, up to 100 testers | Must have an eligible App Store Connect role and access to Nine Below | Available after processing and compliance steps |
+| Selected friends, partners, or players | Private external group, up to 10,000 testers per app | None required | First external beta requires TestFlight App Review |
+
+For personal contacts, use external testing with email invitations and keep the public invitation link disabled. This remains a private beta. Do not make personal contacts App Store Connect administrators just so they can test.
+
+### Internal group for trusted staff
+
+1. In App Store Connect → **Users and Access**, add only staff who need console access. Give the minimum suitable role and limit app access to Nine Below where possible. Eligible tester roles include Account Holder, Admin, App Manager, Developer, and Marketing.
+2. Have each staff member accept the team invitation.
+3. Open Nine Below → **TestFlight** → **Internal Testing** → **+**.
+4. Name the group `Potterwell Internal QA`. Leave automatic distribution off for the first controlled rollout.
+5. Use **Add Builds** to select the processed build and paste the What to Test text from the copy file linked below.
+6. Choose **Invite Testers** and select the eligible staff accounts.
+7. Each tester installs Apple's [TestFlight app](https://apps.apple.com/app/testflight/id899247664), opens their invitation on the device, accepts it, and installs Nine Below.
+
+[Apple internal-testing instructions](https://developer.apple.com/help/app-store-connect/test-a-beta-version/add-internal-testers).
+
+### Private external group for selected people
+
+1. Create the internal group first; Apple's external-group workflow requires one.
+2. Under **External Testing**, click **+** and create `Nine Below Founders` or a wave-specific name.
+3. Add the processed build.
+4. Enter the beta description, monitored feedback email, contact information, and What to Test details. Starter copy is in [TestFlight copy](../store-assets/apple/testflight-copy.md).
+5. Supply a working, non-administrator game review account if Apple needs login. Give Apple enough access to evaluate the game without depending on an expiring or already-used signup code. Keep its password in Apple's review form, not in repository files.
+6. Submit for **TestFlight App Review** and wait for approval.
+7. Add only the selected testers by email. Keep **Public Link** disabled unless you deliberately choose a later public-link wave.
+8. Test the full invitation and installation flow with one selected person before adding the rest.
+
+[Apple external-testing instructions](https://developer.apple.com/help/app-store-connect/test-a-beta-version/invite-external-testers). Store screenshots and a public launch submission are separate from this initial beta workflow.
+
+## 7. Give testers access inside Nine Below
+
+Apple's invitation grants the ability to install the beta. It does not create a Nine Below account or bypass the game's invite gate.
+
+For a new player, create a limited-use signup code in the [Nine Below admin console](https://ninebelow.potterwell.com/admin/) → **Invites**, or use a ready and configured Early Access access campaign. Keep the existing invite gate enabled during controlled testing. The tester selects **Create Account**, chooses a display name and strong password, and enters their Nine Below invite code when required. A one-use code cannot be reused for another account.
+
+Existing accounts with a Nine Below password can log in using the same display name/password on Android, iOS, and web. They do not need another signup code and should not create duplicate accounts to change devices.
+
+### Existing Google/Facebook-only players
+
+This first iOS/browser build does not offer those login buttons. A social-only player needs help adding password sign-in to the **existing** Nine Below account before using it on iOS or the browser.
+
+The verified staff path is **Admin → Players → select the correct player → Reset Password**. After independently verifying the requester owns the account, an authorized staff member can leave the password field blank to generate a strong value and record an audit reason. This resets password credentials and revokes existing game sessions. Deliver the new password privately to the verified owner.
+
+The interface calls this a temporary password, but the current player app does not provide a verified self-service password-change screen or enforce replacement at next login. Treat the generated password as a real credential; do not promise an automatic password-change prompt. This is a staff-assisted beta limitation, not account migration or a new Apple login feature.
+
+### Early Access emails
+
+Follow the [Early Access Operations Guide](early-access-operations.md) for enrollment, consent, selection, onboarding, delivery gates, and audit records. For this private email-invite TestFlight rollout, keep Apple's public link disabled even though the older general operations guide describes a public-link alternative. Apple sends its own installation invitations; Nine Below sends or provides the separate game-access details.
+
+Do not invent a public TestFlight link to satisfy a campaign form. Use manual game invite-code delivery for a small staff test, or verify an appropriate HTTPS installation/instruction destination before scheduling a private-wave campaign. Required email settings, including the sender/postal-address gates, still apply; this guide does not enable campaign delivery.
+
+## 8. Publish the in-game release notice only after availability
+
+The admin console already manages Android, iOS, and browser release policies separately. iOS build `1` is independent of Android's version code. Do not copy Android's current minimum build into iOS.
+
+1. First verify an invited tester can install the uploaded iOS build and start the app.
+2. In **Admin → Live Ops → App Releases**, choose **Testing (Play / TestFlight / web)** and **iOS**.
+3. Enter **Latest build: 1**, **App version: 0.1.0**, and **Minimum allowed build: 0** for the initial rollout.
+4. Enter the verified HTTPS destination that helps this group obtain the update. Private invited testers can open the installed TestFlight app; do not enable a public invitation link just to populate this field. If no suitable destination has been verified, leave the existing iOS policy unchanged until one is ready.
+5. Check **Release ready** only after the intended testers can access it. Prefer **Finish active match, then require update**.
+6. Review the preview, enter an administrative reason, and **Publish Now** or deliberately schedule the policy.
+7. Raise the minimum allowed build only after every intended tester can obtain the required version. Never raise it ahead of Apple processing, beta approval, or group availability.
+8. Repeat separately for Android when its Google Play build is available, and for web only after the tested browser deployment is available. A marketing homepage is not proof that a browser game has been deployed.
+
+For a rollout issue, use the release history and the relevant platform's policy to remove the requirement or restore the last suitable policy. A policy rollback does not downgrade an installed iOS app. If the binary itself is broken, ship a corrected higher build number and manage TestFlight distribution accordingly.
+
+## 9. Mixed-platform acceptance checklist
+
+Record the exact iOS build, Android version code, browser build, server revision, device models, OS/browser versions, and account names for each test. Use test accounts where actions could remove data.
+
+- [ ] Install iOS through TestFlight and Android through the intended Google Play track; launch both from a fully closed state.
+- [ ] Verify iPhone portrait layout, keyboard handling, notches/safe areas, and iPad layout if supporting tablets.
+- [ ] Create an invited first-party account, log out, and use the same credentials on another platform; confirm the same profile and progress.
+- [ ] Have distinct iOS and Android accounts join one room; add a browser account when a browser deployment is actually available.
+- [ ] Complete a full game with alternating turns across devices. Confirm legal actions, hidden-card privacy, final scores, and match results agree.
+- [ ] Test host departure, rejoin, background/foreground transitions, Wi-Fi/mobile-data switching, and brief network loss.
+- [ ] Confirm reconnecting does not duplicate a turn, reward, match, or account.
+- [ ] Confirm release notices target the selected platform and channel; Android build numbers do not block iOS build 1.
+- [ ] Exercise friends/room invitations, chat moderation/reporting, clubs, and other enabled features used by the wave.
+- [ ] Check notification permission refusal and, if APNs is configured, delivery to a physical iPhone. Declining notifications must not block play.
+- [ ] Open the privacy policy, use support/feedback, and test account deletion only with a disposable test account.
+- [ ] Update from one available TestFlight build to the next and confirm stored account progress persists.
+
+The preparation pass completed the iOS JavaScript export, production browser export, full Railway-equivalent build, client lint/typecheck, 225 server tests, and five browser-dialog tests. A local browser smoke test verified sign-in/logout, room creation/leaving, solo card actions, and a keyboard-operable login-error dialog. The server integration suite includes mixed iOS/Android/web protocol clients and shared account data. These checks do not prove that a signed app launches on a physical iPhone. Complete the physical-device checks before expanding the wave, and record the final verification outcome for the exact source used to build.
+
+## 10. Privacy and Apple review answers
+
+Privacy policy: [Nine Below privacy policy](https://ninebelow.potterwell.com/privacy). Terms: [Nine Below terms](https://ninebelow.potterwell.com/terms). Copy preparation: [TestFlight copy and privacy inventory](../store-assets/apple/testflight-copy.md).
+
+The configured `usesNonExemptEncryption: false` declaration is based on the app using exempt operating-system security such as HTTPS/TLS and platform credential storage, rather than custom non-exempt encryption. The declaration covers embedded dependencies too; re-evaluate it if the client gains another encryption implementation. The server's encrypted database fields are a separate server-side concern. Answer any Apple encryption questionnaire according to the actual shipped binary. [Apple encryption guidance](https://developer.apple.com/documentation/security/complying-with-encryption-export-regulations)
+
+The iOS privacy manifest is an implementation declaration about native API use. It does not replace the App Store Connect privacy questionnaire. Current manifest reasons cover file timestamps and user defaults; native dependencies and Apple's processing results must also be checked. [Expo privacy manifests](https://docs.expo.dev/guides/apple-privacy/)
+
+Disclose the data actually collected and its real purpose. Accounts, gameplay records, chat/support content, and associated technical records mean that **"we do not collect data" is not an appropriate blanket answer**. The copy file provides an inventory to reconcile against the release, not a preapproved legal declaration. [Apple app-privacy instructions](https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy)
+
+Apple's social-login rule is why this beta consistently uses first-party credentials on iOS. Adding Google/Facebook later requires meeting guideline 4.8, normally through an equivalent privacy-preserving login such as Sign in with Apple. Account deletion and privacy access must remain usable inside the app. [Apple review guidelines](https://developer.apple.com/app-store/review/guidelines/#login-services)
+
+## 11. Updates, expiry, and common blockers
+
+- **Refresh TestFlight after upload:** processing and review status are in App Store Connect; users should open TestFlight → Nine Below and check the offered build. Availability follows group assignment and any review, not merely a finished EAS build.
+- **Each TestFlight build expires after 90 days:** prepare a replacement before expiry, increment `ios.buildNumber` in `client/app.config.js` from `1` to `2` and upward, build, upload, assign it to the correct groups, verify availability, and only then publish its release policy. The display version can remain `0.1.0` during these beta builds.
+- **Bundle ID missing:** register it in the correct developer team, then refresh App Store Connect.
+- **Missing signing credentials:** complete the interactive Apple/EAS setup; a simulator archive cannot replace an App Store-signed IPA.
+- **Missing Compliance:** review the encryption answer for the actual binary before distributing.
+- **Tester not listed under Internal Testing:** check their accepted App Store Connect invitation and role. Ordinary friends belong in a private external group instead.
+- **"This beta isn't accepting testers":** verify the invitation, group, approved build, build expiry, device compatibility, and tester limit. A disabled public link is expected for email-only groups.
+- **Game asks for an invite code:** the player is creating a new Nine Below account; provide a valid game signup code or log in to the existing account.
+- **Google/Facebook-only account fails on iOS:** use the verified staff-assisted password path above; do not create a duplicate player account.
+- **Push does not arrive:** check APNs credentials, the app's notification permission, physical-device registration, and server delivery logs independently of the binary upload.
+- **App launches but cannot join:** check backend health, invite/account status, release policy, and live-operations controls; confirm both clients use the same backend and compatible protocol.
+
+[Apple internal build lifetime](https://developer.apple.com/help/app-store-connect/test-a-beta-version/add-internal-testers) and [Expo TestFlight workflow](https://docs.expo.dev/submit/testflight/).
+
+## Information needed to finish this first upload
+
+1. The New App record created with the exact bundle ID above.
+2. Its numeric **Apple ID** and the correct **Team ID**.
+3. Your interactive Apple authentication/2FA when EAS requests it; enter secrets in the prompt, not chat.
+4. A monitored TestFlight feedback address and review contact information confirmed for this release.
+5. The intended testers' email addresses and whether they are trusted staff or ordinary private testers; invitations should be sent only to your chosen group.
+
+After signing and upload are actually complete, record the EAS build ID, source commit, IPA checksum/location, Apple processing result, and the tester group that successfully installed it. Until those results exist, the status remains **prepared, awaiting signing/upload**.

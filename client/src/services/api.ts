@@ -48,7 +48,7 @@ export type ReleasePolicyResponse = {
   revision: number;
   fetchedAt: number;
   key: string;
-  platform: 'android' | 'ios';
+  platform: 'android' | 'ios' | 'web';
   channel: 'playtest' | 'production';
   installedBuild: number;
   installedVersion: string;

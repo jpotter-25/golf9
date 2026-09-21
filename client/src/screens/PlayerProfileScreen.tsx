@@ -2,7 +2,8 @@
 // Purpose: Public player profile view for friends, recent players, and in-game taps.
 
 import React, { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert } from '../utils/alert';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ShoppingBag } from 'lucide-react-native';

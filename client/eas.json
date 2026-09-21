@@ -1,5 +1,5 @@
 {
-  "cli": { "version": ">= 12.0.0" },
+  "cli": { "version": ">= 12.0.0", "appVersionSource": "local" },
   "build": {
     "development": {
       "developmentClient": true,
@@ -29,6 +29,19 @@
       "ios": { "simulator": false },
       "android": { "buildType": "app-bundle" }
     },
+    "testflight": {
+      "extends": "playtest",
+      "distribution": "store",
+      "env": { "EXPO_PUBLIC_APP_TARGET": "ios" },
+      "ios": {
+        "simulator": false,
+        "image": "macos-sequoia-15.6-xcode-26.0"
+      }
+    },
+    "ios-simulator": {
+      "extends": "testflight",
+      "ios": { "simulator": true }
+    },
     "production": {
       "environment": "production",
       "env": {
@@ -40,6 +53,7 @@
     }
   },
   "submit": {
+    "testflight": { "ios": {} },
     "production": {}
   }
 }

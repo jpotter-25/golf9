@@ -2564,6 +2564,125 @@ test('release policy blocks obsolete builds while preserving update and recovery
   });
 });
 
+test('iOS, Android, and browser players share accounts and an authoritative table with independent release gates', async () => {
+  await withServer(async (baseUrl) => {
+    const admin = await adminLogin(baseUrl);
+    const platforms = [
+      { platform: 'ios', build: 3, storeUrl: 'https://testflight.apple.com/j/test' },
+      { platform: 'android', build: 59, storeUrl: 'https://play.google.com/store/apps/details?id=com.potterwell.ninebelow' },
+      { platform: 'web', build: 7, storeUrl: 'https://ninebelow.potterwell.com/play/' },
+    ];
+    const platformHeaders = (client, token) => ({
+      ...authHeaders(token),
+      'X-Golf9-Platform': client.platform,
+      'X-Golf9-Channel': 'playtest',
+      'X-Golf9-Build': String(client.build),
+      'X-Golf9-Version': '0.1.0',
+    });
+    const players = [];
+    for (const client of platforms) {
+      await json(await fetch(`${baseUrl}/admin/api/live-ops/releases/publish`, {
+        method: 'POST', headers: adminHeaders(admin),
+        body: JSON.stringify({
+          platform: client.platform, channel: 'playtest',
+          entry: { latestBuild: client.build, minimumBuild: client.build, storeUrl: client.storeUrl, storeReady: true },
+          reason: `Verify independent ${client.platform} testing release.`,
+        }),
+      }));
+      const displayName = testDisplayName(`Cross${client.platform}`);
+      const player = await json(await fetch(`${baseUrl}/auth/signup`, {
+        method: 'POST', headers: platformHeaders(client, ''),
+        body: JSON.stringify({ displayName, password: 'StrongPass9!' }),
+      }));
+      players.push({ ...client, ...player });
+      const policy = await json(await fetch(`${baseUrl}/app/release-policy`, { headers: platformHeaders(client, player.token) }));
+      assert.equal(policy.platform, client.platform);
+      assert.equal(policy.status, 'current');
+      assert.equal(policy.minimumBuild, client.build);
+      const obsolete = await fetch(`${baseUrl}/profile/me`, {
+        headers: { ...platformHeaders(client, player.token), 'X-Golf9-Build': String(client.build - 1) },
+      });
+      assert.equal(obsolete.status, 426);
+      assert.equal((await obsolete.json()).release.platform, client.platform);
+    }
+
+    // Signing in on another platform resolves the existing Nine Below identity and progress.
+    await adminAdjustCoins(baseUrl, admin, players[0].user.userId, 500);
+    for (const client of platforms) {
+      const login = await json(await fetch(`${baseUrl}/auth/login`, {
+        method: 'POST', headers: platformHeaders(client, ''),
+        body: JSON.stringify({ displayName: players[0].user.displayName, password: 'StrongPass9!' }),
+      }));
+      assert.equal(login.user.userId, players[0].user.userId);
+      assert.equal(login.user.currency.coins, 500);
+      assert.deepEqual(login.user.progression, players[0].user.progression);
+      const me = await json(await fetch(`${baseUrl}/auth/me`, { headers: platformHeaders(client, login.token) }));
+      assert.equal(me.user.userId, players[0].user.userId);
+    }
+
+    const created = await json(await fetch(`${baseUrl}/rooms`, {
+      method: 'POST', headers: platformHeaders(players[0], players[0].token),
+      body: JSON.stringify({ maxPlayers: 3, rounds: 5 }),
+    }));
+    const code = created.room.code;
+    for (const player of players.slice(1)) {
+      await json(await fetch(`${baseUrl}/rooms/${code}/join`, {
+        method: 'POST', headers: platformHeaders(player, player.token),
+      }));
+    }
+
+    const sockets = players.map(player => io(baseUrl, {
+      transports: ['websocket'], forceNew: true, autoConnect: false,
+      auth: { token: player.token, platform: player.platform, build: player.build, channel: 'playtest', version: '0.1.0' },
+    }));
+    try {
+      await Promise.all(sockets.map(async (socket, index) => {
+        const release = waitForSocketEvent(socket, 'release-policy:update', value => value?.platform === players[index].platform);
+        const connected = once(socket, 'connect');
+        socket.connect();
+        await connected;
+        assert.equal((await release).status, 'current');
+      }));
+      for (const socket of sockets) {
+        const joined = await emitAck(socket, 'room:join', { code });
+        assert.equal(joined.room.code, code);
+        assert.equal(joined.room.players.length, 3);
+      }
+      assert.deepEqual(await emitAck(sockets[0], 'room:start', { code }), { ok: true });
+      for (let index = 0; index < sockets.length; index += 1) {
+        for (const c of [0, 1]) {
+          const peek = await emitAck(sockets[index], 'game:intent', {
+            code, actionId: `cross-${players[index].platform}-peek-${c}`, type: 'peek', payload: { r: 0, c },
+          });
+          assert.equal(peek.ok, true);
+        }
+      }
+      const { game } = await emitAck(sockets[0], 'room:join', { code });
+      const activeUserId = game.players[game.currentPlayerIndex].userId;
+      const activeIndex = players.findIndex(player => player.user.userId === activeUserId);
+      const draw = await emitAck(sockets[activeIndex], 'game:intent', {
+        code, actionId: 'cross-platform-draw', type: 'draw', payload: {},
+      });
+      assert.equal(draw.ok, true);
+      assert.equal(typeof draw.drawn.rank, 'string');
+      for (let index = 0; index < sockets.length; index += 1) {
+        const state = await emitAck(sockets[index], 'room:join', { code });
+        assert.equal(state.game.currentPlayerIndex, game.currentPlayerIndex);
+        assert.deepEqual(state.game.players.map(player => player.userId), game.players.map(player => player.userId));
+        if (index === activeIndex) assert.equal(state.game.viewerHeldCard.rank, draw.drawn.rank);
+        else assert.equal(state.game.viewerHeldCard, null);
+      }
+      const otherIndex = (activeIndex + 1) % sockets.length;
+      const outOfTurn = await emitAck(sockets[otherIndex], 'game:intent', {
+        code, actionId: 'cross-platform-wrong-turn', type: 'draw', payload: {},
+      });
+      assert.equal(outOfTurn.error, 'Not your turn.');
+    } finally {
+      sockets.forEach(socket => socket.disconnect());
+    }
+  }, { SEED_ADMIN_ACCOUNT: '1' });
+});
+
 test('full lobby countdown stops when a player leaves and restarts when filled again', async () => {
   await withServer(async (baseUrl) => {
     const one = await signup(baseUrl, `CountdownOne${Date.now()}`);

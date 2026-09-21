@@ -547,13 +547,13 @@
 
           <div class="release-ops-heading split-header">
             <div>
-              <p class="eyebrow">Store Delivery</p>
+              <p class="eyebrow">App Delivery</p>
               <h2>App Releases</h2>
-              <p class="muted">Recommend or require a store build without publishing another server change.</p>
+              <p class="muted">Manage Android, iOS, and browser releases independently without publishing another server change.</p>
             </div>
             <div class="actions-inline">
               <span id="releasePolicyRevision" class="chip blue">Revision 0</span>
-              <span id="releasePolicyStatus" class="chip">Store not confirmed</span>
+              <span id="releasePolicyStatus" class="chip">Release not confirmed</span>
             </div>
           </div>
 
@@ -562,7 +562,7 @@
               <div class="row two">
                 <label>Release channel
                   <select id="releasePolicyChannel" name="channel">
-                    <option value="playtest">Play internal testing</option>
+                    <option value="playtest">Testing (Play / TestFlight / web)</option>
                     <option value="production">Production</option>
                   </select>
                 </label>
@@ -570,18 +570,19 @@
                   <select id="releasePolicyPlatform" name="platform">
                     <option value="android">Android</option>
                     <option value="ios">iOS</option>
+                    <option value="web">Web browser</option>
                   </select>
                 </label>
               </div>
               <div class="row three">
-                <label>Latest store build <input name="latestBuild" type="number" min="0" step="1" /></label>
-                <label>Store version <input name="latestVersion" maxlength="40" placeholder="0.1.0" /></label>
+                <label>Latest build <input name="latestBuild" type="number" min="0" step="1" /></label>
+                <label>App version <input name="latestVersion" maxlength="40" placeholder="0.1.0" /></label>
                 <label>Minimum allowed build <input name="minimumBuild" type="number" min="0" step="1" /></label>
               </div>
-              <label>Store listing URL <input name="storeUrl" maxlength="500" placeholder="https://play.google.com/store/apps/details?id=..." /></label>
+              <label>Store listing or browser game URL <input name="storeUrl" maxlength="500" placeholder="https://..." /></label>
               <label class="checkline release-store-confirmation">
                 <input name="storeReady" type="checkbox" />
-                <span><strong>Store release ready</strong><small>I confirmed this build is fully processed and downloadable on the selected testing or production track.</small></span>
+                <span><strong>Release ready</strong><small>I confirmed this build is available to the intended players through the selected store track or browser game URL.</small></span>
               </label>
               <label>Active-match enforcement
                 <select name="enforcement">
@@ -610,7 +611,7 @@
                 <button id="publishReleasePolicy" type="submit">Publish Now</button>
                 <button id="scheduleReleasePolicy" type="button" class="ghost">Schedule</button>
               </div>
-              <p class="release-safety-note"><strong>Safe rollout:</strong> publish the latest build with minimum build 0 first. Raise the minimum only after Google Play confirms that build is available to every intended tester.</p>
+              <p class="release-safety-note"><strong>Safe rollout:</strong> publish the latest build with minimum build 0 first. Raise the minimum only after the selected Play, TestFlight, App Store, or browser release is available to every intended tester.</p>
               <p id="releasePolicyReadOnly" class="muted hidden">Your admin role has read-only app release access.</p>
             </form>
 

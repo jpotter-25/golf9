@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 
-export const RELEASE_PLATFORMS = Object.freeze(['android', 'ios']);
+export const RELEASE_PLATFORMS = Object.freeze(['android', 'ios', 'web']);
 export const RELEASE_CHANNELS = Object.freeze(['playtest', 'production']);
 export const RELEASE_ENFORCEMENTS = Object.freeze(['after_match', 'immediate']);
 
@@ -53,9 +53,13 @@ function defaultEntry(platform, channel) {
     storeReady: false,
     enforcement: 'after_match',
     recommendedTitle: 'Nine Below update available',
-    recommendedMessage: 'A newer version of Nine Below is ready. Update now for the latest fixes and features.',
+    recommendedMessage: platform === 'web'
+      ? 'A newer version of Nine Below is ready. Reload the game for the latest fixes and features.'
+      : 'A newer version of Nine Below is ready. Update now for the latest fixes and features.',
     requiredTitle: 'Update required',
-    requiredMessage: 'A newer version of Nine Below is required before online play can continue.',
+    requiredMessage: platform === 'web'
+      ? 'Reload Nine Below to use the latest version before online play can continue.'
+      : 'A newer version of Nine Below is required before online play can continue.',
     updatedAt: null,
     updatedBy: null,
   };

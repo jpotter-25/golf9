@@ -7,7 +7,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as NavigationBar from 'expo-navigation-bar';
-import { ActivityIndicator, AppState, BackHandler, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, BackHandler, Linking, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   LoginScreen,
@@ -78,6 +78,7 @@ const theme: Theme = {
 };
 
 async function applyImmersive() {
+  if (Platform.OS !== 'android') return;
   try {
     await NavigationBar.setVisibilityAsync('hidden');   // hide Android nav bar
     await NavigationBar.setBehaviorAsync('inset-swipe');
@@ -99,13 +100,13 @@ function gameRouteForRoom(room: api.RoomSummary): RootStackParamList['Game'] {
 }
 
 function isOnActiveGame(room: api.RoomSummary) {
-  const current = navigationRef.getCurrentRoute();
+  const current = navigationRef.isReady() ? navigationRef.getCurrentRoute() : undefined;
   const params = current?.params as Partial<RootStackParamList['Game']> | undefined;
   return current?.name === 'Game' && params?.roomCode === room.code;
 }
 
 function isAllowedActiveMatchRoute(room: api.RoomSummary) {
-  const current = navigationRef.getCurrentRoute();
+  const current = navigationRef.isReady() ? navigationRef.getCurrentRoute() : undefined;
   const params = current?.params as Partial<RootStackParamList['PlayerProfile']> | undefined;
   return isOnActiveGame(room) || (current?.name === 'PlayerProfile' && params?.fromActiveMatchRoomCode === room.code);
 }
@@ -196,7 +197,7 @@ function ActiveMatchGate({ navigationTick }: { navigationTick: number }) {
 
   useEffect(() => {
     if (!token || !checked) return;
-    const current = navigationRef.getCurrentRoute();
+    const current = navigationRef.isReady() ? navigationRef.getCurrentRoute() : undefined;
     if (current?.name !== 'Game') void checkActiveMatch(false);
   }, [checked, checkActiveMatch, navigationTick, token]);
 
@@ -444,7 +445,7 @@ function ReleaseUpdateGate({ navigationTick }: { navigationTick: number }) {
     };
   }, [isOnline, navigationTick, policy?.enforcement, policy?.revision, policy?.status, token, user?.userId]);
 
-  const currentRoute = navigationRef.getCurrentRoute();
+  const currentRoute = navigationRef.isReady() ? navigationRef.getCurrentRoute() : undefined;
   const gameParams = currentRoute?.params as Partial<RootStackParamList['Game']> | undefined;
   const isLocalGame = currentRoute?.name === 'Game' && (gameParams?.mode === 'solo' || gameParams?.mode === 'passplay');
   const isEssentialRoute = currentRoute?.name === 'Inbox'

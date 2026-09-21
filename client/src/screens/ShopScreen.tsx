@@ -2,7 +2,8 @@
 // Purpose: Dedicated storefront for coin, ranked, club, and event cosmetics.
 
 import React, { useCallback, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert } from '../utils/alert';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Coins, Eye, Gift, Lock, ShoppingBag } from 'lucide-react-native';

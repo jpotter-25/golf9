@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Alert, Modal, useWindowDimensions, TextInput, ScrollView, KeyboardAvoidingView, Platform, Vibration, Switch, AppState, BackHandler } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Modal, useWindowDimensions, TextInput, ScrollView, KeyboardAvoidingView, Platform, Vibration, Switch, AppState, BackHandler } from 'react-native';
+import { Alert } from '../utils/alert';
 import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -817,6 +818,7 @@ export default function GameScreen({ route, navigation }: Props) {
 
   // ===== Hide Android navigation bar while in-game =====
   useEffect(() => {
+    if (Platform.OS !== 'android') return;
     NavigationBar.setVisibilityAsync('hidden').catch(() => {});
     return () => {
       NavigationBar.setVisibilityAsync('visible').catch(() => {});

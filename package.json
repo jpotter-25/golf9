@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm --prefix server install",
+    "build": "npm --prefix server ci --omit=dev && npm --prefix client ci --include=dev && npm run build:web",
+    "build:web": "node scripts/build-web.mjs",
     "start": "npm --prefix server start",
     "test": "npm --prefix server test"
   },
   "engines": {
-    "node": ">=18"
+    "node": "22.x"
   }
 }

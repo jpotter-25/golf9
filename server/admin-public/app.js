@@ -1813,7 +1813,7 @@ function populateReleasePolicyEditor() {
   revision.textContent = `Revision ${Number(policy.revision || 0)}`;
   const statusChip = document.querySelector('#releasePolicyStatus');
   if (!entry.storeReady) {
-    statusChip.textContent = 'Store not confirmed';
+    statusChip.textContent = 'Release not confirmed';
     statusChip.className = 'chip';
   } else if (entry.minimumBuild > 0) {
     statusChip.textContent = `Requires build ${entry.minimumBuild}+`;
@@ -1856,8 +1856,8 @@ function validateReleasePolicyPayload(payload, { scheduled = false } = {}) {
   if (!Number.isInteger(payload.entry.latestBuild) || payload.entry.latestBuild < 0) return 'Latest build must be a whole number.';
   if (!Number.isInteger(payload.entry.minimumBuild) || payload.entry.minimumBuild < 0) return 'Minimum build must be a whole number.';
   if (payload.entry.minimumBuild > payload.entry.latestBuild) return 'Minimum build cannot be higher than the latest build.';
-  if (payload.entry.minimumBuild > 0 && !payload.entry.storeReady) return 'Confirm that the store release is ready before requiring a build.';
-  if ((payload.entry.latestBuild > 0 || payload.entry.minimumBuild > 0) && !payload.entry.storeUrl) return 'A store listing URL is required.';
+  if (payload.entry.minimumBuild > 0 && !payload.entry.storeReady) return 'Confirm that the release is ready before requiring a build.';
+  if ((payload.entry.latestBuild > 0 || payload.entry.minimumBuild > 0) && !payload.entry.storeUrl) return 'A store listing or browser game URL is required.';
   if (scheduled && (!payload.activateAt || payload.activateAt <= Date.now())) return 'Choose a future activation time.';
   return null;
 }
@@ -1868,7 +1868,7 @@ function renderReleasePolicyPreview() {
   const { entry } = releasePolicyEditorPayload();
   let state = 'inactive';
   let label = 'No player prompt';
-  let title = 'Store release not confirmed';
+  let title = 'Release not confirmed';
   let message = 'Players remain on their current build until you confirm the selected store release is ready.';
   if (entry.storeReady && entry.minimumBuild > 0) {
     state = 'required';

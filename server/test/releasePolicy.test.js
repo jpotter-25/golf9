@@ -86,6 +86,35 @@ test('store-ready latest builds recommend an update and minimum builds require i
   }).status, 'current');
 });
 
+test('Android, iOS, and browser release requirements stay independent across migration and restart', () => {
+  const legacyStore = normalizeReleasePolicyStore({
+    entries: { 'playtest.android': androidEntry({ latestBuild: 59, minimumBuild: 59 }) },
+  });
+  assert.equal(resolveReleasePolicy(legacyStore, { platform: 'android', channel: 'playtest', build: 58 }).status, 'required');
+  assert.equal(resolveReleasePolicy(legacyStore, { platform: 'ios', channel: 'playtest', build: 1 }).status, 'current');
+  assert.equal(resolveReleasePolicy(legacyStore, { platform: 'web', channel: 'playtest', build: 0 }).status, 'current');
+
+  const ios = publishReleasePolicyChange(legacyStore, {
+    platform: 'ios', channel: 'playtest',
+    entry: androidEntry({ latestBuild: 3, minimumBuild: 3, storeUrl: 'https://testflight.apple.com/j/test' }),
+    actor: 'Owner', reason: 'TestFlight build 3 is available.',
+  });
+  const web = publishReleasePolicyChange(ios.store, {
+    platform: 'web', channel: 'playtest',
+    entry: { latestBuild: 7, minimumBuild: 7, storeUrl: 'https://ninebelow.potterwell.com/play/', storeReady: true },
+    actor: 'Owner', reason: 'Browser build 7 is published.',
+  });
+  const restarted = normalizeReleasePolicyStore(JSON.parse(JSON.stringify(web.store)));
+  for (const [platform, build] of [['android', 59], ['ios', 3], ['web', 7]]) {
+    const current = resolveReleasePolicy(restarted, { platform, channel: 'playtest', build });
+    assert.equal(current.status, 'current');
+    assert.equal(current.minimumBuild, build);
+    assert.equal(resolveReleasePolicy(restarted, { platform, channel: 'playtest', build: build - 1 }).status, 'required');
+    assert.equal(resolveReleasePolicy(restarted, { platform, channel: 'production', build: 0 }).status, 'current');
+  }
+  assert.match(resolveReleasePolicy(restarted, { platform: 'web', channel: 'playtest', build: 6 }).message, /reload/i);
+});
+
 test('unsafe release policies are rejected before publication', () => {
   assert.throws(() => publishReleasePolicyChange(normalizeReleasePolicyStore(), {
     platform: 'android',
