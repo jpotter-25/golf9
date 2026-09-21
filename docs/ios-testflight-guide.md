@@ -2,7 +2,7 @@
 
 Prepared September 21, 2026. Product: **Nine Below by Potterwell**.
 
-This guide prepares the first iOS beta and explains how to give selected people access. The release configuration is prepared for **version 0.1.0, iOS build 1**. The Apple identifier and App Store Connect record are now registered; a signed IPA and its upload are **pending Apple signing credentials**. The first noninteractive EAS attempt stopped because iOS signing credentials have not been configured; **no iOS build was queued by that attempt**. This document does not claim that a build has finished, that Apple has approved it, or that the app is publicly available.
+This guide prepares the first iOS beta and explains how to give selected people access. The first signed native iOS build, **version 0.1.0, iOS build 1**, finished successfully, was uploaded to Apple, and completed processing. App Store Connect reports **VALID / READY_FOR_BETA_TESTING** for internal testing and **READY_FOR_BETA_SUBMISSION** for external testing. Its IPA identity/version were checked and a local archive was saved. The Apple identifier and app record are registered, and signing/upload credentials are configured in EAS. **No testers have been invited, external beta review has not been submitted, and physical-device installation is not yet verified.** The owner will provide the selected tester list. The earlier noninteractive signing blocker is resolved; this is not a public App Store release.
 
 ### Verified Apple registration — September 21, 2026
 
@@ -13,6 +13,19 @@ This guide prepares the first iOS beta and explains how to give selected people 
 - App record created with **Full Access** because Apple disabled Limited Access in this first-app form. No additional staff or testers were invited. Review app permissions before adding team members.
 - `client/eas.json` now targets this app and team for TestFlight submission. Apple signing/upload credentials are not stored in the repository.
 - Apple's default public-release draft is **1.0 / Prepare for Submission**. This is separate from the planned **0.1.0 (1)** TestFlight build; no public-release review was requested.
+
+### Signing setup and first build — September 21, 2026
+
+- The official EAS CLI reused the owner's authenticated local Apple session; no password or verification code was copied into project files.
+- A new Apple Distribution certificate and App Store provisioning profile were created for the confirmed team. Existing certificates were not revoked. The current certificate/profile expire September 21, 2027; renew through EAS before expiry.
+- An Apple Push Notifications service key was created and assigned to this app in EAS. Physical-device push delivery still needs verification.
+- An App Store Connect API key with **APP_MANAGER** permissions was created and assigned to EAS Submit. The private key remains managed by EAS, not in the repository. Revisit credential permissions and rotation when team membership changes.
+- First native build: [4f98cb7c-246f-44a9-8668-db5197cc16fa](https://expo.dev/accounts/nemoclown/projects/golf9/builds/4f98cb7c-246f-44a9-8668-db5197cc16fa), source commit `b819ef46193df3389359888c5e2461f007caa7e3`, profile `testflight`, version **0.1.0 (1)**.
+- Build status: **finished**, September 21, 2026 at 20:34 UTC. The IPA declares bundle `com.potterwell.ninebelow`, version `0.1.0`, build `1`, minimum iOS `15.1`, iPhone/iPad device families, and iOS 26.0 SDK. Expected embedded provisioning/signature resources and JavaScript bundle are present; no `.p8`, `.p12`, `.env`, `credentials.json`, or source-map files were found in the archive. These checks do not replace Apple's signature validation or a device launch test.
+- Local IPA: `artifacts/ios/build-1-4f98cb7c/nine-below-0.1.0-build-1.ipa` (15,081,570 bytes; ignored by Git). SHA-256: `c4cdf76a8dfdb4f1dedd180d0a4b4d195a7f8b31aa400ae981693171dc8328bb`. The local archive preserves the binary independently of hosted artifact retention.
+- Upload job: [81212592-c48a-430e-897c-674ae22f733b](https://expo.dev/accounts/nemoclown/projects/golf9/submissions/81212592-c48a-430e-897c-674ae22f733b), targeting Apple app `6814632886` and the exact build above. Status: **finished**, September 21, 2026 at 20:38 UTC. Automatic TestFlight-group setup was explicitly disabled; no tester invitations or public release were performed.
+- Apple processing verified through the official EAS/App Store Connect status command: build `0.1.0 (1)` is **VALID**, internal state **READY_FOR_BETA_TESTING**, external state **READY_FOR_BETA_SUBMISSION**, and not expired. [TestFlight dashboard](https://appstoreconnect.apple.com/apps/6814632886/testflight/ios).
+- Shared backend readiness and browser access passed read-only checks; iOS playtest build 1 returned `status: current`, `minimumBuild: 0`, and `storeReady: false`. Leave release announcements disabled until actual TestFlight installation is verified.
 
 ## What is already shared across platforms
 
@@ -280,13 +293,13 @@ Apple's social-login rule is why this beta consistently uses first-party credent
 
 [Apple internal build lifetime](https://developer.apple.com/help/app-store-connect/test-a-beta-version/add-internal-testers) and [Expo TestFlight workflow](https://docs.expo.dev/submit/testflight/).
 
-## Information needed to finish this first upload
+## Information needed to start the selected testing wave
 
-The app record, numeric Apple ID, and Team ID are verified and configured. The remaining information/actions are:
+The app record, numeric Apple ID, Team ID, signing credentials, APNs key, and EAS Submit credential are configured. The first build/upload and Apple's processing are complete. The remaining information/actions are:
 
-1. Your interactive Apple authentication/2FA when EAS requests it; enter secrets in the prompt, not chat.
-2. Apple signing and upload credentials configured through the official EAS prompts.
-3. A monitored TestFlight feedback address and review contact information confirmed for this release.
-4. The intended testers' email addresses and whether they are trusted staff or ordinary private testers; invitations should be sent only to your chosen group.
+1. The owner-selected testers' email addresses and whether they are trusted staff or ordinary private testers. The owner chose to supply a list; no recipients should be assumed.
+2. The appropriate tester group, build assignment, and invitations; private external testing also needs TestFlight App Review before distribution.
+3. A monitored TestFlight feedback address and review contact information confirmed for this release, plus a working non-administrator review account if Apple needs one.
+4. A physical-device TestFlight installation and the acceptance checks above, including cross-platform play and push notifications. Fresh authentication is needed only if Apple/EAS requests it again.
 
-After signing and upload are actually complete, record the EAS build ID, source commit, IPA checksum/location, Apple processing result, and the tester group that successfully installed it. Until those results exist, the status remains **prepared, awaiting signing/upload**.
+The IPA checksum/location and Apple processing result are recorded above. Add the tester group and physical-device test outcome after the selected participants successfully install it. Successful compilation and Apple processing are not proof that the binary launches and plays correctly on a physical device.
