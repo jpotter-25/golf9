@@ -2,7 +2,7 @@
 
 Prepared September 21, 2026 for version **0.1.0**, iOS build **1**, bundle ID **com.potterwell.ninebelow**. SKU: **ninebelow-ios**.
 
-This is copy for the first private TestFlight release. **IPA signing, build completion, Apple upload, and beta approval are pending and must be recorded after they happen.** A noninteractive EAS attempt stopped for missing iOS signing credentials before queueing a build. None of this copy announces a public App Store launch.
+This is copy for the first private TestFlight release. **Version 0.1.0 (1) is signed, uploaded, processed by Apple, and submitted for external TestFlight App Review on September 21, 2026. Its current UI status is Waiting for Review.** The earlier noninteractive signing blocker was resolved. The build is assigned to the private, email-only external tester group and automatic tester notification is enabled. Approval, email delivery, and physical-device installation are not yet verified. None of this copy announces a public App Store launch.
 
 See the [step-by-step setup guide](../../docs/ios-testflight-guide.md) for account creation, signing, upload, tester groups, and rollout controls.
 
@@ -15,7 +15,10 @@ See the [step-by-step setup guide](../../docs/ios-testflight-guide.md) for accou
 | Primary language | English (U.S.) |
 | Bundle ID | com.potterwell.ninebelow |
 | SKU | ninebelow-ios |
-| User Access | Limited Access to selected trusted staff |
+| Public developer name | Ninebelow, A Registered Series Of Potterwell LLC |
+| App Store Connect Apple ID | 6814632886 |
+| Apple Team ID | 63FQJRQ66P |
+| User Access | Full Access at creation; Apple disabled Limited Access in the first-app form. Restrict future staff access where supported. Ordinary testers receive no console role. |
 
 ## Beta app description
 
@@ -46,13 +49,13 @@ Use a different player account on each device when playing against yourself for 
 
 | Field | Entry/action |
 | --- | --- |
-| Feedback Email | `app-developer@potterwell.com`, after confirming it is monitored for this beta |
+| Feedback Email | `app-developer@potterwell.com`, saved in TestFlight; keep this destination monitored throughout testing |
 | Privacy Policy URL | https://ninebelow.potterwell.com/privacy |
 | Terms URL | https://ninebelow.potterwell.com/terms |
-| Review contact first/last name | Enter the actual contact directly in App Store Connect |
-| Review contact phone/email | Enter current, monitored contact details directly in App Store Connect |
-| Sign-in required | Yes for account-based online play; provide a working game review account |
-| Reviewer username/password | Enter privately in Apple's review form; do not save credentials in this file |
+| Review contact first/last name | Saved directly in App Store Connect; keep personal contact details out of this worksheet |
+| Review contact phone/email | Saved directly in App Store Connect; keep current and monitored |
+| Sign-in required | Yes for account-based online play; a dedicated ordinary game review account is provisioned |
+| Reviewer username/password | Saved privately in Apple's beta review details; recovery instructions are in the setup guide, never plaintext credentials in this file |
 
 `donotreply@potterwell.com` is the intentionally unmonitored outbound sender. It is unsuitable as the beta feedback destination unless monitoring arrangements change. The existing support destination is separate from the public sending identity.
 
@@ -64,7 +67,13 @@ New player signup may be restricted with Nine Below invite codes during testing.
 
 The player account controls include account deletion. Please use the supplied disposable review account for destructive tests. The privacy policy is available at the URL supplied in the app's metadata.
 
-Before submitting these notes, verify the reviewer account works in the uploaded build and is not an administrator account. Adjust any feature description that does not match the binary being submitted. If online review requires a second player, arrange and describe a reproducible supported test path rather than promising always-available live opponents.
+The review account passed live password sign-in and account retrieval checks; its attempt to access the admin API was rejected with HTTP 401. Native installation and sign-in through the uploaded binary remain unverified. Before submitting these notes, reconcile them with the actual build and testing results. If online review requires a second player, arrange and describe a reproducible supported test path rather than promising always-available live opponents.
+
+## Private external distribution record
+
+The **Private Playtesters** group (`0716e498-8de2-45cb-9510-ad247deaf9f7`) shows **1 Tester · 1 Build**: one owner-selected external tester and build **0.1.0 (1)**. Review was submitted on **September 21, 2026** and the build shows **Waiting for Review**. Automatic tester notification is enabled; no public invitation link has been created. Apple approval, invitation email delivery, and installation are not yet verified. Keep recipient names and email addresses in App Store Connect, not in this repository, and do not grant ordinary play testers App Store Connect roles.
+
+After approval, verify the selected build is available in this group and that Apple's automatic email invitation reaches the selected tester. Privately provide a separate Nine Below signup code if the tester needs a new game account. First confirm a successful installation and launch before expanding the group. See the [private testing and reviewer recovery instructions](../../docs/ios-testflight-guide.md#private-external-group-for-selected-people).
 
 ## Private tester welcome message
 
@@ -106,19 +115,20 @@ The iOS manifest currently declares approved reasons for file timestamp and user
 
 The current app config sets `ios.config.usesNonExemptEncryption` to `false`, reflecting exempt platform security such as HTTPS/TLS and operating-system credential storage. This declaration also covers libraries shipped in the binary. Reassess it if client cryptography changes; server-only database encryption is a different component. If Apple asks about encryption, answer consistently with the inspected release rather than selecting "no encryption" merely to clear the screen.
 
-## Release record — complete after actual results
+## Release record — verified September 21, 2026
 
 | Item | Status/value |
 | --- | --- |
-| App Store Connect numeric Apple ID | Pending owner app creation |
-| Apple Team ID | Pending team confirmation |
-| Source commit | Record the exact built commit after verification |
-| EAS build ID | Pending signing and build |
-| Signed IPA / checksum | Pending finished artifact |
-| EAS submission ID/result | Pending upload |
-| Apple processing/compliance result | Pending processing |
+| App Store Connect numeric Apple ID | 6814632886 |
+| Apple Team ID | 63FQJRQ66P |
+| Source commit | `b819ef46193df3389359888c5e2461f007caa7e3` |
+| EAS build ID | `4f98cb7c-246f-44a9-8668-db5197cc16fa`; finished at 20:34 UTC |
+| Signed IPA / checksum | `artifacts/ios/build-1-4f98cb7c/nine-below-0.1.0-build-1.ipa` (Git-ignored); SHA-256 `c4cdf76a8dfdb4f1dedd180d0a4b4d195a7f8b31aa400ae981693171dc8328bb` |
+| EAS submission ID/result | `81212592-c48a-430e-897c-674ae22f733b`; finished at 20:38 UTC |
+| Apple processing/compliance result | VALID; internal READY_FOR_BETA_TESTING; external UI now Waiting for Review |
 | Internal QA installation | Pending physical-device test |
-| External beta approval | Pending submission, if using external testers |
+| External beta approval | Review submitted September 21, 2026; Waiting for Review, not approved |
+| Private external distribution | Build 0.1.0 (1) assigned to Private Playtesters; automatic notification enabled; email delivery/install not verified; no public link |
 | iOS release policy | Keep unannounced until availability is verified |
 | TestFlight expiry date | Record the date shown by Apple; each build lasts 90 days |
 
