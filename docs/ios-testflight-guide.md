@@ -2,7 +2,17 @@
 
 Prepared September 21, 2026. Product: **Nine Below by Potterwell**.
 
-This guide prepares the first iOS beta and explains how to give selected people access. The release configuration is prepared for **version 0.1.0, iOS build 1**. A signed IPA and its upload are **pending Apple signing credentials and App Store Connect setup**. The first noninteractive EAS attempt stopped because iOS signing credentials have not been configured; **no iOS build was queued by that attempt**. This document does not claim that a build has finished, that Apple has approved it, or that the app is publicly available.
+This guide prepares the first iOS beta and explains how to give selected people access. The release configuration is prepared for **version 0.1.0, iOS build 1**. The Apple identifier and App Store Connect record are now registered; a signed IPA and its upload are **pending Apple signing credentials**. The first noninteractive EAS attempt stopped because iOS signing credentials have not been configured; **no iOS build was queued by that attempt**. This document does not claim that a build has finished, that Apple has approved it, or that the app is publicly available.
+
+### Verified Apple registration — September 21, 2026
+
+- App: **Nine Below**; [App Store Connect record](https://appstoreconnect.apple.com/apps/6814632886/distribution/info).
+- Public developer name approved at creation: **Ninebelow, A Registered Series Of Potterwell LLC**.
+- Team ID: `63FQJRQ66P`; bundle ID: `com.potterwell.ninebelow`; Push Notifications capability enabled.
+- Numeric Apple ID: `6814632886`; SKU: `ninebelow-ios`.
+- App record created with **Full Access** because Apple disabled Limited Access in this first-app form. No additional staff or testers were invited. Review app permissions before adding team members.
+- `client/eas.json` now targets this app and team for TestFlight submission. Apple signing/upload credentials are not stored in the repository.
+- Apple's default public-release draft is **1.0 / Prepare for Submission**. This is separate from the planned **0.1.0 (1)** TestFlight build; no public-release review was requested.
 
 ## What is already shared across platforms
 
@@ -28,7 +38,7 @@ Do not paste your Apple password, verification codes, signing certificates, or p
 
 ## 2. Register the app's identifier if it is missing
 
-If `com.potterwell.ninebelow` already appears in the New App bundle-ID list, skip this section.
+**Completed for this app.** `com.potterwell.ninebelow` is registered under team `63FQJRQ66P` with Push Notifications enabled. The steps below are reference only; do not create a duplicate identifier.
 
 1. Open [Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources/identifiers/list).
 2. Choose **Identifiers**, then **+**.
@@ -43,27 +53,28 @@ The bundle ID must match `ios.bundleIdentifier` in `client/app.config.js`. Apple
 
 ## 3. Fill in the New App screen
 
-Open [App Store Connect](https://appstoreconnect.apple.com/) → **Apps** → **+** → **New App**. Use these values:
+**Completed for this app.** Open the [existing record](https://appstoreconnect.apple.com/apps/6814632886/distribution/info), not New App. The creation values and reference procedure are retained below:
 
 | Field | Enter or select |
 | --- | --- |
 | Platforms | **iOS** |
+| Company Name / public developer name | **Ninebelow, A Registered Series Of Potterwell LLC** |
 | Name | **Nine Below** |
 | Primary language | **English (U.S.)** |
 | Bundle ID | **com.potterwell.ninebelow** |
 | SKU | **ninebelow-ios** |
-| User Access | **Limited Access** for only the trusted staff who need this app |
+| User Access | **Full Access** at creation; Apple disabled Limited Access. Prefer restricted app access for future staff where supported. |
 
 If Apple reports that the name is unavailable, stop at that field and choose an approved alternative with Potterwell; do not change the bundle identifier to solve a name conflict. The SKU is your private inventory identifier and cannot be changed after app creation. Limited Access controls developer-console access, not who can play the game.
 
-Click **Create**. Open the app's **App Information** page and copy its numeric **Apple ID**. We need that number for EAS submission. If Apple shows a developer-name field for an organization account, use the legal branding supported by your membership; the game name is still Nine Below.
+The record was created and its numeric **Apple ID**, `6814632886`, verified on **App Information**. The owner approved the exact public developer name above. Apple states that this first-app developer name cannot be edited later; an alternate name must be a registered trade/DBA name. [Apple developer-name rules](https://developer.apple.com/help/app-store-connect/create-an-app-record/set-your-developer-name).
 
 | Identifier | Meaning | Example/value |
 | --- | --- | --- |
 | Apple account | Your Apple login | Your account email; enter it privately when requested |
-| Team ID | Your enrolled developer team | Read it from your Apple membership |
+| Team ID | Your enrolled developer team | `63FQJRQ66P` |
 | Bundle ID | The app's technical identity | `com.potterwell.ninebelow` |
-| App Store Connect Apple ID | Numeric identifier assigned to the app | Read it from App Information; use as `ascAppId` |
+| App Store Connect Apple ID | Numeric identifier assigned to the app | `6814632886`; configured as `ascAppId` |
 | SKU | Your private app inventory label | `ninebelow-ios` |
 | EAS project ID | Existing Expo project | `b8c31c6b-71b9-497d-984c-d59a4871e84b` |
 
@@ -102,7 +113,7 @@ During first-time signing setup:
 
 1. Sign in to the Apple account directly in the terminal prompt.
 2. Enter Apple's verification code directly in that prompt when requested.
-3. Select the correct Apple developer team.
+3. Select **Ninebelow, A Registered Series Of Potterwell LLC**, team **63FQJRQ66P**.
 4. Confirm the bundle identifier is `com.potterwell.ninebelow`.
 5. Let EAS use or generate the Apple distribution certificate and App Store provisioning profile for this app. Do not revoke an existing certificate as a troubleshooting shortcut.
 6. If push credentials are requested, configure the appropriate APNs key for the same team. A successful app build alone does not prove push delivery is configured.
@@ -114,21 +125,22 @@ Apple credentials may require this interactive step even if Expo is already sign
 
 ## 5. Upload the exact finished build
 
-Once App Store Connect has assigned the numeric Apple ID, put that number in the existing submission profile in `client/eas.json`. Preserve the other build and submission profiles. The relevant fragment will look like this, with the placeholder replaced:
+The existing submission profile in `client/eas.json` is already configured for the verified Apple app and team. Preserve the other build and submission profiles. Its relevant fragment is:
 
 ```json
 {
   "submit": {
     "testflight": {
       "ios": {
-        "ascAppId": "REPLACE_WITH_APP_STORE_CONNECT_NUMERIC_APPLE_ID"
+        "ascAppId": "6814632886",
+        "appleTeamId": "63FQJRQ66P"
       }
     }
   }
 }
 ```
 
-This is a configuration illustration, not a file to paste over all of `eas.json`. Do not submit with the placeholder still present.
+This is a configuration illustration, not a file to paste over all of `eas.json`. These identifiers are not signing secrets and do not replace the upload credential.
 
 Configure the upload credential interactively:
 
@@ -270,10 +282,11 @@ Apple's social-login rule is why this beta consistently uses first-party credent
 
 ## Information needed to finish this first upload
 
-1. The New App record created with the exact bundle ID above.
-2. Its numeric **Apple ID** and the correct **Team ID**.
-3. Your interactive Apple authentication/2FA when EAS requests it; enter secrets in the prompt, not chat.
-4. A monitored TestFlight feedback address and review contact information confirmed for this release.
-5. The intended testers' email addresses and whether they are trusted staff or ordinary private testers; invitations should be sent only to your chosen group.
+The app record, numeric Apple ID, and Team ID are verified and configured. The remaining information/actions are:
+
+1. Your interactive Apple authentication/2FA when EAS requests it; enter secrets in the prompt, not chat.
+2. Apple signing and upload credentials configured through the official EAS prompts.
+3. A monitored TestFlight feedback address and review contact information confirmed for this release.
+4. The intended testers' email addresses and whether they are trusted staff or ordinary private testers; invitations should be sent only to your chosen group.
 
 After signing and upload are actually complete, record the EAS build ID, source commit, IPA checksum/location, Apple processing result, and the tester group that successfully installed it. Until those results exist, the status remains **prepared, awaiting signing/upload**.

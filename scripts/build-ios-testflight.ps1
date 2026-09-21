@@ -10,7 +10,8 @@ try {
     Write-Host 'Nine Below iOS: App Store / TestFlight build (not an Android AAB).'
     Write-Host 'Bundle ID: com.potterwell.ninebelow'
     Write-Host 'Enter Apple sign-in and two-factor codes only in the official EAS prompts.'
-    Write-Host 'Choose your Potterwell developer team. Do not revoke existing certificates.'
+    Write-Host 'Choose Ninebelow, A Registered Series Of Potterwell LLC (team 63FQJRQ66P).'
+    Write-Host 'App Store Connect Apple ID: 6814632886. Do not revoke existing certificates.'
     Write-Host 'If asked, allow EAS to create the distribution profile for this app.'
     & npm.cmd run verify-deps
     if ($LASTEXITCODE -ne 0) { throw 'Dependency validation failed; build stopped.' }
