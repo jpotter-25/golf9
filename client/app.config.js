@@ -62,7 +62,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.potterwell.ninebelow',
-      buildNumber: '1',
+      buildNumber: '2',
       config: { usesNonExemptEncryption: false },
       privacyManifests: {
         NSPrivacyTracking: false,

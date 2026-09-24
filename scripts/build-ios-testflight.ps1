@@ -15,6 +15,8 @@ try {
     Write-Host 'If asked, allow EAS to create the distribution profile for this app.'
     & npm.cmd run verify-deps
     if ($LASTEXITCODE -ne 0) { throw 'Dependency validation failed; build stopped.' }
+    & npm.cmd run test:native-codegen
+    if ($LASTEXITCODE -ne 0) { throw 'Native codegen validation failed; build stopped.' }
     & npm.cmd run typecheck
     if ($LASTEXITCODE -ne 0) { throw 'Type checking failed; build stopped.' }
     & npx.cmd --yes eas-cli@latest build --platform ios --profile testflight

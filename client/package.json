@@ -9,10 +9,11 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "verify-deps": "expo install --check",
-    "eas-build-post-install": "npm run verify-deps",
+    "eas-build-post-install": "npm run verify-deps && npm run test:native-codegen",
     "lint": "eslint . --ext .ts,.tsx --max-warnings=0",
     "typecheck": "tsc --noEmit",
-    "test:browser": "node --test test/browserAlert.test.cjs"
+    "test:browser": "node --test test/browserAlert.test.cjs",
+    "test:native-codegen": "node --test test/nativeCodegen.test.cjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
