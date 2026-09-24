@@ -35,15 +35,16 @@ The iOS build excluded the Google Sign-In pod through Expo autolinking, but Reac
 | EAS submission | [26e55b6b-f250-4807-acc8-575fd9421e19](https://expo.dev/accounts/nemoclown/projects/golf9/submissions/26e55b6b-f250-4807-acc8-575fd9421e19) |
 | Apple upload / processing | Submission finished September 24 at 17:04 UTC; Apple processing `VALID`, unexpired |
 | Apple build resource | `f7d0da0c-299f-426c-b6c4-b2c0127c906c` |
-| TestFlight state | Internal `READY_FOR_BETA_TESTING`; external `READY_FOR_BETA_SUBMISSION`; no build-2 beta review submitted yet |
-| Existing group distribution | Pending owner audience decision; no build-2 group assignment performed |
+| TestFlight state | Internal `READY_FOR_BETA_TESTING`; external `IN_BETA_TESTING`; beta review `APPROVED` |
+| Existing group distribution | Build 2 assigned to **Private Playtesters**; owner approved keeping Public Link enabled on September 24 |
+| Tester notification / instructions | Automatic notification enabled; build-2 startup-fix What to Test saved and verified |
 | Physical-device launch | Pending tester confirmation |
 
-### Distribution audience checkpoint
+### Approved distribution audience
 
-Read-only App Store Connect checks on September 24 found the existing **Private Playtesters** external group has one tester, only build 1 assigned, and **Public Link enabled**. This differs from the September 21 email-only setup. The current setting has been preserved, and the owner has been asked whether to disable the link for selected-testers-only access or retain link-based access before assigning build 2. Do not infer privacy from the group's name. Do not add testers, change roles, expire build 1, or change the link without the appropriate authorization.
+On September 24 the owner explicitly approved keeping **Public Link enabled** on the existing **Private Playtesters** external group. The group is link-accessible, not email-only; its name is not an access restriction. The live preflight showed one tester and build 1 assigned. Build 2 was then assigned to that same group without changing its settings or tester accounts. Both existing build 1 and corrected build 2 remain assigned; testers must select **0.1.0 (2)** to test this fix.
 
-Build 2 is uploaded and valid, but not yet available to this external group. After the audience decision, set build 2's What to Test from the [copy worksheet](../store-assets/apple/testflight-copy.md), assign only the intended existing group, submit any required TestFlight review, and verify availability. Read-only checks found automatic notification enabled on build 2 already. No group configuration, tester, reviewer credential, release-policy, or build-1 changes were made during this replacement upload.
+Apple readback confirms build 2 is **VALID**, **APPROVED**, and **IN_BETA_TESTING**, assigned to the intended group. The startup-fix What to Test from the [copy worksheet](../store-assets/apple/testflight-copy.md) was saved and read back. Automatic tester notification remains enabled, but email receipt and physical-device launch are not verified. The operation made three scoped writes: What to Test, group assignment, and beta review submission. No group configuration, tester, reviewer credential, release-policy, or build-1 changes were made.
 
 ## Tester acceptance
 

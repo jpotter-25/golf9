@@ -2,7 +2,7 @@
 
 Prepared September 21, 2026; updated September 24 for version **0.1.0**, replacement iOS build **2**, bundle ID **com.potterwell.ninebelow**. SKU: **ninebelow-ios**.
 
-This is TestFlight copy, not a public App Store launch announcement. **Build 0.1.0 (1) reached external testing but has a confirmed native launch crash. Build 0.1.0 (2) addresses that defect.** See the [replacement release record](../../docs/ios-testflight-build-2.md) for current upload, processing, distribution, and physical-device verification status. September 24 live checks found Public Link enabled on **Private Playtesters**, differing from the initial email-only setup; the owner's audience decision is required before assigning the replacement. Do not describe the live group as email-only without verifying its settings.
+This is TestFlight copy, not a public App Store launch announcement. **Build 0.1.0 (1) reached external testing but has a confirmed native launch crash. Build 0.1.0 (2) addresses that defect.** See the [replacement release record](../../docs/ios-testflight-build-2.md) for current upload, processing, distribution, and physical-device verification status. On September 24 the owner explicitly approved retaining **Public Link enabled** on **Private Playtesters** for the replacement rollout. Build 2 is assigned and Apple reports **VALID / IN_BETA_TESTING**, with beta review **APPROVED**. This group is not email-only; successful physical-device installation and launch remain unverified.
 
 See the [step-by-step setup guide](../../docs/ios-testflight-guide.md) for account creation, signing, upload, tester groups, and rollout controls.
 
@@ -24,7 +24,7 @@ See the [step-by-step setup guide](../../docs/ios-testflight-guide.md) for accou
 
 Nine Below by Potterwell is a multiplayer card game inspired by the traditional game of Golf. Reveal and replace cards, read the table, and aim for the lowest score.
 
-This private beta helps us test the iPhone and iPad experience and shared online matches with Android players. Browser play will join testing when its deployment is ready. Use your Nine Below display name and password to access the same player account on supported platforms. New accounts may require a separate Nine Below invite code.
+This TestFlight beta helps us test the iPhone and iPad experience and shared online matches with Android players. Browser play will join testing when its deployment is ready. Use your Nine Below display name and password to access the same player account on supported platforms. New accounts may require a separate Nine Below invite code.
 
 The game is in development. Features, balance, rewards, and progress may change during testing. Please share bugs, confusing interactions, and device-specific problems through TestFlight feedback or the game's support tools.
 
@@ -73,11 +73,11 @@ The player account controls include account deletion. Please use the supplied di
 
 The review account passed live password sign-in and account retrieval checks; its attempt to access the admin API was rejected with HTTP 401. Native installation and sign-in through the uploaded binary remain unverified. Before submitting these notes, reconcile them with the actual build and testing results. If online review requires a second player, arrange and describe a reproducible supported test path rather than promising always-available live opponents.
 
-## Private external distribution record
+## External TestFlight distribution record
 
-September 24 read-only checks found the **Private Playtesters** group (`0716e498-8de2-45cb-9510-ad247deaf9f7`) has one tester and build **0.1.0 (1)** assigned. Build 1 is **IN_BETA_TESTING**, with automatic notification enabled, but the tester reported a launch crash. **Public Link is enabled**, differing from the initial setup. Build 2's assignment is pending the owner's audience decision; track current status in the [replacement release record](../../docs/ios-testflight-build-2.md). Keep recipient names and email addresses in App Store Connect, not in this repository, and do not grant ordinary play testers App Store Connect roles.
+On September 24, replacement build **0.1.0 (2)** (Apple build ID `f7d0da0c-299f-426c-b6c4-b2c0127c906c`) was assigned to the existing **Private Playtesters** group (`0716e498-8de2-45cb-9510-ad247deaf9f7`). Apple readback confirms **VALID / IN_BETA_TESTING**, beta review **APPROVED**, and automatic notification enabled; the saved **What to Test** text matches the verified build 2 copy. **Public Link remains enabled with explicit owner approval.** Existing tester accounts, reviewer credentials, and build 1's assignment were unchanged. Build 1 has a confirmed launch crash; testers should choose build 2. Track current status in the [replacement release record](../../docs/ios-testflight-build-2.md). Keep recipient names and email addresses in App Store Connect, not in this repository, and do not grant ordinary play testers App Store Connect roles.
 
-After build 2 processing, any required approval, and authorized assignment, verify **0.1.0 (2)** is available to the intended tester. Privately provide a separate Nine Below signup code if the tester needs a new game account. Confirm a successful installation and cold launch before expanding the group. See the [private testing and reviewer recovery instructions](../../docs/ios-testflight-guide.md#private-external-group-for-selected-people).
+Build 2 is approved and assigned for external testing. Next, verify the intended tester can obtain **0.1.0 (2)** through TestFlight and successfully install and cold-launch it; those physical-device checks remain pending. Automatic notification does not prove receipt or installation. Privately provide a separate Nine Below signup code if the tester needs a new game account. Confirm successful launch before expanding the audience. See the [testing and reviewer recovery instructions](../../docs/ios-testflight-guide.md#private-external-group-for-selected-people).
 
 ## Private tester welcome message
 
