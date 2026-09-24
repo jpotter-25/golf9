@@ -1,8 +1,10 @@
 # Nine Below: iOS and TestFlight setup guide
 
-Prepared September 21, 2026. Product: **Nine Below by Potterwell**.
+Prepared September 21, 2026; release status updated September 24, 2026. Product: **Nine Below by Potterwell**.
 
-This guide prepares the first iOS beta and explains how to give selected people access. The first signed native iOS build, **version 0.1.0, iOS build 1**, finished successfully, was uploaded to Apple, and completed processing. Apple processing was verified as **VALID / READY_FOR_BETA_TESTING** for internal testing; the current external-testing status shown in App Store Connect is **Waiting for Review**. Its IPA identity/version were checked and a local archive was saved. The Apple identifier and app record are registered, and signing/upload credentials are configured in EAS. **The private external group has one owner-selected tester and build 0.1.0 (1); TestFlight App Review was submitted September 21, 2026, and approval is pending.** Automatic tester notification is enabled, but email delivery and physical-device installation are not yet verified. The earlier noninteractive signing blocker is resolved; this is not a public App Store release.
+This guide explains the registered iOS app and TestFlight workflow. **Build 0.1.0 (1) reached external testing but has a confirmed native launch crash. The replacement is 0.1.0 (2).** Its source fix, signed IPA checks, current Apple upload/distribution status, and tester acceptance steps are recorded in the [build 2 release record](ios-testflight-build-2.md). Successful compilation does not establish a successful physical-device launch. The Apple app, signing, and upload credentials are already configured; do not create duplicates. This is not a public App Store release.
+
+**Audience checkpoint:** September 24 live checks found **Public Link enabled** on the existing **Private Playtesters** group, differing from the September 21 email-only setup. There is one tester and only build 1 assigned. Preserve the setting until the owner decides whether to disable the link or retain link-based access before build 2 is distributed. A group's name does not enforce private access.
 
 ### Verified Apple registration — September 21, 2026
 
@@ -24,7 +26,7 @@ This guide prepares the first iOS beta and explains how to give selected people 
 - Build status: **finished**, September 21, 2026 at 20:34 UTC. The IPA declares bundle `com.potterwell.ninebelow`, version `0.1.0`, build `1`, minimum iOS `15.1`, iPhone/iPad device families, and iOS 26.0 SDK. Expected embedded provisioning/signature resources and JavaScript bundle are present; no `.p8`, `.p12`, `.env`, `credentials.json`, or source-map files were found in the archive. These checks do not replace Apple's signature validation or a device launch test.
 - Local IPA: `artifacts/ios/build-1-4f98cb7c/nine-below-0.1.0-build-1.ipa` (15,081,570 bytes; ignored by Git). SHA-256: `c4cdf76a8dfdb4f1dedd180d0a4b4d195a7f8b31aa400ae981693171dc8328bb`. The local archive preserves the binary independently of hosted artifact retention.
 - Upload job: [81212592-c48a-430e-897c-674ae22f733b](https://expo.dev/accounts/nemoclown/projects/golf9/submissions/81212592-c48a-430e-897c-674ae22f733b), targeting Apple app `6814632886` and the exact build above. Status: **finished**, September 21, 2026 at 20:38 UTC. Automatic TestFlight-group setup was explicitly disabled; no tester invitations or public release were performed.
-- Apple processing was verified through the official EAS/App Store Connect status command: build `0.1.0 (1)` is **VALID**, internal state **READY_FOR_BETA_TESTING**, and not expired. The external state was **READY_FOR_BETA_SUBMISSION** before review submission; after submission, the live TestFlight UI reports **Waiting for Review**. [TestFlight dashboard](https://appstoreconnect.apple.com/apps/6814632886/testflight/ios).
+- Historical September 21 processing: build `0.1.0 (1)` was **VALID / READY_FOR_BETA_TESTING**, then **Waiting for Review** after external review submission. September 24 live status is **IN_BETA_TESTING**; the tester's crash report confirms the launch defect documented in the [build 2 replacement record](ios-testflight-build-2.md). [TestFlight dashboard](https://appstoreconnect.apple.com/apps/6814632886/testflight/ios).
 - Shared backend readiness and browser access passed read-only checks; iOS playtest build 1 returned `status: current`, `minimumBuild: 0`, and `storeReady: false`. Leave release announcements disabled until actual TestFlight installation is verified.
 
 ## What is already shared across platforms
@@ -198,7 +200,7 @@ For personal contacts, use external testing with email invitations and keep the 
 
 ### Private external group for selected people
 
-The configured email-only group is **Private Playtesters**, ID `0716e498-8de2-45cb-9510-ad247deaf9f7`. The live group shows **1 Tester · 1 Build**, with build **0.1.0 (1)** assigned. TestFlight App Review was submitted on **September 21, 2026**; the build shows **Waiting for Review**, not approved. **Automatically notify testers** was enabled at submission. The public link has not been created. Email invitation delivery and installation remain unverified. Keep recipient names and email addresses out of Git, and record actual invitation/installation outcomes rather than inferring them from group membership.
+The existing external group is **Private Playtesters**, ID `0716e498-8de2-45cb-9510-ad247deaf9f7`. September 24 checks show one tester and build **0.1.0 (1)** assigned; that build is **IN_BETA_TESTING**, with automatic notification enabled, but has a confirmed launch crash. **Public Link is now enabled**, although it was not enabled during September 21 setup. The owner must resolve the audience choice before build 2 is assigned; see the [current release record](ios-testflight-build-2.md). Keep recipient names and email addresses out of Git, and verify installation outcomes independently of group membership.
 
 1. Create the internal group first if one does not exist; Apple's external-group workflow requires one. Creating the group does not require inviting new staff.
 2. Under **External Testing**, use **Private Playtesters** for the first selected wave. Create a separate wave-specific group only when that separation is intended.
@@ -237,17 +239,17 @@ The interface calls this a temporary password, but the current player app does n
 
 ### Early Access emails
 
-Follow the [Early Access Operations Guide](early-access-operations.md) for enrollment, consent, selection, onboarding, delivery gates, and audit records. For this private email-invite TestFlight rollout, keep Apple's public link disabled even though the older general operations guide describes a public-link alternative. Apple sends its own installation invitations; Nine Below sends or provides the separate game-access details.
+Follow the [Early Access Operations Guide](early-access-operations.md) for enrollment, consent, selection, onboarding, delivery gates, and audit records. An email-only TestFlight rollout requires Apple's public link to be disabled; a link-based wave requires the owner's deliberate approval. Reconcile the live setting before sending a wave, rather than assuming it from this guide or the group name. Apple sends its own installation invitations; Nine Below sends or provides the separate game-access details.
 
 Do not invent a public TestFlight link to satisfy a campaign form. Use manual game invite-code delivery for a small staff test, or verify an appropriate HTTPS installation/instruction destination before scheduling a private-wave campaign. Required email settings, including the sender/postal-address gates, still apply; this guide does not enable campaign delivery.
 
 ## 8. Publish the in-game release notice only after availability
 
-The admin console already manages Android, iOS, and browser release policies separately. iOS build `1` is independent of Android's version code. Do not copy Android's current minimum build into iOS.
+The admin console already manages Android, iOS, and browser release policies separately. iOS build numbers are independent of Android's version code. Do not copy Android's current minimum build into iOS.
 
 1. First verify an invited tester can install the uploaded iOS build and start the app.
 2. In **Admin → Live Ops → App Releases**, choose **Testing (Play / TestFlight / web)** and **iOS**.
-3. Enter **Latest build: 1**, **App version: 0.1.0**, and **Minimum allowed build: 0** for the initial rollout.
+3. For the replacement rollout, enter **Latest build: 2**, **App version: 0.1.0**, and initially retain **Minimum allowed build: 0**. These are instructions, not an indication that this policy has been published.
 4. Enter the verified HTTPS destination that helps this group obtain the update. Private invited testers can open the installed TestFlight app; do not enable a public invitation link just to populate this field. If no suitable destination has been verified, leave the existing iOS policy unchanged until one is ready.
 5. Check **Release ready** only after the intended testers can access it. Prefer **Finish active match, then require update**.
 6. Review the preview, enter an administrative reason, and **Publish Now** or deliberately schedule the policy.
@@ -267,7 +269,7 @@ Record the exact iOS build, Android version code, browser build, server revision
 - [ ] Complete a full game with alternating turns across devices. Confirm legal actions, hidden-card privacy, final scores, and match results agree.
 - [ ] Test host departure, rejoin, background/foreground transitions, Wi-Fi/mobile-data switching, and brief network loss.
 - [ ] Confirm reconnecting does not duplicate a turn, reward, match, or account.
-- [ ] Confirm release notices target the selected platform and channel; Android build numbers do not block iOS build 1.
+- [ ] Confirm release notices target the selected platform and channel; Android build numbers do not block the iOS build.
 - [ ] Exercise friends/room invitations, chat moderation/reporting, clubs, and other enabled features used by the wave.
 - [ ] Check notification permission refusal and, if APNs is configured, delivery to a physical iPhone. Declining notifications must not block play.
 - [ ] Open the privacy policy, use support/feedback, and test account deletion only with a disposable test account.
@@ -290,7 +292,8 @@ Apple's social-login rule is why this beta consistently uses first-party credent
 ## 11. Updates, expiry, and common blockers
 
 - **Refresh TestFlight after upload:** processing and review status are in App Store Connect; users should open TestFlight → Nine Below and check the offered build. Availability follows group assignment and any review, not merely a finished EAS build.
-- **Each TestFlight build expires after 90 days:** prepare a replacement before expiry, increment `ios.buildNumber` in `client/app.config.js` from `1` to `2` and upward, build, upload, assign it to the correct groups, verify availability, and only then publish its release policy. The display version can remain `0.1.0` during these beta builds.
+- **Each TestFlight build expires after 90 days:** prepare a replacement before expiry, increment `ios.buildNumber` in `client/app.config.js` beyond the current `2`, build, upload, assign it to the correct groups, verify availability, and only then publish its release policy. The display version can remain `0.1.0` during these beta builds.
+- **Build 1 crashes immediately:** use the corrected **0.1.0 (2)** once available in TestFlight. The [replacement record](ios-testflight-build-2.md) explains the native registration defect and launch-verification steps. Do not delete the player's account or reset shared data to work around this binary failure.
 - **Bundle ID missing:** register it in the correct developer team, then refresh App Store Connect.
 - **Missing signing credentials:** complete the interactive Apple/EAS setup; a simulator archive cannot replace an App Store-signed IPA.
 - **Missing Compliance:** review the encryption answer for the actual binary before distributing.
@@ -308,7 +311,7 @@ Apple's social-login rule is why this beta consistently uses first-party credent
 The app record, numeric Apple ID, Team ID, signing credentials, APNs key, and EAS Submit credential are configured. The first build/upload and Apple's processing are complete. The remaining information/actions are:
 
 1. Any additional owner-selected testers' email addresses and whether they are trusted staff or ordinary private testers. The first ordinary external tester is recorded in **Private Playtesters**; no additional recipients should be assumed or added to Git.
-2. Apple's TestFlight App Review approval and a verified email installation invitation. Build **0.1.0 (1)** is assigned and review has been submitted; **Waiting for Review** is not installation availability. Automatic tester notification is enabled. A tester creating a new Nine Below account also needs a separately supplied game signup code.
+2. The owner-approved audience setting, then build **0.1.0 (2)** processing/approval, group assignment, and verified tester availability. See the [current release record](ios-testflight-build-2.md); build 1's testing availability does not establish build 2's availability. A tester creating a new Nine Below account also needs a separately supplied game signup code.
 3. Keep the saved feedback/review contact details current and monitored and the dedicated non-administrator review account usable. Its credentials are stored privately as described above, not in this repository.
 4. A physical-device TestFlight installation and the acceptance checks above, including cross-platform play and push notifications. Fresh authentication is needed only if Apple/EAS requests it again.
 

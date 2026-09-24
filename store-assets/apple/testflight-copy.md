@@ -1,8 +1,8 @@
 # Nine Below: Apple beta copy and release worksheet
 
-Prepared September 21, 2026 for version **0.1.0**, iOS build **1**, bundle ID **com.potterwell.ninebelow**. SKU: **ninebelow-ios**.
+Prepared September 21, 2026; updated September 24 for version **0.1.0**, replacement iOS build **2**, bundle ID **com.potterwell.ninebelow**. SKU: **ninebelow-ios**.
 
-This is copy for the first private TestFlight release. **Version 0.1.0 (1) is signed, uploaded, processed by Apple, and submitted for external TestFlight App Review on September 21, 2026. Its current UI status is Waiting for Review.** The earlier noninteractive signing blocker was resolved. The build is assigned to the private, email-only external tester group and automatic tester notification is enabled. Approval, email delivery, and physical-device installation are not yet verified. None of this copy announces a public App Store launch.
+This is TestFlight copy, not a public App Store launch announcement. **Build 0.1.0 (1) reached external testing but has a confirmed native launch crash. Build 0.1.0 (2) addresses that defect.** See the [replacement release record](../../docs/ios-testflight-build-2.md) for current upload, processing, distribution, and physical-device verification status. September 24 live checks found Public Link enabled on **Private Playtesters**, differing from the initial email-only setup; the owner's audience decision is required before assigning the replacement. Do not describe the live group as email-only without verifying its settings.
 
 See the [step-by-step setup guide](../../docs/ios-testflight-guide.md) for account creation, signing, upload, tester groups, and rollout controls.
 
@@ -29,6 +29,10 @@ This private beta helps us test the iPhone and iPad experience and shared online
 The game is in development. Features, balance, rewards, and progress may change during testing. Please share bugs, confusing interactions, and device-specific problems through TestFlight feedback or the game's support tools.
 
 ## What to Test
+
+Build 2 addresses the iOS startup crash in native component registration. Please confirm the app opens successfully, then test display-name/password sign-in, solo play, and cross-platform games with Android or browser players. Check card interactions, round scoring, reconnecting, and background/resume behavior. Please include your device model, iOS version, and reproduction steps with any TestFlight feedback.
+
+### Detailed acceptance checklist
 
 Please focus on:
 
@@ -71,11 +75,13 @@ The review account passed live password sign-in and account retrieval checks; it
 
 ## Private external distribution record
 
-The **Private Playtesters** group (`0716e498-8de2-45cb-9510-ad247deaf9f7`) shows **1 Tester · 1 Build**: one owner-selected external tester and build **0.1.0 (1)**. Review was submitted on **September 21, 2026** and the build shows **Waiting for Review**. Automatic tester notification is enabled; no public invitation link has been created. Apple approval, invitation email delivery, and installation are not yet verified. Keep recipient names and email addresses in App Store Connect, not in this repository, and do not grant ordinary play testers App Store Connect roles.
+September 24 read-only checks found the **Private Playtesters** group (`0716e498-8de2-45cb-9510-ad247deaf9f7`) has one tester and build **0.1.0 (1)** assigned. Build 1 is **IN_BETA_TESTING**, with automatic notification enabled, but the tester reported a launch crash. **Public Link is enabled**, differing from the initial setup. Build 2's assignment is pending the owner's audience decision; track current status in the [replacement release record](../../docs/ios-testflight-build-2.md). Keep recipient names and email addresses in App Store Connect, not in this repository, and do not grant ordinary play testers App Store Connect roles.
 
-After approval, verify the selected build is available in this group and that Apple's automatic email invitation reaches the selected tester. Privately provide a separate Nine Below signup code if the tester needs a new game account. First confirm a successful installation and launch before expanding the group. See the [private testing and reviewer recovery instructions](../../docs/ios-testflight-guide.md#private-external-group-for-selected-people).
+After build 2 processing, any required approval, and authorized assignment, verify **0.1.0 (2)** is available to the intended tester. Privately provide a separate Nine Below signup code if the tester needs a new game account. Confirm a successful installation and cold launch before expanding the group. See the [private testing and reviewer recovery instructions](../../docs/ios-testflight-guide.md#private-external-group-for-selected-people).
 
 ## Private tester welcome message
+
+Use this draft only for an explicitly selected email-invite wave after verifying the audience settings. It is not a description of the currently enabled public link.
 
 You have been selected to help test Nine Below by Potterwell on iPhone or iPad.
 
@@ -115,7 +121,9 @@ The iOS manifest currently declares approved reasons for file timestamp and user
 
 The current app config sets `ios.config.usesNonExemptEncryption` to `false`, reflecting exempt platform security such as HTTPS/TLS and operating-system credential storage. This declaration also covers libraries shipped in the binary. Reassess it if client cryptography changes; server-only database encryption is a different component. If Apple asks about encryption, answer consistently with the inspected release rather than selecting "no encryption" merely to clear the screen.
 
-## Release record — verified September 21, 2026
+## Historical build 1 release record — September 21, 2026
+
+The following table preserves the original submission-day record, not current availability or crash status. Build 1 later reached **IN_BETA_TESTING** and produced the confirmed startup crash. Use the [build 2 release record](../../docs/ios-testflight-build-2.md) for the replacement and current group settings.
 
 | Item | Status/value |
 | --- | --- |
@@ -125,10 +133,10 @@ The current app config sets `ios.config.usesNonExemptEncryption` to `false`, ref
 | EAS build ID | `4f98cb7c-246f-44a9-8668-db5197cc16fa`; finished at 20:34 UTC |
 | Signed IPA / checksum | `artifacts/ios/build-1-4f98cb7c/nine-below-0.1.0-build-1.ipa` (Git-ignored); SHA-256 `c4cdf76a8dfdb4f1dedd180d0a4b4d195a7f8b31aa400ae981693171dc8328bb` |
 | EAS submission ID/result | `81212592-c48a-430e-897c-674ae22f733b`; finished at 20:38 UTC |
-| Apple processing/compliance result | VALID; internal READY_FOR_BETA_TESTING; external UI now Waiting for Review |
+| Apple processing/compliance result | On September 21: VALID; internal READY_FOR_BETA_TESTING; external Waiting for Review |
 | Internal QA installation | Pending physical-device test |
-| External beta approval | Review submitted September 21, 2026; Waiting for Review, not approved |
-| Private external distribution | Build 0.1.0 (1) assigned to Private Playtesters; automatic notification enabled; email delivery/install not verified; no public link |
+| External beta approval | September 21 submission-day state: Waiting for Review; subsequently IN_BETA_TESTING |
+| Private external distribution | September 21: build 0.1.0 (1) assigned to Private Playtesters, automatic notification enabled, no public link at setup; September 24 link is enabled |
 | iOS release policy | Keep unannounced until availability is verified |
 | TestFlight expiry date | Record the date shown by Apple; each build lasts 90 days |
 
