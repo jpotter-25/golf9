@@ -6,7 +6,9 @@ Implemented in source: Google and Facebook on iOS, Sign in with Apple on iOS and
 
 **This is not a released mobile build.** Source reserves iOS build **3** and Android versionCode **60**; do not tell testers these are available until EAS/Apple/Google processing and physical-device verification complete. The previously distributed iOS build is 0.1.0 (2), which the owner reported successfully opening to the login screen on October 30.
 
-The EAS preview environment currently has Android Google/Facebook values but no iOS Google client ID or Apple enable flag. Apple Developer needs an interactive sign-in. The inspected Google account showed no accessible project. Railway CLI authentication is expired. No provider keys, credentials, production flags, or store distributions were changed as part of those checks.
+The EAS preview environment currently has Android Google/Facebook values but no iOS Google client ID or Apple enable flag. The owner has signed in to Apple Developer and accepted its updated agreement; the existing App ID is accessible, but Sign in with Apple is not yet enabled and the only existing developer key is for APNs. Google Cloud is now on the correct existing **nine-below** project, which has two Android OAuth clients and one Web client, but no iOS client. The iOS creation form is prepared, not submitted; provider-credential creation awaits explicit owner confirmation. Railway CLI and browser administration both require sign-in.
+
+Source commit **ce2cc58611ed7f457a0a8066525d3c2072e06e69** is pushed to main and Railway reports its deployment successful. The live `/auth/config` now exposes the new readiness fields with Apple iOS/Android and Facebook iOS all disabled; existing Google/Facebook remain enabled. A transient writer-handoff response was observed during the deployment check; `/health/ready` subsequently returned `ok: true, ready: true`. No new provider keys, credentials, enable flags, or store distributions have been created by these checks. Physical-device OAuth testing and secure provider configuration remain outstanding.
 
 ## Player behavior
 
