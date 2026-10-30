@@ -83,7 +83,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.potterwell.ninebelow',
-      buildNumber: '3',
+      buildNumber: '4',
       usesAppleSignIn: true,
       config: { usesNonExemptEncryption: false },
       privacyManifests: {

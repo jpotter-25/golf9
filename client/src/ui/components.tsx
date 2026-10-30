@@ -25,6 +25,7 @@ import { ProgressAvatar } from '../components/AvatarDecorations';
 import { AccountControls } from '../components/AccountControls';
 import { ClubEmblem } from '../components/ClubEmblem';
 import { APP_CONTENT_MAX_WIDTH, responsiveHorizontalPadding } from '../utils/scaling';
+import { formatCoinBalance } from '../utils/coinBalance';
 import { gradients, ui } from './theme';
 
 type ShellProps = {
@@ -107,6 +108,7 @@ function GlobalTopBar() {
   const isLobby = route.name === 'Lobby';
   const progress = Math.max(0, Math.min(1, user?.progression.levelProgress ?? 0));
   const clubAttentionCount = Math.min(99, clubActionCount + clubChatUnread);
+  const coinBalance = formatCoinBalance(user?.currency.coins ?? 0);
 
   useEffect(() => subscribeGameplayPreferences(setPrefs), []);
 
@@ -126,76 +128,79 @@ function GlobalTopBar() {
       paddingTop: Math.max(10, insets.top + 8),
     }]}>
       <View style={styles.topBar}>
-        {!isLobby ? (
-          <Pressable accessibilityRole="button" accessibilityLabel="Go home" style={[styles.topIconButton, styles.topHomeButton]} onPress={() => navigation.navigate('Lobby')}>
-            <Home size={18} color={ui.text.primary} strokeWidth={2.8} />
+        <View style={[styles.topIdentity, !isLobby && styles.topIdentityWithHome]}>
+          {!isLobby ? (
+            <Pressable accessibilityRole="button" accessibilityLabel="Go home" style={[styles.topIconButton, styles.topHomeButton]} onPress={() => navigation.navigate('Lobby')}>
+              <Home size={18} color={ui.text.primary} strokeWidth={2.8} />
+            </Pressable>
+          ) : null}
+
+          <Pressable accessibilityRole="button" accessibilityLabel="Open profile" style={[styles.playerChip, !isAvailable('profile') && styles.featureLocked]} onPress={() => openFeature('profile', 'Profile')}>
+            <ProgressAvatar
+              cosmetics={user?.inventory.equipped}
+              fallbackInitial={user?.avatarInitial ?? '?'}
+              league={user?.displayRankEmblem?.league}
+              progress={progress}
+              size={43}
+            />
+            <View style={styles.playerMeta}>
+              <Text style={styles.playerName} adjustsFontSizeToFit minimumFontScale={0.76} numberOfLines={1}>{user?.displayName ?? 'Player'}</Text>
+              <Text style={styles.playerAffiliation} numberOfLines={1}>
+                {club?.tag ? `[${club.tag}]  ` : ''}Lv {user?.progression.level ?? 1}
+              </Text>
+            </View>
           </Pressable>
-        ) : null}
+        </View>
+        <View style={styles.topActions}>
+          {isVisible('shop') ? (
+            <Pressable accessibilityRole="button" accessibilityLabel={`Coin balance: ${coinBalance.exact}${coinBalance.exact === 'unavailable' ? '' : ' coins'}. Open shop`} style={[styles.currencyChip, !isAvailable('shop') && styles.featureLocked]} onPress={() => openFeature('shop', 'Shop')}>
+              <Coins size={14} color={ui.palette.gold} strokeWidth={2.8} />
+              <Text style={styles.currencyValue}>{coinBalance.display}</Text>
+            </Pressable>
+          ) : null}
 
-        <Pressable accessibilityRole="button" accessibilityLabel="Open profile" style={[styles.playerChip, !isAvailable('profile') && styles.featureLocked]} onPress={() => openFeature('profile', 'Profile')}>
-          <ProgressAvatar
-            cosmetics={user?.inventory.equipped}
-            fallbackInitial={user?.avatarInitial ?? '?'}
-            league={user?.displayRankEmblem?.league}
-            progress={progress}
-            size={43}
-          />
-          <View style={styles.playerMeta}>
-            <Text style={styles.playerName} adjustsFontSizeToFit minimumFontScale={0.76} numberOfLines={1}>{user?.displayName ?? 'Player'}</Text>
-            <Text style={styles.playerAffiliation} numberOfLines={1}>
-              {club?.tag ? `[${club.tag}]  ` : ''}Lv {user?.progression.level ?? 1}
-            </Text>
-          </View>
-        </Pressable>
+          {isVisible('inbox') ? (
+            <Pressable accessibilityRole="button" accessibilityLabel="Open inbox" style={[styles.topIconButton, !isAvailable('inbox') && styles.featureLocked]} onPress={() => openFeature('inbox', 'Inbox')}>
+              <Mail size={18} color={ui.text.primary} strokeWidth={2.8} />
+              {(mailSummary?.attention ?? 0) > 0 ? (
+                <View style={styles.topIconBadge}>
+                  <Text style={styles.topIconBadgeText}>{Math.min(99, mailSummary?.attention ?? 0)}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          ) : null}
 
-        {isVisible('shop') ? (
-          <Pressable accessibilityRole="button" accessibilityLabel="Open shop" style={[styles.currencyChip, !isAvailable('shop') && styles.featureLocked]} onPress={() => openFeature('shop', 'Shop')}>
-            <Coins size={14} color={ui.palette.gold} strokeWidth={2.8} />
-            <Text style={styles.currencyValue} numberOfLines={1}>{user?.currency.coins ?? 0}</Text>
+          {isVisible('clubs.standings') ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Open Club Standings"
+              style={[styles.topIconButton, !isAvailable('clubs.standings') && styles.featureLocked]}
+              onPress={() => openFeature('clubs.standings', 'ClubStandings')}
+            >
+              <Medal size={19} color={ui.palette.violet} strokeWidth={2.8} />
+            </Pressable>
+          ) : null}
+
+          {isVisible('clubs') ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Open club${clubActionCount ? `, ${clubActionCount} pending club action${clubActionCount === 1 ? '' : 's'}` : ''}${clubChatUnread ? `, ${clubChatUnread} new club chat message${clubChatUnread === 1 ? '' : 's'}` : ''}`}
+              style={[styles.topIconButton, !isAvailable('clubs') && styles.featureLocked]}
+              onPress={openClub}
+            >
+              {club ? <ClubEmblem branding={club.branding} tag={club.tag} size={29} /> : <Users size={18} color={ui.text.primary} strokeWidth={2.8} />}
+              {clubAttentionCount > 0 ? (
+                <View style={styles.topIconBadge}>
+                  <Text style={styles.topIconBadgeText}>{clubAttentionCount}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          ) : null}
+
+          <Pressable accessibilityRole="button" accessibilityLabel="Open settings" style={styles.topIconButton} onPress={() => setSettingsOpen(true)}>
+            <Settings size={18} color={ui.text.primary} strokeWidth={2.8} />
           </Pressable>
-        ) : null}
-
-        {isVisible('inbox') ? (
-          <Pressable accessibilityRole="button" accessibilityLabel="Open inbox" style={[styles.topIconButton, !isAvailable('inbox') && styles.featureLocked]} onPress={() => openFeature('inbox', 'Inbox')}>
-            <Mail size={18} color={ui.text.primary} strokeWidth={2.8} />
-            {(mailSummary?.attention ?? 0) > 0 ? (
-              <View style={styles.topIconBadge}>
-                <Text style={styles.topIconBadgeText}>{Math.min(99, mailSummary?.attention ?? 0)}</Text>
-              </View>
-            ) : null}
-          </Pressable>
-        ) : null}
-
-        {isVisible('clubs.standings') ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Open Club Standings"
-            style={[styles.topIconButton, !isAvailable('clubs.standings') && styles.featureLocked]}
-            onPress={() => openFeature('clubs.standings', 'ClubStandings')}
-          >
-            <Medal size={19} color={ui.palette.violet} strokeWidth={2.8} />
-          </Pressable>
-        ) : null}
-
-        {isVisible('clubs') ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Open club${clubActionCount ? `, ${clubActionCount} pending club action${clubActionCount === 1 ? '' : 's'}` : ''}${clubChatUnread ? `, ${clubChatUnread} new club chat message${clubChatUnread === 1 ? '' : 's'}` : ''}`}
-            style={[styles.topIconButton, !isAvailable('clubs') && styles.featureLocked]}
-            onPress={openClub}
-          >
-            {club ? <ClubEmblem branding={club.branding} tag={club.tag} size={29} /> : <Users size={18} color={ui.text.primary} strokeWidth={2.8} />}
-            {clubAttentionCount > 0 ? (
-              <View style={styles.topIconBadge}>
-                <Text style={styles.topIconBadgeText}>{clubAttentionCount}</Text>
-              </View>
-            ) : null}
-          </Pressable>
-        ) : null}
-
-        <Pressable accessibilityRole="button" accessibilityLabel="Open settings" style={styles.topIconButton} onPress={() => setSettingsOpen(true)}>
-          <Settings size={18} color={ui.text.primary} strokeWidth={2.8} />
-        </Pressable>
+        </View>
       </View>
 
       <Modal animationType="fade" transparent visible={settingsOpen} onRequestClose={() => setSettingsOpen(false)}>
@@ -416,10 +421,31 @@ const styles = StyleSheet.create({
     borderColor: ui.border.soft,
     backgroundColor: 'rgba(36, 54, 85, 0.94)',
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    gap: 3,
+    gap: 6,
     paddingHorizontal: 4,
     paddingVertical: 4,
+  },
+  topIdentity: {
+    flexGrow: 1,
+    flexShrink: 0,
+    flexBasis: 112,
+    minWidth: 112,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  topIdentityWithHome: { flexBasis: 148, minWidth: 148 },
+  topActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    flexShrink: 1,
+    maxWidth: '100%',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginLeft: 'auto',
+    gap: 3,
   },
   playerChip: {
     flex: 1,
@@ -433,8 +459,8 @@ const styles = StyleSheet.create({
   playerName: { color: ui.text.primary, fontSize: 11, fontWeight: '900' },
   playerAffiliation: { color: ui.palette.gold, fontSize: 8.5, lineHeight: 11, fontWeight: '900', marginTop: 2 },
   currencyChip: {
-    width: 47,
-    height: 38,
+    flexShrink: 0,
+    minHeight: 38,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: ui.border.gold,
@@ -442,11 +468,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 2,
-    paddingHorizontal: 3,
+    gap: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
   },
-  currencyValue: { color: ui.palette.gold, fontSize: 11, fontWeight: '900', maxWidth: 29 },
+  currencyValue: { color: ui.palette.gold, fontSize: 12, fontWeight: '900', fontVariant: ['tabular-nums'], flexShrink: 0 },
   topIconButton: {
+    flexShrink: 0,
     width: 32,
     height: 38,
     borderRadius: 8,
