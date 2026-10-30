@@ -37,7 +37,31 @@ Existing navigation, feature-availability rules, balances, and server logic are 
 
 ## Distribution
 
-iOS build 4 is reserved for this change. Build/signature verification and Apple
-processing/distribution must finish before testers can install it. Existing build
-3 does not receive this change merely by restarting the app. Android version code
-60 is unchanged; the shared fix will require a new Android binary when released.
+- Source commit: `80294f551486ea870e14b15ae86ad96db8069a63`.
+- EAS iOS build 4: `93758566-db41-4d12-b467-c7d7c65f0aa3`, finished successfully.
+- Verified artifact: `artifacts/nine-below-0.1.0-ios-build-4.ipa`, 21,220,587 bytes.
+- SHA-256: `94afc359391d8bd99e4934937c4fa21478c12acf138f316f22284c71c6a8c250`.
+- Static package inspection passed: correct app/build/team, ARM64 device target,
+  all 50 registered native component classes, packaged frameworks and Hermes,
+  preserved Apple/Google configuration, no unexpected credential/source-map
+  filenames or private-key markers. Embedded bytecode contains the new header.
+  These checks do not replace a device cold-launch test or Apple's validation.
+- EAS submission `7c3c0cb9-0d47-41b7-981d-b4ace9e6d871` finished. Apple build
+  `37072534-8d6c-4627-a73a-d36ce4c47775` is `VALID`, beta review `APPROVED`, and
+  `IN_BETA_TESTING`. App Store Connect also shows build 4 as **Testing**.
+- Build 4 is assigned to the existing Private Playtesters group. Its existing
+  two testers, public join link, older builds, reviewer information, and access
+  settings were preserved. Automatic notification is enabled; receipt on a
+  tester device is not independently verified.
+- The distribution request returned an uncertain result after its writes; a
+  separate read-only check confirmed approval, group assignment, exact release
+  notes, and the testing state. No duplicate submission was made.
+- Railway deployment `1de2be37-25cb-4fec-83bd-8e28f6c22f5a` succeeded. The live
+  browser bundle contains the new header; `/health` and `/health/ready` passed.
+
+On iPhone, open **TestFlight → Nine Below → Update** and confirm **0.1.0 (4)**.
+If the update has not appeared yet, refresh/reopen TestFlight. Existing build 3
+does not receive this change merely by restarting the app.
+Android version code 60 is unchanged; the shared fix will require a new Android
+binary when released. No database migration, balance change, account reset, new
+tester access, or sign-in configuration change is part of this release.
