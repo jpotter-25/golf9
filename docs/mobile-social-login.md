@@ -6,9 +6,17 @@ Implemented in source: Google and Facebook on iOS, Sign in with Apple on iOS and
 
 **This is not a released mobile build.** Source reserves iOS build **3** and Android versionCode **60**; do not tell testers these are available until EAS/Apple/Google processing and physical-device verification complete. The previously distributed iOS build is 0.1.0 (2), which the owner reported successfully opening to the login screen on October 30.
 
-The EAS preview environment currently has Android Google/Facebook values but no iOS Google client ID or Apple enable flag. The owner has signed in to Apple Developer and accepted its updated agreement; the existing App ID is accessible, but Sign in with Apple is not yet enabled and the only existing developer key is for APNs. Google Cloud is now on the correct existing **nine-below** project, which has two Android OAuth clients and one Web client, but no iOS client. The iOS creation form is prepared, not submitted; provider-credential creation awaits explicit owner confirmation. Railway CLI and browser administration both require sign-in.
+Provider-console setup is complete for Google iOS and Apple iOS/Android, using the owner's explicitly approved credential batch. The company account **app-developer@potterwell.com** manages OAuth in the existing **nine-below** Google project; project ownership, existing clients, billing, and Expo ownership are unchanged. Cloud Identity Free is active, the Business Plus trial is canceled, and SiteGround mail/MX records remain unchanged.
 
-Source commit **ce2cc58611ed7f457a0a8066525d3c2072e06e69** is pushed to main and Railway reports its deployment successful. The live `/auth/config` now exposes the new readiness fields with Apple iOS/Android and Facebook iOS all disabled; existing Google/Facebook remain enabled. A transient writer-handoff response was observed during the deployment check; `/health/ready` subsequently returned `ok: true, ready: true`. No new provider keys, credentials, enable flags, or store distributions have been created by these checks. Physical-device OAuth testing and secure provider configuration remain outstanding.
+The live `/auth/config` reports Apple iOS/Android enabled, existing Google/Facebook enabled, and Facebook iOS disabled. Meta's app remains unpublished and requires business verification before general tester access. Physical-device OAuth testing and distribution of the new binaries remain outstanding.
+
+Live verification exposed a PostgreSQL-only bug: `persistProviderState` referenced an out-of-scope `staleWriter`. Commit **2e1d74e31244b98a5dae216424fbee8420f4006e** reads the actual PostgreSQL runtime status and preserves the write fence. Five regression tests exercise the real adapter; the full suite now passes 245 tests. Recheck live challenge creation after deployment, not just `/auth/config`.
+
+Build tracking:
+
+- Android 60: EAS **4bf8019e-7530-446e-94ab-b06109c28d03**, source **676c63a8**, building; server-only fix does not require rebuilding it.
+- First iOS 3 attempt **6685b3ce-2f38-45f4-98cf-edb6c25a2a7a** failed at CocoaPods: AppCheckCore requires modular GoogleUtilities/RecaptchaInterop dependencies.
+- Replacement iOS 3 **623ce501-c34b-46a3-96d0-fc2ebd880038**, source **56e6f308**, building with narrowly scoped `extraPods` modular headers, following the [Google Sign-In setup guidance](https://react-native-google-signin.github.io/docs/setting-up/ios). No global framework switch or SDK downgrade.
 
 ## Player behavior
 
@@ -28,6 +36,8 @@ Never paste private keys, client secrets, passwords, or MFA codes into chat or G
 
 Use the existing Potterwell team **63FQJRQ66P** and App ID **com.potterwell.ninebelow**.
 
+Verified configuration: primary App ID enabled; grouped Services ID **com.potterwell.ninebelow.signin**; Sign in with Apple-only key **S6N35XY9S2** sealed in Railway; existing APNs key/certificate unchanged. Native and Services ID credential probes both returned `invalid_grant` for intentionally invalid codes, rather than `invalid_client`; this is not a real player login. The transactional relay sender **donotreply@potterwell.com** is registered; actual Hide My Email recovery delivery still needs testing. EAS refreshed provisioning profile **BLMMAR54W8** using the existing distribution certificate.
+
 1. Enable Sign in with Apple on the existing App ID as the **primary App ID**.
 2. Register/reuse a Services ID for the Android web flow, suggested **com.potterwell.ninebelow.signin**. Associate it with that primary App ID. This grouping is essential for the same Apple identity across iOS and Android.
 3. Configure domain **ninebelow.potterwell.com** and exact return URL **https://ninebelow.potterwell.com/auth/apple/callback**. Do not register the mobile custom scheme with Apple.
@@ -41,6 +51,8 @@ Official references: [Apple cross-platform configuration](https://developer.appl
 
 Use the existing project that owns the Android and Web OAuth client IDs, not a new project.
 
+Created **Nine Below iOS**, client **480561997054-e49k6kj3fm311i41gon3lgbcmgbb2fdl.apps.googleusercontent.com**, with the existing bundle/team and App Store ID **6814632886**. Its public ID is saved in EAS preview. Consent audience is External / In production. Existing Web and Android clients are unchanged. The company account has scoped OAuth Config Editor, View Service Accounts, and Service Usage Viewer roles; it was not made project owner.
+
 1. Register/reuse an **iOS OAuth client** with bundle ID **com.potterwell.ninebelow**, team **63FQJRQ66P**, and App Store ID **6814632886** where requested.
 2. Put its public client ID in EAS preview as **EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID**. Keep the existing **EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID** unchanged.
 3. The Expo config derives the reversed iOS URL scheme from that ID.
@@ -53,6 +65,8 @@ Use the existing project that owns the Android and Web OAuth client IDs, not a n
 
 Use the existing Nine Below Facebook app. Add/verify its iOS platform with bundle **com.potterwell.ninebelow** and App Store ID **6814632886**. Confirm Facebook Login / Limited Login availability and app-mode/tester restrictions. Keep the same Facebook App ID across platforms so app-scoped identities remain consistent.
 
+Current console: app **1315258740282659**, unpublished/development mode, business verification required and Publish disabled. The iOS bundle is saved and automatic iOS app events are off. App Store ID fields remain blank because the initial form with those IDs did not persist; do not claim the store listing is registered. `FACEBOOK_IOS_LOGIN_ENABLED` remains unset/false. Do not grant playtesters developer-console roles to bypass publication requirements.
+
 Do not enable advertising tracking to make sign-in work. [SDK Limited Login implementation](https://github.com/thebergamo/react-native-fbsdk-next#limited-login-ios-only).
 
 ## Runtime configuration
@@ -61,21 +75,21 @@ Server-only Railway variables:
 
 | Variable | Value / purpose |
 | --- | --- |
-| APPLE_SIGN_IN_ENABLED | 1 only after iOS/signing setup and smoke checks |
-| APPLE_SIGN_IN_ANDROID_ENABLED | 1 only after Services ID/domain setup |
+| APPLE_SIGN_IN_ENABLED | Currently 1 |
+| APPLE_SIGN_IN_ANDROID_ENABLED | Currently 1 |
 | APPLE_SIGN_IN_IOS_CLIENT_ID | com.potterwell.ninebelow |
-| APPLE_SIGN_IN_SERVICE_ID | Verified, grouped Services ID |
+| APPLE_SIGN_IN_SERVICE_ID | com.potterwell.ninebelow.signin |
 | APPLE_SIGN_IN_TEAM_ID | 63FQJRQ66P |
-| APPLE_SIGN_IN_KEY_ID | Actual Sign in with Apple key ID |
-| APPLE_SIGN_IN_PRIVATE_KEY | Protected PEM .p8 contents; real newlines or escaped newline sequences |
+| APPLE_SIGN_IN_KEY_ID | S6N35XY9S2 |
+| APPLE_SIGN_IN_PRIVATE_KEY | Sealed Railway PEM; never exposed to clients or committed |
 | APPLE_SIGN_IN_REDIRECT_URI | https://ninebelow.potterwell.com/auth/apple/callback |
-| FACEBOOK_IOS_LOGIN_ENABLED | 1 after Meta iOS configuration |
+| FACEBOOK_IOS_LOGIN_ENABLED | Currently unset/false; publication/business verification outstanding |
 | EARLY_ACCESS_PII_KEY / EARLY_ACCESS_TOKEN_SECRET | Existing strong encryption/signing configuration; do not rotate casually |
 
 EAS preview client variables:
 
-- EXPO_PUBLIC_APPLE_SIGN_IN_ENABLED=1 once both intended mobile paths are ready.
-- EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=<actual public iOS OAuth client ID>.
+- EXPO_PUBLIC_APPLE_SIGN_IN_ENABLED=1 is configured.
+- EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=480561997054-e49k6kj3fm311i41gon3lgbcmgbb2fdl.apps.googleusercontent.com is configured.
 - Preserve existing Google Web ID and Facebook App ID/client token/display name.
 - **Never put Apple's private key or Meta's app secret in an EXPO_PUBLIC variable.**
 
@@ -96,12 +110,16 @@ The API reports safe readiness booleans at /auth/config. The client combines tho
 
 Completed locally on October 30:
 
-- Full server suite: **240 passed**, including game/cross-platform integration checks. Provider-specific JWT/replay/revocation tests were also rerun after the final grant-storage guard.
+- Full server suite: **245 passed**, including game/cross-platform integration checks and five PostgreSQL adapter regression cases. Focused provider/PostgreSQL suite: **28 passed**.
 - Client lint and TypeScript: passed.
 - Social-auth/config tests: **9 passed**; native-codegen/autolinking tests: **5 passed**; browser-dialog tests: **5 passed**.
 - Expo SDK dependency compatibility: passed.
 - Production browser export and iOS/Android Hermes source exports: passed. The latter are compile checks under artifacts/social-auth-source-check, **not signed store packages**.
-- Real Apple/Google/Meta account sign-in, live PostgreSQL migration, signed native compilation/IPA inspection, physical-device launch, and store distribution: still pending provider setup and access.
+- Real Apple/Google/Meta account sign-in, signed native compilation/IPA inspection, physical-device launch, and new store distribution remain unverified.
+
+Run EAS builds through `eas env:exec preview` so local iOS configuration validation sees the same public provider values as the cloud worker. Example: `eas env:exec preview 'eas build --platform ios --profile testflight --non-interactive --no-wait' --non-interactive`. This avoids writing public-provider environment files locally. Signed native package checks remain necessary; local source tests do not execute CocoaPods.
+
+Operational observation: after deployment, `/health/ready` has sometimes stayed 503 with writer handoff pending until `/health` is requested and the existing five-second handoff completes. Railway's configured healthcheck is `/health`. Verify both endpoints after deployments. Do not remove revision fencing or force a second writer to make readiness green.
 
 Dependency check on October 30: npm audit reports five pre-existing server dependency advisories (one moderate, three high, one critical) across body-parser, engine.io, nodemailer, proxy-addr, and qs. The newly added jose dependency is not listed. The client install also reported existing dependency advisories. These are not a new repository-wide security assessment or proof of exploitability; dependency remediation and re-testing remain a production-release gate. No broad framework or mail-library upgrade was bundled into this authentication change.
 

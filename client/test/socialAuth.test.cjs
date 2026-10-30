@@ -149,6 +149,14 @@ test('iOS build config includes all provider plugins and refuses a linked Facebo
     return module.exports.expo;
   };
   const native = build(env);
+  const buildProperties = native.plugins.find(plugin => Array.isArray(plugin) && plugin[0] === 'expo-build-properties')[1];
+  assert.equal(JSON.stringify(buildProperties.ios.extraPods), JSON.stringify([
+    { name: 'GoogleUtilities', modular_headers: true },
+    { name: 'RecaptchaInterop', modular_headers: true },
+  ]));
+  assert.equal(buildProperties.ios.useFrameworks, undefined);
+  assert.equal(buildProperties.android.enableMinifyInReleaseBuilds, true);
+  assert.equal(buildProperties.android.enableShrinkResourcesInReleaseBuilds, true);
   assert.equal(native.ios.usesAppleSignIn, true);
   assert.ok(native.scheme.includes('com.potterwell.ninebelow'));
   const google = native.plugins.find(plugin => Array.isArray(plugin) && plugin[0].includes('google-signin'));
