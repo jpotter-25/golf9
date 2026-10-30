@@ -54,6 +54,35 @@ the new client: iOS build 6 / Android version code 62. Do not treat the earlier
 build 5 / 61 as containing that new presentation code. Deployment and store
 availability must be verified separately from successful tests/builds.
 
+### Release evidence
+
+- Runtime change: `970cb8293ffaf5c81e2e7d450b39ee437f149f4b`.
+  Follow-up `5b21fa528d56238da7a03a7c3b1d1ae4299248be` explicitly stages the
+  three new client test/fixture files excluded by the workspace's sparse-checkout
+  rules; it does not change runtime code. Both mobile build archives included
+  those tests, confirmed by the public-card regression in their post-install logs.
+- Railway deployment `a54ac741-03d6-486e-862f-92770c0867eb` is Active on
+  `5b21fa52`; `/health` and `/health/ready` both returned HTTP 200, ready `true`.
+- iOS EAS build 6: `2fcd011e-05a5-403c-a213-24ee5167ab30` finished.
+  Submission `a055ab66-ff2b-4471-bd63-8550fa285959` finished; Apple build
+  `d9533093-c4dd-4ac9-9b51-a526801db8fd` is `VALID`, beta review `APPROVED`,
+  and external state `IN_BETA_TESTING`. App Store Connect also visibly shows
+  build 6 as Testing in the existing Private Playtesters group. Its public link,
+  tester accounts, review contact, and older builds were preserved.
+  IPA SHA-256: `d17a527003f7f20519bc6fc44b24f82b2c1caf544604ee4b493cecebe8af911e`.
+  Package checks verified ZIP integrity, app/team/version, unchanged sign-in URL
+  schemes, native component markers, and the new public-card JavaScript. These
+  checks do not constitute physical-device launch or full signature verification.
+- Android EAS version code 62: `182634bb-457c-45b1-87e0-0af0c4525a47` finished.
+  [Download the AAB](https://expo.dev/artifacts/eas/sfL7G5wxyXLz5TvYNSNsw7ATrnnMshc7cPrOjB9L4mA.aab).
+  Downloaded successfully and checked ZIP integrity, bundle structure, package ID,
+  the same embedded upload certificate as version 61, and the new public-card
+  JavaScript. SHA-256:
+  `3cd57bf93d2e3c88a8edd1c33f9637c1f32e3e6001a09bc8cf53aca3397ffaba`.
+  Ready for the existing Google Play closed-testing track; not uploaded or
+  published to Google Play by this task. Both mobile builds use runtime commit
+  `970cb829`; later commits contain test fixtures and release documentation only.
+
 For the physical-device check, reconnect both apps and start a fresh online
 round. Flip one opening card and verify it appears on the other device before
 the opening timer finishes. Repeat from the other player, then verify a
