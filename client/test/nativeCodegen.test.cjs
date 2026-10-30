@@ -3,6 +3,7 @@ const { mkdtempSync, readFileSync, rmSync } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { execFileSync } = require('node:child_process');
 
 const {
   findCodegenEnabledLibraries,
@@ -16,6 +17,19 @@ const {
 const projectRoot = path.resolve(__dirname, '..');
 const packageJson = JSON.parse(readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
 const googleLibrary = '@react-native-google-signin/google-signin';
+
+test('Expo resolves both iOS social-auth pods and excludes the Android-only updater', () => {
+  const cli = path.join(projectRoot, 'node_modules/expo-modules-autolinking/bin/expo-modules-autolinking.js');
+  const resolved = JSON.parse(execFileSync(process.execPath, [cli, 'react-native-config', '--platform', 'ios', '--json'], {
+    cwd: projectRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  }));
+  for (const name of [googleLibrary, 'react-native-fbsdk-next']) {
+    const podspec = resolved.dependencies[name]?.platforms?.ios?.podspecPath;
+    assert.ok(podspec, name + ' must be linked into CocoaPods, not just codegen');
+    assert.ok(readFileSync(podspec, 'utf8').length > 0);
+  }
+  assert.ok(!resolved.dependencies['expo-in-app-updates']?.platforms?.ios);
+});
 
 function withWorkspace(t) {
   const tempRoot = path.resolve(os.tmpdir());
@@ -46,19 +60,20 @@ test('React Native codegen and Expo exclude the same iOS-only dependencies', t =
   const rnExcluded = findDisabledLibrariesByPlatform(config, 'ios').sort();
   const expoExcluded = [...packageJson.expo.autolinking.ios.exclude].sort();
   assert.deepEqual(rnExcluded, expoExcluded);
-  assert.ok(rnExcluded.includes(googleLibrary));
+  assert.deepEqual(rnExcluded, ['expo-in-app-updates']);
   assert.deepEqual(findDisabledLibrariesByPlatform(config, 'android'), []);
 });
 
-test('generated iOS Fabric registry omits Google while retaining every linked game UI provider', t => {
+test('generated iOS Fabric registry includes the now-linked Google pod and every game UI provider', t => {
   const directory = withWorkspace(t);
   const config = readReactNativeConfig(projectRoot, directory);
   const libraries = enabledFor(discover(directory, config), config, 'ios');
-  assert.equal(libraries.some(library => library.name === googleLibrary), false);
+  assert.equal(libraries.some(library => library.name === googleLibrary), true);
   const output = path.join(directory, 'ios-provider');
   generateRCTThirdPartyComponents(libraries, output);
   const provider = readFileSync(path.join(output, 'RCTThirdPartyComponentsProvider.mm'), 'utf8');
-  assert.doesNotMatch(provider, /RNGoogleSignInButton|RNGoogleSignInButtonComponentView/);
+  assert.match(provider, /RNGoogleSignInButtonComponentView/);
+  assert.ok(readFileSync(path.join(projectRoot, 'node_modules', googleLibrary, 'RNGoogleSignin.podspec'), 'utf8').includes('RNGoogleSignin'));
   for (const nativeClass of [
     'RNGestureHandlerButtonComponentView',
     'RNCSafeAreaProviderComponentView',
@@ -72,12 +87,13 @@ test('generated iOS Fabric registry omits Google while retaining every linked ga
   }
 });
 
-test('negative control reproduces the missing-config Google class entry that crashed TestFlight build 1', t => {
+test('negative control detects the excluded-pod/codegen mismatch that crashed TestFlight build 1', t => {
   const directory = withWorkspace(t);
   const legacyConfig = {};
   const libraries = enabledFor(discover(directory, legacyConfig), legacyConfig, 'ios');
   assert.ok(libraries.some(library => library.name === googleLibrary));
-  assert.ok(packageJson.expo.autolinking.ios.exclude.includes(googleLibrary));
+  const legacyExpoExcluded = [...packageJson.expo.autolinking.ios.exclude, googleLibrary];
+  assert.notDeepEqual(findDisabledLibrariesByPlatform(legacyConfig, 'ios').sort(), legacyExpoExcluded.sort());
   const output = path.join(directory, 'legacy-ios-provider');
   generateRCTThirdPartyComponents(libraries, output);
   const provider = readFileSync(path.join(output, 'RCTThirdPartyComponentsProvider.mm'), 'utf8');

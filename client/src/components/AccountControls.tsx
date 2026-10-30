@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Alert } from '../utils/alert';
 import { CheckCircle2, Link, LogOut, ShieldAlert, Trash2 } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
-import type { AuthProviderKey } from '../services/api';
-import { isProviderConfigured } from '../services/socialAuth';
+import { authConfig, PROVIDER_LABELS } from '../services/api';
+import type { AuthProviderKey, AuthProviderStatus } from '../services/api';
+import { availableSocialProviders } from '../services/socialAuth';
+import { AppleSignInButton } from './AppleSignInButton';
 import { ui } from '../ui/theme';
 
 type AccountControlsProps = {
@@ -20,14 +22,20 @@ export function AccountControls({ onSessionEnd }: AccountControlsProps) {
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteError, setDeleteError] = useState('');
-  const availableProviders = (['google', 'facebook'] as AuthProviderKey[]).filter(isProviderConfigured);
+  const [providers, setProviders] = useState<AuthProviderStatus>({ google: false, facebook: false, apple: false });
+  useEffect(() => {
+    let mounted = true;
+    authConfig().then(availableSocialProviders).then(value => { if (mounted) setProviders(value); }).catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+  const availableProviders = (['apple', 'google', 'facebook'] as AuthProviderKey[]).filter(provider => providers[provider]);
 
   const linkProvider = async (provider: AuthProviderKey) => {
     if (busy) return;
     setBusy(`link-${provider}`);
     try {
       await linkSocialProvider(provider);
-      Alert.alert('Account linked', `${provider === 'google' ? 'Google' : 'Facebook'} can now sign in to this Nine Below profile.`);
+      Alert.alert('Account linked', `${PROVIDER_LABELS[provider]} can now sign in to this Nine Below profile.`);
     } catch (error) {
       Alert.alert('Link failed', error instanceof Error ? error.message : 'Try again.');
     } finally {
@@ -73,12 +81,14 @@ export function AccountControls({ onSessionEnd }: AccountControlsProps) {
         <Text style={styles.sectionTitle}>{availableProviders.length ? 'Linked accounts' : 'Your Nine Below account'}</Text>
         <Text style={styles.sectionMeta}>
           {availableProviders.length
-            ? 'Connect Google or Facebook to use the same player profile.'
+            ? 'Link a sign-in method here to keep your existing profile and progress. Accounts are never merged just because emails match.'
             : 'Use your Nine Below display name and password to keep the same player profile across devices.'}
         </Text>
       </View>
 
-      {availableProviders.map(provider => (
+      {availableProviders.map(provider => provider === 'apple' && !user?.authProviders?.apple ? (
+        <AppleSignInButton key={provider} disabled={!!busy} onPress={() => linkProvider('apple')} />
+      ) : (
         <ProviderRow
           key={provider}
           provider={provider}
@@ -173,7 +183,7 @@ export function AccountControls({ onSessionEnd }: AccountControlsProps) {
               </>
             ) : null}
 
-            {user?.authProviders?.google && isProviderConfigured('google') ? (
+            {user?.authProviders?.google && providers.google ? (
               <DeleteButton
                 label="Verify And Delete With Google"
                 busy={busy === 'google'}
@@ -182,13 +192,18 @@ export function AccountControls({ onSessionEnd }: AccountControlsProps) {
               />
             ) : null}
 
-            {user?.authProviders?.facebook && isProviderConfigured('facebook') ? (
+            {user?.authProviders?.facebook && providers.facebook ? (
               <DeleteButton
                 label="Verify And Delete With Facebook"
                 busy={busy === 'facebook'}
                 disabled={deleteConfirmation !== 'DELETE' || !!busy}
                 onPress={() => removeAccount('facebook')}
               />
+            ) : null}
+
+            {user?.authProviders?.apple && providers.apple ? (
+              <DeleteButton label="Verify And Delete With Apple" busy={busy === 'apple'}
+                disabled={deleteConfirmation !== 'DELETE' || !!busy} onPress={() => removeAccount('apple')} />
             ) : null}
 
             {deleteError ? <Text style={styles.deleteError}>{deleteError}</Text> : null}
@@ -215,12 +230,12 @@ function ProviderRow({
   disabled: boolean;
   onPress: () => void;
 }) {
-  const label = provider === 'google' ? 'Google' : 'Facebook';
+  const label = PROVIDER_LABELS[provider];
   return (
     <View style={styles.providerRow}>
       <View style={[styles.providerMark, provider === 'google' ? styles.googleMark : styles.facebookMark]}>
         <Text style={[styles.providerMarkText, provider === 'facebook' && styles.facebookMarkText]}>
-          {provider === 'google' ? 'G' : 'f'}
+          {provider === 'google' ? 'G' : provider === 'facebook' ? 'f' : 'A'}
         </Text>
       </View>
       <View style={styles.rowCopy}>

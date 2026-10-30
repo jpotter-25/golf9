@@ -39,7 +39,7 @@ The browser build is configured to deploy at [ninebelow.potterwell.com/play/](ht
 
 Use the same **Nine Below display name and password** to access the same account on another device. Use separate player accounts when testing a match between multiple devices. A TestFlight invitation, a Google Play tester invitation, and a Nine Below account invite code each serve different purposes.
 
-The initial iOS and browser releases support Nine Below's own display-name/password login. Google and Facebook integrations remain Android-only. **Sign in with Apple is not implemented in this release.** See the existing-account section below if someone originally created an account only through Google or Facebook.
+The distributed iOS build 2 and browser release support Nine Below's own display-name/password login. Google and Facebook are Android-only in those released binaries. The next mobile source release adds iOS Google/Facebook and Apple on iOS/Android, gated until provider setup and device checks are complete. See [mobile social-login setup and rollout](mobile-social-login.md). These changes are not available to testers merely because source has changed. See the existing-account section below for access on the currently distributed build.
 
 ## 1. Finish the Apple account prerequisites
 

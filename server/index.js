@@ -9,6 +9,7 @@ import path from 'path';
 import cors from 'cors';
 import nodemailer from 'nodemailer';
 import { OAuth2Client } from 'google-auth-library';
+import { createProviderAuth, pruneProviderTransactions } from './providerAuth.js';
 import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import { createPostgresStore } from './postgresStore.js';
@@ -459,7 +460,7 @@ function normalizeAdminPublicUrl(value, publicApiUrl) {
 
 const app = express();
 if (IS_PRODUCTION) app.set('trust proxy', Math.max(1, Number(process.env.TRUST_PROXY_HOPS || 1)));
-app.use(cors({
+const apiCors = cors({
   origin(origin, callback) {
     if (!origin || CLIENT_ORIGINS.includes('*') || PUBLIC_WEB_ORIGINS.has(origin)) {
       return callback(null, true);
@@ -467,7 +468,13 @@ app.use(cors({
     return callback(new Error('Origin is not allowed.'));
   },
   credentials: true,
-}));
+});
+app.use((req, res, next) => {
+  // Apple sends a cross-origin form_post, not a credentialed browser API call.
+  // This one endpoint authenticates through a one-use state + OIDC nonce.
+  if (req.method === 'POST' && req.path === '/auth/apple/callback') return next();
+  return apiCors(req, res, next);
+});
 app.use(express.json());
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -668,6 +675,8 @@ const clubs = new Map();
 const mailEntries = [];
 /** @type {Array<any>} */
 const accountDeletionRequests = [];
+const providerTransactions = [];
+const providerAuth = createProviderAuth({ records: providerTransactions, save: persistProviderState });
 /** @type {Map<string, number>} */
 const clubChatRate = new Map();
 const competitiveStore = normalizeCompetitiveConfigStore({});
@@ -901,17 +910,18 @@ function normalizeUserClub(user) {
 
 function normalizeProvider(value) {
   const provider = String(value || '').trim().toLowerCase();
-  return provider === 'google' || provider === 'facebook' ? provider : '';
+  return ['google', 'facebook', 'apple'].includes(provider) ? provider : '';
 }
 
 function providerLabel(provider) {
-  return provider === 'facebook' ? 'Facebook' : 'Google';
+  return { google: 'Google', facebook: 'Facebook', apple: 'Apple' }[provider] || 'Account';
 }
 
 function socialProviderEnabled(provider) {
   if (SOCIAL_AUTH_TEST_MODE) return true;
   if (provider === 'google') return GOOGLE_CLIENT_IDS.length > 0;
   if (provider === 'facebook') return !!FACEBOOK_APP_ID && !!FACEBOOK_APP_SECRET;
+  if (provider === 'apple') return providerAuth.readiness().appleIos;
   return false;
 }
 
@@ -919,12 +929,13 @@ function socialProviderConfig() {
   return {
     google: socialProviderEnabled('google'),
     facebook: socialProviderEnabled('facebook'),
+    apple: socialProviderEnabled('apple'),
   };
 }
 
 function normalizeAuthProviders(user) {
   user.authProviders = user.authProviders && typeof user.authProviders === 'object' ? user.authProviders : {};
-  for (const provider of ['google', 'facebook']) {
+  for (const provider of ['google', 'facebook', 'apple']) {
     const item = user.authProviders[provider];
     const providerUserId = String(item?.providerUserId || item?.id || '').trim();
     if (!providerUserId) {
@@ -939,6 +950,8 @@ function normalizeAuthProviders(user) {
       displayName: String(item.displayName || '').trim(),
       linkedAt: Number(item.linkedAt || Date.now()) || Date.now(),
       lastLoginAt: Number(item.lastLoginAt || item.linkedAt || Date.now()) || Date.now(),
+      ...(provider === 'apple' && item.appleGrantsEncrypted ? { appleGrantsEncrypted: item.appleGrantsEncrypted } : {}),
+      ...(provider === 'apple' && item.contactEncrypted ? { contactEncrypted: item.contactEncrypted } : {}),
     };
   }
   return user.authProviders;
@@ -949,6 +962,7 @@ function publicAuthProviders(user) {
   return {
     google: !!user.authProviders.google,
     facebook: !!user.authProviders.facebook,
+    apple: !!user.authProviders.apple,
   };
 }
 
@@ -1671,6 +1685,7 @@ function applyStoreState(parsed = {}) {
   results.splice(0, results.length);
   mailEntries.splice(0, mailEntries.length);
   accountDeletionRequests.splice(0, accountDeletionRequests.length);
+  providerTransactions.splice(0, providerTransactions.length, ...pruneProviderTransactions(parsed.providerTransactions || []));
   clubs.clear();
   normalizeCatalogStore(Object.assign(catalogStore, parsed.catalog || {}));
   seedCatalogStore(catalogStore);
@@ -1755,6 +1770,7 @@ function storeSnapshot() {
     results,
     mailEntries: normalizeMailEntries(mailEntries),
     accountDeletionRequests: normalizeAccountDeletionRequests(accountDeletionRequests),
+    providerTransactions: pruneProviderTransactions(providerTransactions),
     rankedSeason,
     competitiveConfig: competitiveStore,
     economyConfig: economyStore,
@@ -1800,6 +1816,22 @@ function saveStore() {
   const snapshot = storeSnapshot();
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(DATA_FILE, JSON.stringify(snapshot, null, 2));
+}
+
+function providerRoute(handler) {
+  return (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    Promise.resolve(handler(req, res, next)).catch(() => {
+      if (!res.headersSent) res.status(503).json({ error: 'Account services are temporarily unavailable. Please try again.' });
+    });
+  };
+}
+
+async function persistProviderState() {
+  if (postgresStore) {
+    if (!persistenceWriterReady || staleWriter) throw new Error('Sign-in storage is temporarily unavailable.');
+    await postgresStore.saveCritical(storeSnapshot);
+  } else saveStore();
 }
 
 function seedLocalTestAccounts() {
@@ -1872,6 +1904,7 @@ function verifiedDeletionEmails(user) {
   normalizeAuthProviders(user);
   return [...new Set(
     Object.values(user.authProviders || {})
+      .map(link => link.provider === 'apple' ? decryptEarlyAccessContact(link.contactEncrypted) || {} : link)
       .filter(link => link?.emailVerified && link?.email)
       .map(link => String(link.email).trim().toLowerCase())
       .filter(Boolean)
@@ -1912,7 +1945,7 @@ async function verifyAccountDeletionCredential(user, body = {}) {
 
   let profile;
   try {
-    profile = await verifySocialProfile(provider, body);
+    profile = await verifySocialProfile(provider, body, 'delete', user.userId);
   } catch (error) {
     return {
       error: error instanceof Error
@@ -1923,6 +1956,8 @@ async function verifyAccountDeletionCredential(user, body = {}) {
   if (profile.providerUserId !== linkedProvider.providerUserId) {
     return { error: `${providerLabel(provider)} verification did not match this account.` };
   }
+  if (!providerAuth.consume(profile)) return { error: 'Sign-in expired. Please start again.' };
+  providerAuth.attachAppleGrant(linkedProvider, profile);
   return { method: provider };
 }
 
@@ -2036,8 +2071,14 @@ function disconnectDeletedUser(userId) {
   clubForegroundSockets.delete(userId);
 }
 
-function deletePlayerAccount(user, req, source = 'authenticated') {
+async function deletePlayerAccount(user, req, source = 'authenticated') {
   const userId = user.userId;
+  if (activePlayingRoomForUser(userId)) return { error: 'Finish your active match before deleting your account.' };
+  try {
+    await providerAuth.revokeApple(user.authProviders?.apple);
+  } catch {
+    return { error: 'Apple authorization could not be revoked. Please retry deletion shortly or contact support.' };
+  }
   const deletedUserId = anonymizedDeletedUserId(userId);
   const roomCleanup = removeDeletedUserRooms(userId);
   if (roomCleanup.error) return roomCleanup;
@@ -2059,6 +2100,9 @@ function deletePlayerAccount(user, req, source = 'authenticated') {
   }
 
   users.delete(userId);
+  for (const record of providerTransactions) {
+    if (record.userId === userId) { record.status = 'consumed'; delete record.profileEncrypted; }
+  }
   writeAudit(
     adminStore,
     req,
@@ -2069,6 +2113,7 @@ function deletePlayerAccount(user, req, source = 'authenticated') {
   );
   disconnectDeletedUser(userId);
   saveStore();
+  await persistProviderState();
   return { ok: true };
 }
 
@@ -2091,6 +2136,7 @@ function validateNewDisplayName(displayName, existingUserId = null) {
 }
 
 function suggestedSocialDisplayName(profile) {
+  if (profile.provider === 'apple') return 'ApplePlayer';
   const base = String(profile.displayName || profile.email?.split('@')[0] || `${providerLabel(profile.provider)} Player`)
     .replace(/\s+/g, '')
     .replace(/[^A-Za-z0-9_-]/g, '')
@@ -2108,7 +2154,7 @@ function findUserByProvider(provider, providerUserId) {
 }
 
 function socialLinkFromProfile(profile, now = Date.now()) {
-  return {
+  const link = {
     provider: profile.provider,
     providerUserId: profile.providerUserId,
     email: String(profile.email || '').trim().toLowerCase(),
@@ -2117,11 +2163,18 @@ function socialLinkFromProfile(profile, now = Date.now()) {
     linkedAt: now,
     lastLoginAt: now,
   };
+  providerAuth.attachAppleGrant(link, profile);
+  if (profile.provider === 'apple') {
+    link.contactEncrypted = encryptEarlyAccessContact({ email: link.email, emailVerified: link.emailVerified });
+    link.email = '';
+    link.displayName = '';
+  }
+  return link;
 }
 
 function mockSocialProfile(provider, body = {}) {
   if (!SOCIAL_AUTH_TEST_MODE) return null;
-  const token = String(provider === 'google' ? body.idToken : body.accessToken || '').trim();
+  const token = String(provider === 'facebook' ? body.accessToken || body.idToken : body.idToken || '').trim();
   if (!token.startsWith(`mock:${provider}:`)) throw new Error(`${providerLabel(provider)} test token is invalid.`);
   const [, , providerUserId, email = '', ...nameParts] = token.split(':');
   const displayName = String(body.mockProfile?.displayName || nameParts.join(' ') || providerLabel(provider)).trim();
@@ -2190,8 +2243,13 @@ async function verifyFacebookProfile(body = {}) {
   };
 }
 
-async function verifySocialProfile(provider, body = {}) {
+async function verifySocialProfile(provider, body = {}, purpose = 'login', userId = null) {
   if (!socialProviderEnabled(provider)) throw new Error(`${providerLabel(provider)} login is not configured.`);
+  if (provider === 'apple' || (provider === 'facebook' && (body.idToken || body.challengeId))) {
+    if (SOCIAL_AUTH_TEST_MODE && !body.challengeId) return mockSocialProfile(provider, body);
+    try { return await providerAuth.verify(provider, body, purpose, userId); }
+    catch { throw new Error('Sign-in expired or could not be verified. Please start again.'); }
+  }
   return provider === 'google' ? verifyGoogleProfile(body) : verifyFacebookProfile(body);
 }
 
@@ -4559,15 +4617,15 @@ app.get('/privacy', (_req, res) => sendLegalPage(res, 'Privacy Policy', [
   {
     title: 'What Nine Below Collects',
     body: [
-      'Nine Below collects the information needed to run the game, protect accounts, and keep online matches working. This can include your display name, generated user ID, password hash for direct sign-in, linked Google or Facebook account identifiers, invite or tester status, friends, clubs, gameplay history, scores, rankings, virtual currency, cosmetics, chat messages, support requests, and moderation records.',
+      'Nine Below collects the information needed to run the game, protect accounts, and keep online matches working. This can include your display name, generated user ID, password hash for direct sign-in, linked Google, Facebook, or Apple account identifiers, invite or tester status, friends, clubs, gameplay history, scores, rankings, virtual currency, cosmetics, chat messages, support requests, and moderation records.',
       'We may also collect basic technical information such as IP address, device or browser details, server logs, crash details, notification push tokens, notification preferences, and connection events so we can secure the service, send requested game alerts, and troubleshoot bugs.',
     ],
   },
   {
     title: 'How We Use Information',
     body: [
-      'We use this information to create and secure accounts, verify Google and Facebook sign-ins, match players into rooms, run games, save progress, show leaderboards and profiles, operate chat and social features, send enabled push notifications, provide support, prevent abuse, and improve Nine Below.',
-      'Google and Facebook login are used only to verify your identity and link your Nine Below account. Nine Below does not receive your Google or Facebook password.',
+      'We use this information to create and secure accounts, verify Google, Facebook, and Apple sign-ins, match players into rooms, run games, save progress, show leaderboards and profiles, operate chat and social features, send enabled push notifications, provide support, prevent abuse, and improve Nine Below.',
+      'Google, Facebook, and Apple login are used only to verify your identity and link your Nine Below account. Nine Below does not receive your provider password. Apple can supply a private relay email instead of your personal email. Apple email information and authorization grants are encrypted in storage, and Apple authorization is revoked when your Nine Below account is deleted. Short-lived sign-in transactions expire after ten minutes. Facebook on iOS uses Limited Login without advertising tracking or Graph API access.',
     ],
   },
   {
@@ -4696,7 +4754,7 @@ app.post('/account/delete/request', accountDeletionRateLimit, async (req, res) =
   });
 });
 
-app.post('/account/delete/password', accountDeletionRateLimit, async (req, res) => {
+app.post('/account/delete/password', accountDeletionRateLimit, providerRoute(async (req, res) => {
   const user = findDeletionUser(req.body?.displayName);
   if (!user) return res.status(401).json({ error: 'Account verification failed.' });
   const verification = await verifyAccountDeletionCredential(user, {
@@ -4707,12 +4765,12 @@ app.post('/account/delete/password', accountDeletionRateLimit, async (req, res) 
   if (verification.error) {
     return res.status(401).json({ error: 'Account verification failed.' });
   }
-  const result = deletePlayerAccount(user, req, 'public-password');
+  const result = await deletePlayerAccount(user, req, 'public-password');
   if (result.error) return res.status(409).json(result);
   return res.json({ ok: true });
-});
+}));
 
-app.post('/account/delete/confirm', accountDeletionRateLimit, (req, res) => {
+app.post('/account/delete/confirm', accountDeletionRateLimit, providerRoute(async (req, res) => {
   if (String(req.body?.confirmation || '').trim().toUpperCase() !== 'DELETE') {
     return res.status(400).json({ error: 'Type DELETE to confirm account deletion.' });
   }
@@ -4748,10 +4806,10 @@ app.post('/account/delete/confirm', accountDeletionRateLimit, (req, res) => {
     saveStore();
     return res.status(404).json({ error: 'This account is no longer available.' });
   }
-  const result = deletePlayerAccount(user, req, 'verified-email');
+  const result = await deletePlayerAccount(user, req, 'verified-email');
   if (result.error) return res.status(409).json(result);
   return res.json({ ok: true });
-});
+}));
 
 app.use('/admin', (req, res, next) => {
   const rawUrl = req.originalUrl || req.url || '';
@@ -6961,10 +7019,32 @@ app.post('/early-access/feedback', earlyAccessRateLimit, (req, res) => {
 });
 
 app.get('/auth/config', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
   res.json({
     inviteRequired: signupInvitesRequired(),
     providers: socialProviderConfig(),
+    mobileProviders: providerAuth.readiness(),
   });
+});
+
+app.post('/auth/social/challenge', socialAuthRateLimit, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const purpose = req.body?.purpose || 'login';
+  const auth = purpose === 'login' ? null : optionalPlayerAuth(req);
+  if (purpose !== 'login' && (!auth || banErrorFor(adminStore, auth.user))) return res.status(401).json({ error: 'Sign in again to continue.' });
+  if (purpose === 'link' && (!auth.session.authenticatedAt || Date.now() - auth.session.authenticatedAt > 5 * 60 * 1000)) {
+    return res.status(403).json({ error: 'Sign in again before linking an account.', code: 'RECENT_AUTH_REQUIRED' });
+  }
+  try { return res.json(await providerAuth.start(req.body || {}, auth?.user.userId || null)); }
+  catch { return res.status(400).json({ error: 'This sign-in method is unavailable. Please try again later.' }); }
+});
+
+app.post('/auth/apple/callback', express.urlencoded({ extended: false, limit: '20kb', parameterLimit: 8 }), socialAuthRateLimit, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+  try { return res.redirect(303, await providerAuth.callback(req.body || {})); }
+  catch { return res.status(400).type('text').send('Sign-in expired. Return to Nine Below and start again.'); }
 });
 
 app.post('/auth/signup', signupRateLimit, async (req, res) => {
@@ -7020,7 +7100,7 @@ app.post('/auth/login', playerLoginRateLimit, (req, res) => {
   return res.json({ token: session.token, user: safeUser(user) });
 });
 
-app.post('/auth/social/login', socialAuthRateLimit, async (req, res) => {
+app.post('/auth/social/login', socialAuthRateLimit, providerRoute(async (req, res) => {
   const provider = normalizeProvider(req.body?.provider);
   if (!provider) return res.status(400).json({ error: 'Unsupported social login provider.' });
   let profile;
@@ -7035,9 +7115,12 @@ app.post('/auth/social/login', socialAuthRateLimit, async (req, res) => {
     const deviceHash = trackUserDevice(linkedUser, req, req.body?.deviceId);
     const moderationError = banErrorFor(adminStore, linkedUser, deviceHash);
     if (moderationError) return res.status(403).json({ error: moderationError });
+    if (!providerAuth.consume(profile)) return res.status(401).json({ error: 'Sign-in expired. Please start again.' });
     linkedUser.authProviders[provider].lastLoginAt = Date.now();
+    providerAuth.attachAppleGrant(linkedUser.authProviders[provider], profile);
     const session = createSession(linkedUser.userId);
     saveStore();
+    if (profile.transactionId) await persistProviderState();
     return res.json({ token: session.token, user: safeUser(linkedUser) });
   }
 
@@ -7060,6 +7143,7 @@ app.post('/auth/social/login', socialAuthRateLimit, async (req, res) => {
   const deviceHash = trackUserDevice(user, req, req.body?.deviceId);
   const moderationError = banErrorFor(adminStore, user, deviceHash);
   if (moderationError) return res.status(403).json({ error: moderationError });
+  if (!providerAuth.consume(profile)) return res.status(401).json({ error: 'Sign-in expired. Please start again.' });
   const invite = consumeSignupInvite(adminStore, inviteCheck.invite, user);
   users.set(user.userId, user);
   const session = createSession(user.userId);
@@ -7069,10 +7153,11 @@ app.post('/auth/social/login', socialAuthRateLimit, async (req, res) => {
     writeAudit(adminStore, req, null, 'auth.signup.invite_used', { userId: user.userId, inviteId: invite.inviteId, earlyAccessSignupId: invite.earlyAccessSignupId || null }, { codePreview: invite.codePreview || null });
   }
   saveStore();
+  if (profile.transactionId) await persistProviderState();
   return res.json({ token: session.token, user: safeUser(user) });
-});
+}));
 
-app.post('/auth/social/link', requireAuth, socialAuthRateLimit, async (req, res) => {
+app.post('/auth/social/link', requireAuth, socialAuthRateLimit, providerRoute(async (req, res) => {
   if (!req.auth.session.authenticatedAt || Date.now() - req.auth.session.authenticatedAt > 5 * 60 * 1000) {
     return res.status(403).json({ error: 'Sign in again before linking a social account.', code: 'RECENT_AUTH_REQUIRED' });
   }
@@ -7080,7 +7165,7 @@ app.post('/auth/social/link', requireAuth, socialAuthRateLimit, async (req, res)
   if (!provider) return res.status(400).json({ error: 'Unsupported social login provider.' });
   let profile;
   try {
-    profile = await verifySocialProfile(provider, req.body);
+    profile = await verifySocialProfile(provider, req.body, 'link', req.auth.user.userId);
   } catch (error) {
     return res.status(401).json({ error: error instanceof Error ? error.message : `${providerLabel(provider)} link failed.` });
   }
@@ -7097,14 +7182,18 @@ app.post('/auth/social/link', requireAuth, socialAuthRateLimit, async (req, res)
   }
 
   const now = Date.now();
+  if (!providerAuth.consume(profile)) return res.status(401).json({ error: 'Sign-in expired. Please start again.' });
+  const mergedLink = current ? { ...current, lastLoginAt: now } : socialLinkFromProfile(profile, now);
+  providerAuth.attachAppleGrant(mergedLink, profile);
   req.auth.user.authProviders[provider] = current
-    ? { ...current, ...socialLinkFromProfile(profile, current.linkedAt || now), linkedAt: current.linkedAt || now, lastLoginAt: now }
-    : socialLinkFromProfile(profile, now);
+    ? { ...mergedLink, ...(provider !== 'apple' ? { email: profile.email || current.email, emailVerified: profile.email ? profile.emailVerified : current.emailVerified } : {}) }
+    : mergedLink;
   normalizeAuthProviders(req.auth.user);
   writeAudit(adminStore, req, null, 'auth.social.link', { userId: req.auth.user.userId, provider });
   saveStore();
+  if (profile.transactionId) await persistProviderState();
   return res.json({ user: safeUser(req.auth.user) });
-});
+}));
 
 app.post('/auth/logout', requireAuth, (req, res) => {
   sessions.delete(req.auth.session.token);
@@ -7112,7 +7201,7 @@ app.post('/auth/logout', requireAuth, (req, res) => {
   return res.json({ ok: true });
 });
 
-app.delete('/auth/account', requireAuth, accountDeletionRateLimit, async (req, res) => {
+app.delete('/auth/account', requireAuth, accountDeletionRateLimit, providerRoute(async (req, res) => {
   const activeRoom = activePlayingRoomForUser(req.auth.user.userId);
   if (activeRoom) {
     return res.status(409).json({
@@ -7125,10 +7214,10 @@ app.delete('/auth/account', requireAuth, accountDeletionRateLimit, async (req, r
     const confirmationError = String(req.body?.confirmation || '').trim().toUpperCase() !== 'DELETE';
     return res.status(confirmationError ? 400 : 401).json({ error: verification.error });
   }
-  const result = deletePlayerAccount(req.auth.user, req, `in-app-${verification.method}`);
+  const result = await deletePlayerAccount(req.auth.user, req, `in-app-${verification.method}`);
   if (result.error) return res.status(409).json(result);
   return res.json({ ok: true });
-});
+}));
 
 app.get('/auth/me', requireAuth, (req, res) => res.json({ user: safeUser(req.auth.user) }));
 

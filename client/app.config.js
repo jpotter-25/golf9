@@ -1,9 +1,19 @@
 const googleWebClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '';
-const googleIosUrlScheme = process.env.EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME || '';
+const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '';
+const googleIosUrlScheme = googleIosClientId
+  ? `com.googleusercontent.apps.${googleIosClientId.replace(/\.apps\.googleusercontent\.com$/, '')}`
+  : process.env.EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME || '';
 const facebookAppId = process.env.EXPO_PUBLIC_FACEBOOK_APP_ID || '';
 const facebookClientToken = process.env.EXPO_PUBLIC_FACEBOOK_CLIENT_TOKEN || '';
 const facebookDisplayName = process.env.EXPO_PUBLIC_FACEBOOK_DISPLAY_NAME || 'Nine Below';
 const isIosBuild = process.env.EAS_BUILD_PLATFORM === 'ios' || process.env.EXPO_PUBLIC_APP_TARGET === 'ios';
+// The linked Facebook Expo delegate runs at launch: never ship it without its plist configuration.
+if (isIosBuild && (!facebookAppId || !facebookClientToken)) {
+  throw new Error('iOS builds require EXPO_PUBLIC_FACEBOOK_APP_ID and EXPO_PUBLIC_FACEBOOK_CLIENT_TOKEN.');
+}
+if (isIosBuild && process.env.EXPO_PUBLIC_APPLE_SIGN_IN_ENABLED === '1' && (!googleWebClientId || !googleIosClientId)) {
+  throw new Error('Social-login iOS builds require both Google Web and iOS client IDs.');
+}
 const releaseChannel = process.env.EXPO_PUBLIC_RELEASE_CHANNEL
   || (process.env.EXPO_PUBLIC_APP_ENV === 'production' ? 'production' : 'playtest');
 
@@ -11,6 +21,8 @@ const plugins = [];
 
 plugins.push('expo-secure-store');
 plugins.push('expo-notifications');
+plugins.push('expo-apple-authentication');
+plugins.push('expo-web-browser');
 plugins.push([
   'expo-build-properties',
   {
@@ -21,14 +33,14 @@ plugins.push([
   },
 ]);
 
-if (!isIosBuild && googleWebClientId && googleIosUrlScheme) {
+if (googleWebClientId && googleIosUrlScheme) {
   plugins.push([
     '@react-native-google-signin/google-signin',
     { iosUrlScheme: googleIosUrlScheme },
   ]);
 }
 
-if (!isIosBuild && facebookAppId && facebookClientToken) {
+if (facebookAppId && facebookClientToken) {
   plugins.push([
     'react-native-fbsdk-next',
     {
@@ -37,8 +49,9 @@ if (!isIosBuild && facebookAppId && facebookClientToken) {
       displayName: facebookDisplayName,
       scheme: `fb${facebookAppId}`,
       advertiserIDCollectionEnabled: false,
+      iosUserTrackingPermission: false,
       autoLogAppEventsEnabled: false,
-      isAutoInitEnabled: true,
+      isAutoInitEnabled: false,
     },
   ]);
 }
@@ -47,7 +60,7 @@ module.exports = {
   expo: {
     name: 'Nine Below',
     slug: 'golf9',
-    scheme: 'golf9',
+    scheme: ['golf9', 'com.potterwell.ninebelow'],
     version: '0.1.0',
     orientation: 'portrait',
     icon: './assets/icon.png',
@@ -62,7 +75,8 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.potterwell.ninebelow',
-      buildNumber: '2',
+      buildNumber: '3',
+      usesAppleSignIn: true,
       config: { usesNonExemptEncryption: false },
       privacyManifests: {
         NSPrivacyTracking: false,
@@ -75,7 +89,7 @@ module.exports = {
     },
     android: {
       package: 'com.potterwell.ninebelow',
-      versionCode: 59,
+      versionCode: 60,
       permissions: [],
       blockedPermissions: [
         'com.google.android.gms.permission.AD_ID',

@@ -35,6 +35,8 @@ export const SOCKET_URL = SERVER_URL;
 
 export const SOCIAL_AUTH_CONFIG = {
   googleWebClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '',
+  googleIosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '',
+  appleEnabled: process.env.EXPO_PUBLIC_APPLE_SIGN_IN_ENABLED === '1',
   facebookAppId: process.env.EXPO_PUBLIC_FACEBOOK_APP_ID || '',
   facebookClientToken: process.env.EXPO_PUBLIC_FACEBOOK_CLIENT_TOKEN || '',
 };

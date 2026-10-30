@@ -39,9 +39,12 @@ export type ForfeitStatus = {
 };
 
 export type AuthResponse = { token: string; user: UserProfile };
-export type AuthProviderKey = 'google' | 'facebook';
+export type AuthProviderKey = 'google' | 'facebook' | 'apple';
+export const PROVIDER_LABELS: Record<AuthProviderKey, string> = { google: 'Google', facebook: 'Facebook', apple: 'Apple' };
+export type SocialAuthPurpose = 'login' | 'link' | 'delete';
 export type AuthProviderStatus = Record<AuthProviderKey, boolean>;
-export type AuthConfig = { environment: string; inviteRequired: boolean; apiUrl: string; adminUrl: string; providers: AuthProviderStatus };
+export type AuthConfig = { environment: string; inviteRequired: boolean; apiUrl: string; adminUrl: string; providers: AuthProviderStatus;
+  mobileProviders?: { appleIos: boolean; appleAndroid: boolean; facebookIos: boolean } };
 export type ReleaseStatus = 'current' | 'recommended' | 'required';
 export type ReleaseEnforcement = 'after_match' | 'immediate';
 export type ReleasePolicyResponse = {
@@ -125,6 +128,9 @@ export type PushTokenPayload = {
 };
 export type SocialAuthPayload = {
   provider: AuthProviderKey;
+  authorizationCode?: string;
+  challengeId?: string;
+  verifier?: string;
   idToken?: string;
   accessToken?: string;
   displayName?: string;
@@ -132,6 +138,9 @@ export type SocialAuthPayload = {
 };
 export type AccountDeletionPayload = {
   confirmation: 'DELETE';
+  authorizationCode?: string;
+  challengeId?: string;
+  verifier?: string;
   method: 'password' | AuthProviderKey;
   password?: string;
   idToken?: string;
@@ -951,6 +960,12 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 
 export function authConfig(): Promise<AuthConfig> {
   return request<AuthConfig>('/auth/config');
+}
+
+export function socialChallenge(payload: { provider: AuthProviderKey; platform: 'ios' | 'android'; purpose: SocialAuthPurpose; codeChallenge: string }, token?: string | null) {
+  return request<{ challengeId: string; nonce: string; expiresAt: number; authorizationUrl?: string }>(
+    '/auth/social/challenge', { method: 'POST', body: JSON.stringify(payload) }, token,
+  );
 }
 
 export function appAvailability(token?: string | null): Promise<AvailabilityResponse> {

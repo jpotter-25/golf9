@@ -99,7 +99,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const credential = await getSocialCredential(provider);
       const response = await api.socialLogin(credential);
       if ('token' in response) await applyAuth(response);
-      return 'requiresProfile' in response ? { ...response, ...credential } : response;
+      const continuation = credential.challengeId
+        ? { provider, challengeId: credential.challengeId, verifier: credential.verifier }
+        : credential;
+      return 'requiresProfile' in response ? { ...response, ...continuation } : response;
     },
     completeSocialSignUp: async (credential, displayName, inviteCode = '') => {
       const response = await api.socialLogin({ ...credential, displayName, inviteCode });
@@ -108,16 +111,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     },
     linkSocialProvider: async provider => {
       if (!token) throw new Error('Log in before linking an account.');
-      const credential = await getSocialCredential(provider);
+      const credential = await getSocialCredential(provider, 'link', token);
       const response = await api.linkSocialProvider(token, credential);
       setUser(response.user);
+      await saveCachedProfile(JSON.stringify(response.user));
     },
     deleteAccount: async (method, password) => {
       if (!token) throw new Error('Log in before deleting an account.');
       if (!isOnline) throw new Error('Connect to the internet before deleting your account.');
       const credential = method === 'password'
         ? { method, password }
-        : { method, ...await getSocialCredential(method) };
+        : { method, ...await getSocialCredential(method, 'delete', token) };
       await api.deleteAccount(token, { confirmation: 'DELETE', ...credential });
       await signOutProviders().catch(error => logError(error, { area: 'provider-delete-account' }));
       setToken(null);

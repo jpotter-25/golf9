@@ -2,6 +2,25 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createDatabaseSslConfig, PostgresStore } from '../postgresStore.js';
 
+test('critical auth saves cancel debounce, serialize current snapshots, and propagate write failure', async () => {
+  const store = new PostgresStore({});
+  const snapshots = [];
+  store.save = async snapshot => { snapshots.push(snapshot); };
+  let revision = 1;
+  store.scheduleSave(() => ({ stale: true }));
+  const first = store.saveCritical(() => ({ revision }));
+  revision = 2;
+  const second = store.saveCritical(() => ({ revision }));
+  await Promise.all([first, second]);
+  assert.deepEqual(snapshots, [{ revision: 2 }, { revision: 2 }]);
+  assert.equal(store.pendingSave, null);
+  assert.equal(store.pendingStateFactory, null);
+  store.save = async () => { throw Object.assign(new Error('write failed'), { code: 'TEST_WRITE_FAILURE' }); };
+  await assert.rejects(store.saveCritical(() => ({})), /write failed/);
+  await store.lastSave;
+  assert.equal(store.lastSaveErrorCode, 'TEST_WRITE_FAILURE');
+});
+
 const TEST_CA = `-----BEGIN CERTIFICATE-----
 MIIDHTCCAgWgAwIBAgIUMh2M6Z9G+ops/2s25awW2uIe9zUwDQYJKoZIhvcNAQEL
 BQAwHjEcMBoGA1UEAwwTbmluZWJlbG93LXRlc3Qtcm9vdDAeFw0yNjA4MjAwMDM2

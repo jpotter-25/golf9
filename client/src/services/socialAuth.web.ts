@@ -1,1 +1,1 @@
-export { getSocialCredential, isProviderConfigured, signOutProviders } from './firstPartyAuth';
+export { getSocialCredential, isProviderConfigured, availableSocialProviders, signOutProviders } from './firstPartyAuth';

@@ -10,7 +10,8 @@ import type { RootStackParamList } from '../App';
 import { useAuth } from '../context/AuthContext';
 import { SERVER_URL } from '../config';
 import * as api from '../services/api';
-import { isProviderConfigured } from '../services/socialAuth';
+import { availableSocialProviders } from '../services/socialAuth';
+import { AppleSignInButton } from '../components/AppleSignInButton';
 import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
@@ -33,7 +34,7 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
   const [password, setPassword] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [inviteRequired, setInviteRequired] = useState(false);
-  const [providers, setProviders] = useState<api.AuthProviderStatus>({ google: false, facebook: false });
+  const [providers, setProviders] = useState<api.AuthProviderStatus>({ google: false, facebook: false, apple: false });
   const [pendingSocial, setPendingSocial] = useState<(api.SocialProfileRequiredResponse & api.SocialAuthPayload) | null>(null);
   const [socialDisplayName, setSocialDisplayName] = useState('');
   const [socialInviteCode, setSocialInviteCode] = useState('');
@@ -42,13 +43,13 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
 
   useEffect(() => {
     api.authConfig()
-      .then(config => {
+      .then(async config => {
         setInviteRequired(config.inviteRequired);
-        setProviders(config.providers);
+        setProviders(await availableSocialProviders(config));
       })
       .catch(() => {
         setInviteRequired(false);
-        setProviders({ google: false, facebook: false });
+        setProviders({ google: false, facebook: false, apple: false });
       });
   }, []);
 
@@ -96,7 +97,7 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
         setSocialInviteCode('');
       }
     } catch (error) {
-      Alert.alert(`${provider === 'google' ? 'Google' : 'Facebook'} login failed`, error instanceof Error ? error.message : 'Please try again.');
+      Alert.alert(`${api.PROVIDER_LABELS[provider]} login failed`, error instanceof Error ? error.message : 'Please try again.');
     } finally {
       setLoading(false);
     }
@@ -131,9 +132,9 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
   };
 
   const isLogin = mode === 'login';
-  const googleEnabled = providers.google && isProviderConfigured('google');
-  const facebookEnabled = providers.facebook && isProviderConfigured('facebook');
-  const showSocial = googleEnabled || facebookEnabled;
+  const googleEnabled = providers.google;
+  const facebookEnabled = providers.facebook;
+  const showSocial = googleEnabled || facebookEnabled || providers.apple;
 
   return (
     <ScreenShell scroll centered>
@@ -206,6 +207,7 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
               <Text style={styles.dividerText}>OR</Text>
               <View style={styles.dividerLine} />
             </View>
+            {providers.apple ? <AppleSignInButton disabled={loading} onPress={() => startSocial('apple')} /> : null}
             {googleEnabled ? <SocialButton provider="google" disabled={loading} onPress={() => startSocial('google')} /> : null}
             {facebookEnabled ? <SocialButton provider="facebook" disabled={loading} onPress={() => startSocial('facebook')} /> : null}
           </>
@@ -269,7 +271,7 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
 
 export default LoginScreen;
 
-function SocialButton({ provider, disabled, onPress }: { provider: api.AuthProviderKey; disabled: boolean; onPress: () => void }) {
+function SocialButton({ provider, disabled, onPress }: { provider: 'google' | 'facebook'; disabled: boolean; onPress: () => void }) {
   const isGoogle = provider === 'google';
   return (
     <Pressable style={[styles.socialButton, disabled && styles.disabled]} disabled={disabled} onPress={onPress}>

@@ -6,6 +6,8 @@ export const SERVER_URL = __DEV__ ? process.env.EXPO_PUBLIC_DEV_SERVER_URL || 'h
 export const SOCKET_URL = SERVER_URL;
 export const SOCIAL_AUTH_CONFIG = {
   googleWebClientId: '',
+  googleIosClientId: '',
+  appleEnabled: false,
   facebookAppId: '',
   facebookClientToken: '',
 };

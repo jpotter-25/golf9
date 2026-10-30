@@ -8,6 +8,8 @@ import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import test from 'node:test';
 import { generateTotp } from '../adminMfa.js';
+import crypto from 'node:crypto';
+import { encryptEarlyAccessContact } from '../earlyAccess.js';
 
 const require = createRequire(import.meta.url);
 const { io } = require('socket.io-client');
@@ -204,12 +206,12 @@ async function fnWithServer(dataDir, serverPort, fn, extraEnv = {}) {
   }
 }
 
-async function withSeededServer(seed, fn) {
+async function withSeededServer(seed, fn, extraEnv = {}) {
   const serverPort = await freePort();
   const dataDir = await mkdtemp(path.join(tmpdir(), 'golf9-server-test-'));
   await mkdir(dataDir, { recursive: true });
   await writeFile(path.join(dataDir, 'auth-store.json'), JSON.stringify(seed, null, 2));
-  await fnWithServer(dataDir, serverPort, fn);
+  await fnWithServer(dataDir, serverPort, fn, extraEnv);
 }
 
 async function waitForExit(child, timeoutMs = 5000) {
@@ -1157,6 +1159,94 @@ test('social auth gates new accounts and links existing profiles', async () => {
     });
     assert.equal(conflict.status, 409);
   }, { REQUIRE_INVITE_CODE: '1', SEED_ADMIN_ACCOUNT: '1', SOCIAL_AUTH_TEST_MODE: '1' });
+});
+
+test('Apple links to the existing cross-platform player without email merges and supports verified deletion', async () => {
+  await withServer(async (baseUrl, dataDir) => {
+    const player = await signup(baseUrl, testDisplayName('Existing'));
+    const headers = authHeaders(player.token);
+    const appleToken = 'mock:apple:apple-one:hidden@privaterelay.appleid.com:Apple';
+    const payload = { provider: 'apple', idToken: appleToken };
+    const linked = await json(await fetch(baseUrl + '/auth/social/link', { method: 'POST', headers, body: JSON.stringify(payload) }));
+    assert.equal(linked.user.userId, player.user.userId);
+    assert.equal(linked.user.authProviders.apple, true);
+    assert.equal(linked.user.passwordSignIn, true);
+    for (const platform of ['ios', 'android']) {
+      const login = await json(await fetch(baseUrl + '/auth/social/login', {
+        method: 'POST', headers: { ...headers, 'X-Golf9-Platform': platform }, body: JSON.stringify(payload),
+      }));
+      assert.equal(login.user.userId, player.user.userId);
+      assert.equal(login.user.currency.coins, player.user.currency.coins);
+      assert.equal(login.user.currency.lifetimeCoins, player.user.currency.lifetimeCoins);
+      assert.deepEqual(login.user.stats, player.user.stats);
+    }
+    const stored = JSON.parse(await readFile(path.join(dataDir, 'auth-store.json'), 'utf8'));
+    const appleLink = stored.users.find(user => user.userId === player.user.userId).authProviders.apple;
+    assert.ok(appleLink.contactEncrypted);
+    assert.equal(appleLink.email, '');
+    assert.doesNotMatch(JSON.stringify(linked), /contactEncrypted|appleGrantsEncrypted|privaterelay/);
+    const stranger = await json(await fetch(baseUrl + '/auth/social/login', { method: 'POST', headers,
+      body: JSON.stringify({ provider: 'apple', idToken: 'mock:apple:different-sub:hidden@privaterelay.appleid.com:Other' }) }));
+    assert.equal(stranger.requiresProfile, true, 'same email must not merge identities');
+    const other = await signup(baseUrl, testDisplayName('Other'));
+    const conflict = await fetch(baseUrl + '/auth/social/link', { method: 'POST', headers: authHeaders(other.token), body: JSON.stringify(payload) });
+    assert.equal(conflict.status, 409);
+    const wrongDeletion = await fetch(baseUrl + '/auth/account', { method: 'DELETE', headers,
+      body: JSON.stringify({ confirmation: 'DELETE', method: 'apple', idToken: 'mock:apple:someone-else::Other' }) });
+    assert.equal(wrongDeletion.status, 401);
+    const deleted = await json(await fetch(baseUrl + '/auth/account', { method: 'DELETE', headers,
+      body: JSON.stringify({ confirmation: 'DELETE', method: 'apple', idToken: appleToken }) }));
+    assert.equal(deleted.ok, true);
+    assert.equal((await fetch(baseUrl + '/auth/me', { headers })).status, 401);
+  }, { SOCIAL_AUTH_TEST_MODE: '1' });
+});
+
+test('verified mobile identities continue profile setup without replaying provider tokens and are consumed once', async () => {
+  const verifier = 'test-device-verifier'.padEnd(64, 'x');
+  const records = ['apple', 'facebook'].map(provider => ({
+    requestId: provider + '-verified-challenge', provider, platform: 'ios', purpose: 'login', userId: null,
+    codeChallenge: crypto.createHash('sha256').update(verifier).digest('base64url'),
+    nonce: 'already-verified-nonce', status: 'verified', expiresAt: Date.now() + 600000,
+    profileEncrypted: encryptEarlyAccessContact({ provider, providerUserId: provider + '-identity',
+      email: '', emailVerified: false, displayName: '' }),
+  }));
+  await withSeededServer({ providerTransactions: records }, async (baseUrl, dataDir) => {
+    for (const provider of ['apple', 'facebook']) {
+      const payload = { provider, challengeId: provider + '-verified-challenge', verifier };
+      const request = body => fetch(baseUrl + '/auth/social/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const needsProfile = await json(await request(payload));
+      assert.equal(needsProfile.requiresProfile, true);
+      const retryBadName = await request({ ...payload, displayName: 'not a valid name' });
+      assert.equal(retryBadName.status, 400);
+      const signedUp = await json(await request({ ...payload, displayName: testDisplayName(provider) }));
+      assert.equal(signedUp.user.authProviders[provider], true);
+      assert.equal((await request(payload)).status, 401);
+    }
+    const stored = JSON.parse(await readFile(path.join(dataDir, 'auth-store.json'), 'utf8'));
+    assert.deepEqual(stored.providerTransactions, []);
+  }, { SOCIAL_AUTH_TEST_MODE: '1', REQUIRE_INVITE_CODE: '0' });
+});
+
+test('unconfigured Apple remains hidden and callbacks/challenges cannot bypass authentication', async () => {
+  await withServer(async baseUrl => {
+    const config = await json(await fetch(baseUrl + '/auth/config'));
+    assert.equal(config.providers.apple, false);
+    assert.equal(config.mobileProviders.appleIos, false);
+    assert.equal(config.mobileProviders.appleAndroid, false);
+    const challenge = await fetch(baseUrl + '/auth/social/challenge', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'apple', platform: 'ios', purpose: 'link', codeChallenge: 'a'.repeat(43) }) });
+    assert.equal(challenge.status, 401);
+    const callback = await fetch(baseUrl + '/auth/apple/callback', { method: 'POST', redirect: 'manual',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: 'https://appleid.apple.com' },
+      body: 'state=forged&code=forged' });
+    assert.equal(callback.status, 400);
+    assert.equal(callback.headers.get('cache-control'), 'no-store');
+    assert.equal(callback.headers.get('referrer-policy'), 'no-referrer');
+    assert.equal(callback.headers.get('location'), null);
+  }, { APPLE_SIGN_IN_ENABLED: '0', SOCIAL_AUTH_TEST_MODE: '0' });
 });
 
 test('admin console supports MFA login, audited player ops, support tickets, and bans', async () => {
