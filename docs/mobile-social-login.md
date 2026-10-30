@@ -4,11 +4,11 @@
 
 Implemented in source: Google and Facebook on iOS, Sign in with Apple on iOS and Android, account linking, fresh-provider verification for deletion, and Apple token revocation. Browser login remains Nine Below display name/password. All platforms still use the same player database and authoritative game server.
 
-**This is not a released mobile build.** Source reserves iOS build **3** and Android versionCode **60**; do not tell testers these are available until EAS/Apple/Google processing and physical-device verification complete. The previously distributed iOS build is 0.1.0 (2), which the owner reported successfully opening to the login screen on October 30.
+**iOS 0.1.0 (3) is approved and available to the existing TestFlight group; Android versionCode 60 is packaged but not uploaded to Google Play.** Physical-device launch/sign-in acceptance remains pending. Build 2 was the previously distributed iOS version, which the owner reported successfully opening to the login screen on October 30. This is a beta rollout, not a public App Store or production release.
 
 Provider-console setup is complete for Google iOS and Apple iOS/Android, using the owner's explicitly approved credential batch. The company account **app-developer@potterwell.com** manages OAuth in the existing **nine-below** Google project; project ownership, existing clients, billing, and Expo ownership are unchanged. Cloud Identity Free is active, the Business Plus trial is canceled, and SiteGround mail/MX records remain unchanged.
 
-The live `/auth/config` reports Apple iOS/Android enabled, existing Google/Facebook enabled, and Facebook iOS disabled. Meta's app remains unpublished and requires business verification before general tester access. Physical-device OAuth testing and distribution of the new binaries remain outstanding.
+The live `/auth/config` reports Apple iOS/Android enabled, existing Google/Facebook enabled, and Facebook iOS disabled. Meta's app remains unpublished and requires business verification before general tester access. Physical-device OAuth testing and Google Play upload remain outstanding.
 
 Live verification exposed a PostgreSQL-only bug: `persistProviderState` referenced an out-of-scope `staleWriter`. Commit **2e1d74e31244b98a5dae216424fbee8420f4006e** reads the actual PostgreSQL runtime status and preserves the write fence. Five regression tests exercise the real adapter; the full suite now passes 245 tests. Railway deployment **a792ce13-836c-45a8-85fe-85e5aac7e6fc** succeeded, both health endpoints returned 200, and real iOS/Android Apple challenge creation returned 200 after durable PostgreSQL saves. The Android authorization URL uses the expected Services ID and HTTPS callback. These checks do not authenticate a real player.
 
@@ -18,7 +18,16 @@ Build tracking:
 - First iOS 3 attempt **6685b3ce-2f38-45f4-98cf-edb6c25a2a7a** failed at CocoaPods: AppCheckCore requires modular GoogleUtilities/RecaptchaInterop dependencies.
 - Replacement iOS 3 **623ce501-c34b-46a3-96d0-fc2ebd880038**, source **56e6f308**, finished with narrowly scoped `extraPods` modular headers, following the [Google Sign-In setup guidance](https://react-native-google-signin.github.io/docs/setting-up/ios). No global framework switch or SDK downgrade.
 - Signed IPA **artifacts/nine-below-0.1.0-ios-build-3.ipa**, SHA-256 **144f38a0204821de620b4f4f9a1b169bc8c6f4b57d5fe9d773339a806d43d929**. Static inspection verified build/bundle/team, Apple entitlement, Google URL scheme, all 50 generated Fabric classes, expected Facebook launch configuration with tracking/events disabled, device ARM64 frameworks and Hermes bundle. No recognized secret/source-map files or PEM private-key markers were found. OS Swift libraries resolve via the binary's `/usr/lib/swift` path on its iOS 15.1 minimum; these are not missing packaged frameworks.
-- EAS submission **b3941e38-12ee-4606-801f-776ffc26bd00** finished successfully. Apple processing / beta distribution is still pending; this is not a public App Store release.
+- EAS submission **b3941e38-12ee-4606-801f-776ffc26bd00** finished successfully. Apple resource **e690c999-f790-4552-91f5-3253086c1424** is `VALID`, beta review `APPROVED`, external state `IN_BETA_TESTING`. Build 3 is assigned to the existing **Private Playtesters** group with What to Test saved and automatic notification enabled. Public link **https://testflight.apple.com/join/snuTfM67** is unchanged. Prior builds, group settings, tester accounts/roles, and reviewer credentials were preserved. Notification receipt and actual device behavior are not verified.
+
+### Tester handoff
+
+1. On iPhone, open TestFlight and update Nine Below to **0.1.0 (3)** using the existing invitation or public link.
+2. Cold-launch the app. Apple and Google should appear; Facebook iOS is intentionally hidden until Meta approval.
+3. Existing players: sign in with the current method, then link Apple/Google from account controls to retain progress. Do not create a new account just because the provider uses the same email.
+4. New players still need a separate Nine Below alpha signup code. The TestFlight link is not that code.
+5. Test provider success/cancellation, Hide My Email, logout/re-login, and a shared game across iPhone and Android. Report build/device/OS and reproduction steps without credentials.
+6. Upload the verified **version 60 AAB**, not the IPA or an APK, as the next Google Play closed-testing release. Keep the existing tester audience.
 
 ## Player behavior
 
@@ -119,7 +128,7 @@ Completed locally on October 30:
 - Social-auth/config tests: **9 passed**; native-codegen/autolinking tests: **5 passed**; browser-dialog tests: **5 passed**.
 - Expo SDK dependency compatibility: passed.
 - Production browser export and iOS/Android Hermes source exports: passed. The latter are compile checks under artifacts/social-auth-source-check, **not signed store packages**.
-- Signed iOS compilation and static IPA inspection passed. Real Apple/Google/Meta account sign-in, physical-device launch, Hide My Email delivery, and new tester distribution remain unverified.
+- Signed iOS compilation/static IPA inspection, Android integrity/signer checks, Apple processing/approval, and assignment to the existing external group passed. Real Apple/Google/Meta account sign-in, physical-device launch, Hide My Email delivery, Google Play upload, and notification receipt remain unverified.
 
 Run EAS builds through `eas env:exec preview` so local iOS configuration validation sees the same public provider values as the cloud worker. Example: `eas env:exec preview 'eas build --platform ios --profile testflight --non-interactive --no-wait' --non-interactive`. This avoids writing public-provider environment files locally. Signed native package checks remain necessary; local source tests do not execute CocoaPods.
 
