@@ -124,9 +124,10 @@ export default function RankedQueueScreen({ route, navigation }: Props) {
       <PremiumPanel>
         <MetricRow Icon={Users} label="Queue" value={`${players} players - 9 rounds`} />
         <MetricRow Icon={Trophy} label="Entry" value="Free ladder match" />
-        <MetricRow Icon={Radar} label="Search" value={queue?.clubSeparated ? 'League + club protected' : 'League-based'} />
+        <MetricRow Icon={Radar} label="Search" value="League-based" />
         <MetricRow Icon={Sparkles} label="Waiting" value={`${waitedSeconds}s`} />
-        <MetricRow Icon={Users} label="Eligible" value={`${queue?.eligiblePlayers ?? queue?.queuedPlayers ?? 1}/${players}`} />
+        <MetricRow Icon={Users} label="In queue" value={String(queue?.queuedPlayers ?? 1)} />
+        <MetricRow Icon={Users} label="Eligible for table" value={`${queue?.eligiblePlayers ?? 1}/${players}`} />
       </PremiumPanel>
 
       <PremiumPanel tone="felt">
@@ -136,19 +137,19 @@ export default function RankedQueueScreen({ route, navigation }: Props) {
             ? `${placementsRemaining} placement match${placementsRemaining === 1 ? '' : 'es'} remaining.`
             : `Season best: ${competitive?.seasonBestLeague.name ?? league}.`}
         </Text>
-        {queue?.clubSeparated ? (
-          <Text style={styles.clubProtectionText}>Clubmates are kept at separate Ranked tables. The rating search keeps expanding, but club separation never relaxes.</Text>
-        ) : null}
+        <Text style={styles.searchHelpText}>
+          {queue?.waitingReason === 'rating_range'
+            ? 'Other players are waiting outside your current rating range. The search widens over time. Clubmates can match normally.'
+            : 'Waiting for more players in this queue. Clubmates can match and earn normal ranked results.'}
+        </Text>
       </PremiumPanel>
 
       <PremiumPanel>
         <View style={styles.rewardHeader}>
-          <View>
-          <Text style={styles.rewardTitle}>Season 1</Text>
-            <Text style={styles.rewardText}>{seasonDaysLeft} days left - unlock prestige shop access</Text>
-          </View>
-          <StatusBadge label={`${claimableCount} Ready`} tone={claimableCount ? 'gold' : 'muted'} />
+          <Text style={styles.rewardTitle}>{competitive?.season.name ?? 'Ranked Season'}</Text>
+          <StatusBadge label={`${claimableCount} Ready`} tone={claimableCount ? 'gold' : 'muted'} style={styles.rewardBadge} />
         </View>
+        <Text style={styles.rewardText}>{seasonDaysLeft} days left - unlock prestige shop access</Text>
         <ActionButton
           label={claimableCount ? `Unlock ${claimableCount} Shop Item${claimableCount === 1 ? '' : 's'}` : 'No Shop Unlocks Ready'}
           tone="gold"
@@ -187,7 +188,9 @@ const styles = StyleSheet.create({
   rankMeta: { color: '#4D3D17', fontSize: 13, fontWeight: '900', marginTop: 3 },
   metricRow: {
     minHeight: 38,
+    paddingVertical: 7,
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
@@ -196,17 +199,19 @@ const styles = StyleSheet.create({
   },
   metricLabelWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   metricLabel: { color: ui.text.muted, fontWeight: '900' },
-  metricValue: { color: ui.text.primary, fontWeight: '900' },
+  metricValue: { color: ui.text.primary, fontWeight: '900', flexShrink: 1, maxWidth: '100%', textAlign: 'right' },
   statusTitle: { color: ui.palette.emerald, fontWeight: '900', fontSize: 20, textAlign: 'center' },
   statusText: { color: ui.text.secondary, fontWeight: '800', textAlign: 'center', marginTop: 8, lineHeight: 20 },
-  clubProtectionText: { color: ui.palette.gold, fontSize: 11, fontWeight: '800', textAlign: 'center', marginTop: 9, lineHeight: 17 },
+  searchHelpText: { color: ui.palette.gold, fontSize: 11, fontWeight: '800', textAlign: 'center', marginTop: 9, lineHeight: 17 },
   rewardHeader: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    marginBottom: 12,
+    marginBottom: 4,
   },
-  rewardTitle: { color: ui.palette.gold, fontWeight: '900', fontSize: 18 },
-  rewardText: { color: ui.text.secondary, fontWeight: '800', marginTop: 3 },
+  rewardTitle: { color: ui.palette.gold, fontWeight: '900', fontSize: 18, flexShrink: 1, minWidth: 0 },
+  rewardBadge: { flexShrink: 0 },
+  rewardText: { color: ui.text.secondary, fontWeight: '800', marginBottom: 12 },
 });

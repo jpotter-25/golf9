@@ -2972,7 +2972,7 @@ test('ranked queue creates a human-only ranked room and starts automatically', a
   }, { ROOM_COUNTDOWN_MS: '50' });
 });
 
-test('ranked queue keeps clubmates separate and reports only eligible opponents', async () => {
+test('ranked queue matches clubmates immediately as a normal ranked table', async () => {
   const expiresAt = Date.now() + 60_000;
   const users = [
     { userId: 'club-seed', displayName: 'ClubSeed', passwordHash: 'unused', salt: 'unused', clubId: 'club-a' },
@@ -3006,22 +3006,52 @@ test('ranked queue keeps clubmates separate and reports only eligible opponents'
     const first = await enqueue('club-seed-token');
     assert.equal(first.queue.queued, true);
     assert.equal(first.queue.eligiblePlayers, 1);
-    assert.equal(first.queue.clubSeparated, true);
+    assert.equal(first.queue.clubSeparated, false);
+    assert.equal(first.queue.queuedPlayers, 1);
+    assert.equal(first.queue.waitingReason, 'more_players');
 
     const clubmate = await enqueue('club-mate-token');
-    assert.equal(clubmate.queue.queued, true);
-    assert.equal(clubmate.queue.matchedRoomCode, null);
-    assert.equal(clubmate.queue.eligiblePlayers, 1);
+    assert.equal(clubmate.queue.queued, false);
+    assert.equal(typeof clubmate.queue.matchedRoomCode, 'string');
+    assert.equal(clubmate.queue.room.matchType, 'ranked');
+    assert.equal(clubmate.queue.room.rounds, 9);
+    assert.deepEqual(clubmate.queue.room.players.map(player => player.userId).sort(), ['club-mate', 'club-seed']);
 
     const rival = await enqueue('club-rival-token');
-    assert.equal(rival.queue.queued, false);
-    assert.equal(typeof rival.queue.matchedRoomCode, 'string');
+    assert.equal(rival.queue.queued, true);
+    assert.equal(rival.queue.matchedRoomCode, null);
+    assert.equal(rival.queue.clubSeparated, false);
+    assert.equal(rival.queue.queuedPlayers, 1);
 
     const seedStatus = await json(await fetch(`${baseUrl}/ranked/queue`, { headers: authHeaders('club-seed-token') }));
     const clubmateStatus = await json(await fetch(`${baseUrl}/ranked/queue`, { headers: authHeaders('club-mate-token') }));
-    assert.equal(seedStatus.queue.matchedRoomCode, rival.queue.matchedRoomCode);
-    assert.equal(clubmateStatus.queue.queued, true);
-    assert.equal(clubmateStatus.queue.eligiblePlayers, 1);
+    assert.equal(seedStatus.queue.matchedRoomCode, clubmate.queue.matchedRoomCode);
+    assert.equal(clubmateStatus.queue.matchedRoomCode, clubmate.queue.matchedRoomCode);
+  });
+});
+
+test('eligible ranked opponents match immediately across every mobile platform pairing', async t => {
+  await withServer(async baseUrl => {
+    for (const [index, platforms] of [['ios', 'android'], ['android', 'android'], ['ios', 'ios']].entries()) {
+      await t.test(platforms.join(' vs '), async () => {
+        const players = [await signup(baseUrl, `RankPair${index}One`), await signup(baseUrl, `RankPair${index}Two`)];
+        const headers = players.map((player, i) => ({
+          ...authHeaders(player.token), 'X-Golf9-Platform': platforms[i],
+          'X-Golf9-Build': platforms[i] === 'ios' ? '4' : '60', 'X-Golf9-Channel': 'playtest',
+        }));
+        const enter = async i => json(await fetch(`${baseUrl}/ranked/queue`, {
+          method: 'POST', headers: headers[i], body: JSON.stringify({ maxPlayers: 2 }),
+        }));
+        assert.equal((await enter(0)).queue.waitingReason, 'more_players');
+        const match = (await enter(1)).queue;
+        assert.equal(match.queued, false);
+        assert.equal(typeof match.matchedRoomCode, 'string');
+        const other = (await json(await fetch(`${baseUrl}/ranked/queue`, { headers: headers[0] }))).queue;
+        assert.equal(other.matchedRoomCode, match.matchedRoomCode);
+        assert.equal(match.room.matchType, 'ranked');
+        assert.equal(match.room.players.length, 2);
+      });
+    }
   });
 });
 

@@ -61,7 +61,7 @@ function topBarFixture({ coins = 54_321, width = 414, route = 'Lobby', fontScale
   });
   const shell = components.ScreenShell({ children: null });
   const header = shell.props.children[0];
-  return { tree: header.type(header.props), navigations, unavailable };
+  return { tree: header.type(header.props), navigations, unavailable, components, native };
 }
 
 function descendants(tree) {
@@ -69,4 +69,4 @@ function descendants(tree) {
   return [tree, ...React.Children.toArray(tree.props?.children).flatMap(descendants)];
 }
 
-module.exports = { topBarFixture, descendants, formatCoinBalance: formatter.formatCoinBalance };
+module.exports = { topBarFixture, descendants, compile, theme, formatCoinBalance: formatter.formatCoinBalance };

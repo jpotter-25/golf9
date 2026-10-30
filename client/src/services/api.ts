@@ -625,6 +625,7 @@ export type RankedQueueStatus = {
   queuedPlayers?: number;
   eligiblePlayers?: number;
   clubSeparated?: boolean;
+  waitingReason?: 'rating_range' | 'more_players' | null;
 };
 
 export type DisplayRankSelection = {

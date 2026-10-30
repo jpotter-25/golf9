@@ -9,13 +9,14 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "verify-deps": "expo install --check",
-    "eas-build-post-install": "npm run verify-deps && npm run test:native-codegen && npm run test:social-auth && npm run test:header",
+    "eas-build-post-install": "npm run verify-deps && npm run test:native-codegen && npm run test:social-auth && npm run test:header && npm run test:ranked",
     "lint": "eslint . --ext .ts,.tsx --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test:browser": "node --test test/browserAlert.test.cjs",
     "test:native-codegen": "node --test test/nativeCodegen.test.cjs",
     "test:social-auth": "node --test test/socialAuth.test.cjs",
-    "test:header": "node --test test/coinBalance.test.cjs"
+    "test:header": "node --test test/coinBalance.test.cjs",
+    "test:ranked": "node --test test/rankedLayout.test.cjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",

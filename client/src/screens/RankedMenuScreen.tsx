@@ -82,11 +82,11 @@ export default function RankedMenuScreen({ navigation }: Props) {
 
       <PremiumPanel>
         <View style={styles.sectionHeader}>
-          <View>
+          <View style={styles.sectionCopy}>
             <Text style={styles.sectionTitle}>Your {players}P Season</Text>
             <Text style={styles.sectionMeta}>This ladder changes only through {players}-player ranked matches.</Text>
           </View>
-          <StatusBadge label="9 ROUNDS" tone="gold" />
+          <StatusBadge label="9 ROUNDS" tone="gold" style={styles.sectionBadge} />
         </View>
         <View style={styles.statGrid}>
           <RankStat Icon={Trophy} label="Wins" value={String(ladder?.wins ?? 0)} />
@@ -149,7 +149,9 @@ const styles = StyleSheet.create({
   rankLeague: { color: ui.text.inverse, fontSize: 26, fontWeight: '900' },
   rankFormat: { color: '#4D3D17', fontSize: 12, fontWeight: '900', marginTop: 2, marginBottom: 10 },
   rankProgressText: { color: '#4D3D17', fontSize: 11, fontWeight: '900', marginTop: 7 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14 },
+  sectionHeader: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14 },
+  sectionCopy: { flexGrow: 1, flexShrink: 1, flexBasis: 180, minWidth: 0 },
+  sectionBadge: { flexShrink: 0 },
   sectionTitle: { color: ui.text.primary, fontSize: 18, fontWeight: '900' },
   sectionMeta: { color: ui.text.secondary, fontSize: 11, fontWeight: '700', lineHeight: 16, marginTop: 4, maxWidth: 230 },
   statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

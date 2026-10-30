@@ -440,11 +440,6 @@ export function matchmakingRangeFor(joinedAt, now = Date.now(), config = null) {
   return clamp(safeInteger(rules.expandBase, 300) + Math.max(0, extra), safeInteger(rules.expandBase, 300), safeInteger(rules.maxRange, 800));
 }
 
-function rankedQueueClubId(entry) {
-  const clubId = String(entry?.clubId || '').trim();
-  return clubId || null;
-}
-
 export function eligibleRankedEntriesForSeed(seed, entries, now = Date.now(), config = null) {
   if (!seed?.userId) return [];
   const seedRange = matchmakingRangeFor(seed.joinedAt, now, config);
@@ -457,17 +452,10 @@ export function eligibleRankedEntriesForSeed(seed, entries, now = Date.now(), co
     .sort((a, b) => Number(a.joinedAt || 0) - Number(b.joinedAt || 0) || String(a.userId).localeCompare(String(b.userId)));
   const selected = [seed];
   const selectedUserIds = new Set([String(seed.userId)]);
-  const representedClubs = new Set();
-  const seedClubId = rankedQueueClubId(seed);
-  if (seedClubId) representedClubs.add(seedClubId);
-
   for (const candidate of compatible) {
     if (selectedUserIds.has(String(candidate.userId))) continue;
-    const clubId = rankedQueueClubId(candidate);
-    if (clubId && representedClubs.has(clubId)) continue;
     selected.push(candidate);
     selectedUserIds.add(String(candidate.userId));
-    if (clubId) representedClubs.add(clubId);
   }
   return selected;
 }
@@ -476,6 +464,20 @@ export function selectRankedMatchEntries(seed, entries, now = Date.now(), config
   const needed = normalizeRankedPlayerCount(seed?.maxPlayers);
   const eligible = eligibleRankedEntriesForSeed(seed, entries, now, config);
   return eligible.length >= needed ? eligible.slice(0, needed) : [];
+}
+
+// Public queue diagnostics share the matcher's rules without exposing player IDs,
+// club IDs, or hidden ratings. A queued player is not necessarily an eligible opponent.
+export function rankedQueueAvailability(seed, entries, now = Date.now(), config = null) {
+  const pool = (Array.isArray(entries) ? entries : []).filter(entry => entry?.userId);
+  const needed = normalizeRankedPlayerCount(seed?.maxPlayers);
+  const eligible = eligibleRankedEntriesForSeed(seed, pool, now, config).length;
+  const queuedPlayers = new Set(pool.map(entry => String(entry.userId))).size;
+  return {
+    queuedPlayers,
+    eligiblePlayers: Math.min(needed, eligible),
+    waitingReason: eligible >= needed ? null : queuedPlayers > eligible ? 'rating_range' : 'more_players',
+  };
 }
 
 function placementBaseDeltas(playerCount, config = null) {

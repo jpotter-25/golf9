@@ -82,7 +82,7 @@ import {
   BASE_MMR,
   applyRankedMatchResult,
   claimSeasonRewards,
-  eligibleRankedEntriesForSeed,
+  rankedQueueAvailability,
   leagueForMmr,
   matchmakingRangeFor,
   normalizeCompetitiveState,
@@ -4082,10 +4082,7 @@ function publicRankedQueueStatus(userId) {
   const entry = rankedQueue.get(userId);
   if (!entry) return { queued: false, matchedRoomCode: null, room: null, status: 'idle' };
   const liveEntry = liveRankedQueueEntry(entry);
-  const eligiblePlayers = Math.min(
-    entry.maxPlayers,
-    eligibleRankedEntriesForSeed(liveEntry, liveRankedQueueGroup(entry.key), Date.now(), rankedConfig()).length,
-  );
+  const availability = rankedQueueAvailability(liveEntry, liveRankedQueueGroup(entry.key), Date.now(), rankedConfig());
   return {
     queued: true,
     matchedRoomCode: null,
@@ -4096,9 +4093,9 @@ function publicRankedQueueStatus(userId) {
     joinedAt: entry.joinedAt,
     buyIn: 0,
     pot: 0,
-    queuedPlayers: eligiblePlayers,
-    eligiblePlayers,
-    clubSeparated: !!liveEntry.clubId,
+    ...availability,
+    // Retain the legacy field so installed clients stop showing club restrictions.
+    clubSeparated: false,
   };
 }
 

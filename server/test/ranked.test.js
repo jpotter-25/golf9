@@ -11,6 +11,7 @@ import {
   placementForTotals,
   previewRankedDelta,
   publicCompetitiveState,
+  rankedQueueAvailability,
   rankedDisplayEmblemChoices,
   resolveDisplayRankEmblem,
   selectRankedMatchEntries,
@@ -378,23 +379,46 @@ test('matchmaking range expands with queue time', () => {
   assert.equal(matchmakingRangeFor(1000, 1000 + 10 * 60_000), 800);
 });
 
-test('ranked matching never pairs clubmates even after maximum search expansion', () => {
+test('ranked matching admits clubmates immediately for every table size without duplicate players', () => {
   const joinedAt = 1_000;
-  const seed = { userId: 'one', clubId: 'club-a', mmr: 1000, joinedAt, maxPlayers: 2 };
-  const clubmate = { userId: 'two', clubId: 'club-a', mmr: 1000, joinedAt: joinedAt + 1, maxPlayers: 2 };
-  const now = joinedAt + (10 * 60_000);
-  assert.deepEqual(selectRankedMatchEntries(seed, [seed, clubmate], now), []);
-  assert.equal(eligibleRankedEntriesForSeed(seed, [seed, clubmate], now).length, 1);
+  for (const maxPlayers of [2, 3, 4]) {
+    const entries = Array.from({ length: maxPlayers }, (_, i) => ({ userId: `clubmate-${i}`, clubId: 'club-a', mmr: 1000, joinedAt: joinedAt + i, maxPlayers }));
+    const pool = [...entries, entries[1]];
+    assert.deepEqual(selectRankedMatchEntries(entries[0], pool, joinedAt + 5), entries);
+    assert.equal(eligibleRankedEntriesForSeed(entries[0], pool, joinedAt + 5).length, maxPlayers);
+    assert.deepEqual(rankedQueueAvailability(entries[0], pool, joinedAt + 5), {
+      queuedPlayers: maxPlayers, eligiblePlayers: maxPlayers, waitingReason: null,
+    });
+  }
 });
 
-test('ranked matching preserves queue order while selecting distinct clubs', () => {
+test('queue diagnostics distinguish population from rating eligibility without leaking identities', () => {
+  const seed = { userId: 'seed', clubId: null, mmr: 1000, joinedAt: 1000, maxPlayers: 3 };
+  const one = { ...seed, userId: 'one', clubId: 'same-club' };
+  const two = { ...seed, userId: 'two', clubId: 'same-club' };
+  assert.deepEqual(rankedQueueAvailability(seed, [seed], 1000), {
+    queuedPlayers: 1, eligiblePlayers: 1, waitingReason: 'more_players',
+  });
+  assert.deepEqual(rankedQueueAvailability(seed, [seed, one, two], 1000), {
+    queuedPlayers: 3, eligiblePlayers: 3, waitingReason: null,
+  });
+  const distant = { ...two, clubId: 'different-club', mmr: 1350 };
+  assert.deepEqual(rankedQueueAvailability(seed, [seed, one, distant], 1000), {
+    queuedPlayers: 3, eligiblePlayers: 2, waitingReason: 'rating_range',
+  });
+  assert.deepEqual(rankedQueueAvailability(seed, [seed, one, distant], 91_000), {
+    queuedPlayers: 3, eligiblePlayers: 3, waitingReason: null,
+  });
+});
+
+test('ranked matching preserves queue order regardless of club membership', () => {
   const joinedAt = 1_000;
   const seed = { userId: 'seed', clubId: 'club-a', mmr: 1000, joinedAt, maxPlayers: 3 };
   const olderClubmate = { userId: 'clubmate', clubId: 'club-a', mmr: 1000, joinedAt: joinedAt + 1, maxPlayers: 3 };
   const firstOpponent = { userId: 'opponent-b', clubId: 'club-b', mmr: 1000, joinedAt: joinedAt + 2, maxPlayers: 3 };
   const secondOpponent = { userId: 'opponent-c', clubId: 'club-c', mmr: 1000, joinedAt: joinedAt + 3, maxPlayers: 3 };
   const selected = selectRankedMatchEntries(seed, [seed, olderClubmate, firstOpponent, secondOpponent], joinedAt + 5_000);
-  assert.deepEqual(selected.map(entry => entry.userId), ['seed', 'opponent-b', 'opponent-c']);
+  assert.deepEqual(selected.map(entry => entry.userId), ['seed', 'clubmate', 'opponent-b']);
 });
 
 test('clubless players remain unrestricted in four-player Ranked selection', () => {
@@ -410,12 +434,24 @@ test('clubless players remain unrestricted in four-player Ranked selection', () 
   ]);
 });
 
-test('club separation remains strict while normal MMR expansion admits opponent clubs', () => {
+test('clubmates still need rating compatibility and benefit from normal search expansion', () => {
   const joinedAt = 1_000;
   const seed = { userId: 'seed', clubId: 'club-a', mmr: 1000, joinedAt, maxPlayers: 2 };
-  const distantOpponent = { userId: 'opponent', clubId: 'club-b', mmr: 1350, joinedAt, maxPlayers: 2 };
+  const distantOpponent = { userId: 'opponent', clubId: 'club-a', mmr: 1350, joinedAt, maxPlayers: 2 };
   assert.deepEqual(selectRankedMatchEntries(seed, [seed, distantOpponent], joinedAt + 20_000), []);
   assert.deepEqual(selectRankedMatchEntries(seed, [seed, distantOpponent], joinedAt + 90_000).map(entry => entry.userId), ['seed', 'opponent']);
+});
+
+test('club membership does not change normal ranked result credit', () => {
+  const season = normalizeRankedSeason({ id: 's1', name: 'Season 1', startsAt: 1000, endsAt: 86400000 }, 2000);
+  const clubmate = user({ clubId: 'club-a' });
+  const clubless = user();
+  const result = { matchId: 'same-club-match', roomCode: 'TEST', playerCount: 2, placement: 1, total: 12, opponentMmrs: [0] };
+  assert.deepEqual(applyRankedMatchResult(clubmate, result, season, 3000), applyRankedMatchResult(clubless, result, season, 3000));
+  assert.deepEqual(clubmate.competitive, clubless.competitive);
+  assert.equal(clubmate.competitive.rankedGames, 1);
+  assert.equal(clubmate.competitive.wins, 1);
+  assert.equal(clubmate.competitive.placementsPlayed, 1);
 });
 
 test('season reward claim unlocks ranked shop eligibility without granting cosmetics', () => {
