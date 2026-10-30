@@ -238,7 +238,8 @@ export function revealForPeek(state, playerIndex, r, c) {
   const card = player.grid?.[r]?.[c];
   if (!card || card.faceUp) return { state: next, error: 'Card cannot be peeked.' };
   card.faceUp = true;
-  card.visibleToUserId = player.userId;
+  // Opening flips stay face-up on the shared table; these are not private decisions.
+  delete card.visibleToUserId;
   player.peekFlips += 1;
   next.revision = (next.revision || 0) + 1;
   return { state: next };
@@ -272,7 +273,7 @@ export function autoCompleteCurrentPeek(state) {
         const index = randomInt(coords.length);
         const { r, c } = coords.splice(index, 1)[0];
         player.grid[r][c].faceUp = true;
-        player.grid[r][c].visibleToUserId = player.userId;
+        delete player.grid[r][c].visibleToUserId;
         player.peekFlips += 1;
       }
     }
@@ -290,7 +291,7 @@ export function autoCompleteCurrentPeek(state) {
     const index = randomInt(coords.length);
     const { r, c } = coords.splice(index, 1)[0];
     player.grid[r][c].faceUp = true;
-    player.grid[r][c].visibleToUserId = player.userId;
+    delete player.grid[r][c].visibleToUserId;
     player.peekFlips += 1;
   }
   next.revision = (next.revision || 0) + 1;
@@ -701,11 +702,18 @@ export function publicGameState(
   next.viewerHeldSource = viewerHeldSource;
   next.viewerHeldMustReplace = !!viewerHeldMustReplace;
   next.viewerHeldCanDiscard = !!viewerHeldCanDiscard;
-  next.players = next.players.map(player => ({
+  next.players = next.players.map((player, playerIndex) => ({
     ...player,
     cosmetics: sharedPlayerCosmetics(player.cosmetics),
     grid: player.grid.map((row, rowIndex) => row.map((card, columnIndex) => {
-      const privatelyHidden = card?.visibleToUserId && card.visibleToUserId !== viewerUserId;
+      // Only the active keep/replace examination is private. Older room snapshots
+      // may still carry owner-only markers on public opening cards: do not let
+      // those stale markers hide already face-up cards for the rest of the round.
+      const privatelyHidden = next.phase === 'turn'
+        && next.pendingDecision?.playerIndex === playerIndex
+        && next.pendingDecision.r === rowIndex
+        && next.pendingDecision.c === columnIndex
+        && player.userId !== viewerUserId;
       if (!card || (card.faceUp && !privatelyHidden)) {
         if (card) delete card.visibleToUserId;
         return card;

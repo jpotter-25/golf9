@@ -485,6 +485,77 @@ test('publicGameState exposes viewer held card while masking draw pile', () => {
   assert.notEqual(view.players[0].grid[0][0].id, state.players[0].grid[0][0].id);
 });
 
+test('opening flips are public immediately and stay public when turns start', () => {
+  for (const simultaneousPeek of [false, true]) {
+    let state = createGameState([
+      { userId: 'u1', displayName: 'One' },
+      { userId: 'u2', displayName: 'Two' },
+    ], { simultaneousPeek });
+    for (const playerIndex of [0, 1]) {
+      for (const c of [0, 1]) {
+        const result = flipForPeek(state, playerIndex, 0, c);
+        assert.equal(result.error, undefined);
+        state = result.state;
+        for (const viewer of ['u1', 'u2', null]) {
+          const view = publicGameState(state, viewer);
+          assert.equal(view.players[playerIndex].grid[0][c].faceUp, true);
+          assert.equal(view.players[playerIndex].grid[0][c].rank, state.players[playerIndex].grid[0][c].rank);
+          assert.equal(view.players[playerIndex].grid[0][c].id, state.players[playerIndex].grid[0][c].id);
+          assert.equal(view.players[playerIndex].grid[0][2].faceUp, false);
+          assert.equal(view.players[playerIndex].grid[0][2].id, `hidden-u${playerIndex + 1}-0-2`);
+        }
+      }
+    }
+    assert.equal(state.phase, 'turn');
+    for (const viewer of ['u1', 'u2']) {
+      assert.deepEqual(publicGameState(state, viewer).players.map(player => player.grid.flat().filter(card => card?.faceUp).length), [2, 2]);
+    }
+  }
+});
+
+test('timer-completed opening flips are public for sequential and simultaneous play', () => {
+  for (const simultaneousPeek of [false, true]) {
+    let state = createGameState([
+      { userId: 'u1', displayName: 'One' },
+      { userId: 'u2', displayName: 'Two' },
+    ], { simultaneousPeek });
+    state = flipForPeek(state, 0, 0, 0).state;
+    while (state.phase === 'peek') state = autoCompleteCurrentPeek(state);
+    for (const viewer of ['u1', 'u2']) {
+      assert.deepEqual(publicGameState(state, viewer).players.map(player => player.grid.flat().filter(card => card?.faceUp).length), [2, 2]);
+    }
+  }
+});
+
+test('legacy opening privacy markers cannot hide public cards or expose an active private decision', () => {
+  let state = createGameState([
+    { userId: 'u1', displayName: 'One' },
+    { userId: 'u2', displayName: 'Two' },
+  ], { simultaneousPeek: true });
+  state.players[0].grid[0][0] = card('8', { id: 'opening-eight', visibleToUserId: 'u1' });
+  state.players[0].grid[0][1] = card('6', { id: 'opening-six', visibleToUserId: 'u1' });
+  for (const phase of ['peek', 'turn', 'roundReveal']) {
+    state.phase = phase;
+    const view = publicGameState(state, 'u2');
+    assert.equal(view.players[0].grid[0][0].rank, '8');
+    assert.equal(view.players[0].grid[0][1].rank, '6');
+    assert.equal(view.players[0].grid[0][0].visibleToUserId, undefined);
+    assert.equal(state.players[0].grid[0][0].visibleToUserId, 'u1', 'serialization must not mutate authoritative state');
+  }
+  state = startTurns(state);
+  state.currentPlayerIndex = 0;
+  state.players[0].grid[1][1] = card('4', { id: 'private-four', faceUp: false });
+  state = revealGridCardForDecision(state, 0, 1, 1).state;
+  // The active decision, not a stale per-card marker, defines temporary privacy.
+  delete state.players[0].grid[1][1].visibleToUserId;
+  const opponent = publicGameState(state, 'u2');
+  assert.equal(opponent.players[0].grid[0][0].rank, '8');
+  assert.equal(opponent.players[0].grid[1][1].faceUp, false);
+  assert.equal(JSON.stringify(opponent).includes('private-four'), false);
+  const resolved = resolvePendingGridDecision(state, 0, card('A'), 'revealed').state;
+  assert.equal(publicGameState(resolved, 'u2').players[0].grid[1][1].rank, '4');
+});
+
 test('temporary private reveals are visible only to the deciding player', () => {
   let state = createGameState([
     { userId: 'u1', displayName: 'One' },

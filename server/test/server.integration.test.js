@@ -2654,6 +2654,97 @@ test('release policy blocks obsolete builds while preserving update and recovery
   });
 });
 
+test('opening cards and completed turns broadcast immediately across mobile platform pairs', async t => {
+  for (const platforms of [['ios', 'android'], ['android', 'android'], ['ios', 'ios']]) {
+    await t.test(platforms.join(' vs '), async () => withServer(async baseUrl => {
+      const players = [await signup(baseUrl, 'SyncOne'), await signup(baseUrl, 'SyncTwo')];
+      const { room } = await json(await fetch(`${baseUrl}/rooms`, {
+        method: 'POST', headers: authHeaders(players[0].token),
+        body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
+      }));
+      const code = room.code;
+      await json(await fetch(`${baseUrl}/rooms/${code}/join`, { method: 'POST', headers: authHeaders(players[1].token) }));
+      const sockets = players.map((player, index) => io(baseUrl, {
+        transports: ['websocket'], forceNew: true, autoConnect: false,
+        auth: { token: player.token, platform: platforms[index], build: platforms[index] === 'ios' ? 4 : 60, channel: 'playtest', version: '0.1.0' },
+      }));
+      let reconnect;
+      try {
+        await Promise.all(sockets.map(async socket => {
+          const connected = once(socket, 'connect');
+          socket.connect();
+          await connected;
+          assert.equal((await emitAck(socket, 'room:join', { code })).room.code, code);
+        }));
+        const started = Promise.all(sockets.map(socket => waitForSocketEvent(socket, 'game:state', game => game.phase === 'peek')));
+        const [startResult, initial] = await Promise.all([emitAck(sockets[0], 'room:start', { code }), started]);
+        assert.equal(startResult.ok, true);
+        let views = initial;
+        let actionNumber = 0;
+        async function act(index, type, payload = {}) {
+          const revision = views[0].revision;
+          // Listen before sending; assert unsolicited broadcasts, not room:join polling.
+          const received = Promise.all(sockets.map(socket => waitForSocketEvent(socket, 'game:state', game => game.id === initial[0].id && game.revision > revision)));
+          const [ack, snapshots] = await Promise.all([
+            emitAck(sockets[index], 'game:intent', { code, actionId: `visibility-${++actionNumber}`, type, payload }), received,
+          ]);
+          assert.equal(ack.ok, true, ack.error);
+          assert.equal(snapshots[0].revision, snapshots[1].revision);
+          views = snapshots;
+          return ack;
+        }
+        for (const index of [0, 1]) {
+          for (const c of [0, 1]) {
+            await act(index, 'peek', { r: 0, c });
+            const ownerCard = views[index].players[index].grid[0][c];
+            assert.equal(ownerCard.faceUp, true);
+            assert.deepEqual(views[1 - index].players[index].grid[0][c], ownerCard, 'opponent must receive the flipped card immediately');
+            assert.equal(views[1 - index].players[index].grid[0][2].faceUp, false);
+          }
+        }
+        assert.equal(views[0].phase, 'turn');
+        assert.deepEqual(views[0].players, views[1].players);
+        const actor = views[0].currentPlayerIndex;
+        const observer = 1 - actor;
+        const draw = await act(actor, 'draw');
+        assert.deepEqual(views[actor].viewerHeldCard, draw.drawn);
+        assert.equal(views[observer].viewerHeldCard, null);
+        assert.equal(JSON.stringify(views[observer]).includes(draw.drawn.id), false);
+        assert.equal(views[actor].drawPile.length, views[observer].drawPile.length);
+        await act(actor, 'reveal', { r: 1, c: 1 });
+        const privateCard = views[actor].players[actor].grid[1][1];
+        assert.equal(privateCard.faceUp, true);
+        assert.equal(views[observer].players[actor].grid[1][1].faceUp, false);
+        assert.equal(JSON.stringify(views[observer]).includes(privateCard.id), false);
+        // Keep the examined grid card; it and the discarded draw become public together.
+        await act(actor, 'discard');
+        assert.equal(views[observer].players[actor].grid[1][1].id, privateCard.id);
+        assert.equal(views[observer].topDiscard.id, draw.drawn.id);
+        assert.equal(views[observer].pendingDecision, null);
+        assert.deepEqual(views[0].players, views[1].players);
+        assert.equal(views[0].currentPlayerIndex, observer);
+        // Also cover replacing an already face-up opening card from the discard pile.
+        await act(observer, 'takeDiscard');
+        await act(observer, 'replace', { r: 0, c: 0 });
+        assert.equal(views[actor].players[observer].grid[0][0].id, draw.drawn.id);
+        assert.deepEqual(views[0].players, views[1].players);
+        const expected = views[actor];
+        sockets[actor].disconnect();
+        reconnect = io(baseUrl, { transports: ['websocket'], forceNew: true, autoConnect: false, auth: { token: players[actor].token, platform: platforms[actor], build: platforms[actor] === 'ios' ? 4 : 60 } });
+        const connected = once(reconnect, 'connect');
+        reconnect.connect();
+        await connected;
+        const restored = await emitAck(reconnect, 'room:join', { code });
+        assert.deepEqual(restored.game.players, expected.players);
+        assert.deepEqual(restored.game.topDiscard, expected.topDiscard);
+      } finally {
+        sockets.forEach(socket => socket.disconnect());
+        reconnect?.disconnect();
+      }
+    }));
+  }
+});
+
 test('iOS, Android, and browser players share accounts and an authoritative table with independent release gates', async () => {
   await withServer(async (baseUrl) => {
     const admin = await adminLogin(baseUrl);
