@@ -10,13 +10,15 @@ Provider-console setup is complete for Google iOS and Apple iOS/Android, using t
 
 The live `/auth/config` reports Apple iOS/Android enabled, existing Google/Facebook enabled, and Facebook iOS disabled. Meta's app remains unpublished and requires business verification before general tester access. Physical-device OAuth testing and distribution of the new binaries remain outstanding.
 
-Live verification exposed a PostgreSQL-only bug: `persistProviderState` referenced an out-of-scope `staleWriter`. Commit **2e1d74e31244b98a5dae216424fbee8420f4006e** reads the actual PostgreSQL runtime status and preserves the write fence. Five regression tests exercise the real adapter; the full suite now passes 245 tests. Recheck live challenge creation after deployment, not just `/auth/config`.
+Live verification exposed a PostgreSQL-only bug: `persistProviderState` referenced an out-of-scope `staleWriter`. Commit **2e1d74e31244b98a5dae216424fbee8420f4006e** reads the actual PostgreSQL runtime status and preserves the write fence. Five regression tests exercise the real adapter; the full suite now passes 245 tests. Railway deployment **a792ce13-836c-45a8-85fe-85e5aac7e6fc** succeeded, both health endpoints returned 200, and real iOS/Android Apple challenge creation returned 200 after durable PostgreSQL saves. The Android authorization URL uses the expected Services ID and HTTPS callback. These checks do not authenticate a real player.
 
 Build tracking:
 
-- Android 60: EAS **4bf8019e-7530-446e-94ab-b06109c28d03**, source **676c63a8**, building; server-only fix does not require rebuilding it.
+- Android 60: EAS **4bf8019e-7530-446e-94ab-b06109c28d03**, source **676c63a8**, finished; server-only fix does not require rebuilding it. Local **artifacts/Nine-Below-Android-0.1.0-version-code-60.aab** is 51,759,833 bytes, SHA-256 **56f787406a8a7e45a5bd83c9f3a7e0c643913ea2656e4c2fa0fbebc2b53b7f00**. Verified RSA signature against the existing upload certificate, signed manifest and all 1,587 payload digests, package/version 0.1.0 (60), non-debuggable release, target SDK 36 / minimum 24, and no advertising-ID permissions. Google Play upload and physical-device testing remain pending.
 - First iOS 3 attempt **6685b3ce-2f38-45f4-98cf-edb6c25a2a7a** failed at CocoaPods: AppCheckCore requires modular GoogleUtilities/RecaptchaInterop dependencies.
-- Replacement iOS 3 **623ce501-c34b-46a3-96d0-fc2ebd880038**, source **56e6f308**, building with narrowly scoped `extraPods` modular headers, following the [Google Sign-In setup guidance](https://react-native-google-signin.github.io/docs/setting-up/ios). No global framework switch or SDK downgrade.
+- Replacement iOS 3 **623ce501-c34b-46a3-96d0-fc2ebd880038**, source **56e6f308**, finished with narrowly scoped `extraPods` modular headers, following the [Google Sign-In setup guidance](https://react-native-google-signin.github.io/docs/setting-up/ios). No global framework switch or SDK downgrade.
+- Signed IPA **artifacts/nine-below-0.1.0-ios-build-3.ipa**, SHA-256 **144f38a0204821de620b4f4f9a1b169bc8c6f4b57d5fe9d773339a806d43d929**. Static inspection verified build/bundle/team, Apple entitlement, Google URL scheme, all 50 generated Fabric classes, expected Facebook launch configuration with tracking/events disabled, device ARM64 frameworks and Hermes bundle. No recognized secret/source-map files or PEM private-key markers were found. OS Swift libraries resolve via the binary's `/usr/lib/swift` path on its iOS 15.1 minimum; these are not missing packaged frameworks.
+- EAS submission **b3941e38-12ee-4606-801f-776ffc26bd00** finished successfully. Apple processing / beta distribution is still pending; this is not a public App Store release.
 
 ## Player behavior
 
@@ -37,6 +39,8 @@ Never paste private keys, client secrets, passwords, or MFA codes into chat or G
 Use the existing Potterwell team **63FQJRQ66P** and App ID **com.potterwell.ninebelow**.
 
 Verified configuration: primary App ID enabled; grouped Services ID **com.potterwell.ninebelow.signin**; Sign in with Apple-only key **S6N35XY9S2** sealed in Railway; existing APNs key/certificate unchanged. Native and Services ID credential probes both returned `invalid_grant` for intentionally invalid codes, rather than `invalid_client`; this is not a real player login. The transactional relay sender **donotreply@potterwell.com** is registered; actual Hide My Email recovery delivery still needs testing. EAS refreshed provisioning profile **BLMMAR54W8** using the existing distribution certificate.
+
+The temporary plaintext .p8 was removed after an encrypted Windows CurrentUser DPAPI backup was decrypted and compared successfully in memory. The protected local backup is outside Git; the operational key is sealed in Railway. The DPAPI backup depends on the owner's Windows account and is not a portable disaster-recovery copy. Never expose either copy in an app bundle or public build variable.
 
 1. Enable Sign in with Apple on the existing App ID as the **primary App ID**.
 2. Register/reuse a Services ID for the Android web flow, suggested **com.potterwell.ninebelow.signin**. Associate it with that primary App ID. This grouping is essential for the same Apple identity across iOS and Android.
@@ -115,13 +119,13 @@ Completed locally on October 30:
 - Social-auth/config tests: **9 passed**; native-codegen/autolinking tests: **5 passed**; browser-dialog tests: **5 passed**.
 - Expo SDK dependency compatibility: passed.
 - Production browser export and iOS/Android Hermes source exports: passed. The latter are compile checks under artifacts/social-auth-source-check, **not signed store packages**.
-- Real Apple/Google/Meta account sign-in, signed native compilation/IPA inspection, physical-device launch, and new store distribution remain unverified.
+- Signed iOS compilation and static IPA inspection passed. Real Apple/Google/Meta account sign-in, physical-device launch, Hide My Email delivery, and new tester distribution remain unverified.
 
 Run EAS builds through `eas env:exec preview` so local iOS configuration validation sees the same public provider values as the cloud worker. Example: `eas env:exec preview 'eas build --platform ios --profile testflight --non-interactive --no-wait' --non-interactive`. This avoids writing public-provider environment files locally. Signed native package checks remain necessary; local source tests do not execute CocoaPods.
 
 Operational observation: after deployment, `/health/ready` has sometimes stayed 503 with writer handoff pending until `/health` is requested and the existing five-second handoff completes. Railway's configured healthcheck is `/health`. Verify both endpoints after deployments. Do not remove revision fencing or force a second writer to make readiness green.
 
-Dependency check on October 30: npm audit reports five pre-existing server dependency advisories (one moderate, three high, one critical) across body-parser, engine.io, nodemailer, proxy-addr, and qs. The newly added jose dependency is not listed. The client install also reported existing dependency advisories. These are not a new repository-wide security assessment or proof of exploitability; dependency remediation and re-testing remain a production-release gate. No broad framework or mail-library upgrade was bundled into this authentication change.
+Dependency check repeated October 30: npm audit reports five server dependency advisories (one moderate, three high, one critical) across body-parser, engine.io, nodemailer, proxy-addr, and qs. The newly added jose dependency is not listed. Client audit reports 33 advisories (nine low, eight moderate, fifteen high, one critical). These are not a new repository-wide security assessment or proof of exploitability; dependency remediation and re-testing remain a public-production-release gate. No broad framework or mail-library upgrade was bundled into this authentication change.
 
 Before releasing:
 
