@@ -1829,6 +1829,7 @@ function providerRoute(handler) {
 
 async function persistProviderState() {
   if (postgresStore) {
+    const staleWriter = postgresStore.runtimeStatus().lastSaveErrorCode === 'STALE_STATE_WRITE';
     if (!persistenceWriterReady || staleWriter) throw new Error('Sign-in storage is temporarily unavailable.');
     await postgresStore.saveCritical(storeSnapshot);
   } else saveStore();
