@@ -10,6 +10,7 @@ import { Bell, Bot, Gem, LockKeyhole, MessageCircle, Settings, ShoppingBag, Trop
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import type { GameState, Card, Grid, PlayerIdentity } from '../game/types';
+import { tablePilePresentation } from '../game/tablePresentation';
 import { chooseAiPeekTargets, executeAiTurn, planAiTurn } from '../game/ai';
 import {
   deal,
@@ -1164,6 +1165,7 @@ export default function GameScreen({ route, navigation }: Props) {
   );
 
   const isDrawOnlyTurn = state.mustDrawOnlyForPlayerIndex === state.currentPlayerIndex;
+  const tablePiles = tablePilePresentation(state, isOnline, held, activeSource);
   const isBonusDrawTurn = isDrawOnlyTurn;
   const isActiveGridVisible = bottomIndex === activeIndex;
   const canUsePiles = isHumanTurn && state.phase === 'turn' && !held && !state.pendingDecision && !activeSource && !selectedCell;
@@ -2056,12 +2058,12 @@ export default function GameScreen({ route, navigation }: Props) {
             <Piles
               drawCount={state.drawPile.length}
               topDiscard={state.topDiscard}
-              held={held}
+              held={tablePiles.held}
               metrics={tableLayout.pileMetrics}
               compact
               onDraw={onDraw}
               onTakeDiscard={onTakeDiscard}
-              activeSource={activeSource ?? activeAutoplayCueSource}
+              activeSource={tablePiles.activeSource ?? activeAutoplayCueSource}
               cardBackId={bottomCardBackId}
               disableDraw={!canUsePiles && !canSwitchDiscardToDraw}
               disableTake={!canUsePiles || isDrawOnlyTurn || !!state.pendingDecision || !state.topDiscard}

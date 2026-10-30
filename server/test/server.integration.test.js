@@ -1720,10 +1720,12 @@ test('auth, room readiness, authoritative intents, duplicate rejection, and held
         assert.equal(revealedState.game.players[revealedState.game.currentPlayerIndex].grid[0][2].faceUp, true);
         assert.equal(revealedState.game.viewerHeldCard.rank, draw.drawn.rank);
         assert.equal(revealedState.game.viewerHeldSource, 'draw');
-        const privateCardId = revealedState.game.pendingDecision.cardId;
+        const revealedCardId = revealedState.game.pendingDecision.cardId;
         const opponentState = await emitAck(otherSocket, 'room:join', { code });
-        assert.equal(opponentState.game.players[revealedState.game.currentPlayerIndex].grid[0][2].faceUp, false);
-        assert.equal(JSON.stringify(opponentState.game).includes(privateCardId), false);
+        assert.equal(opponentState.game.players[revealedState.game.currentPlayerIndex].grid[0][2].faceUp, true);
+        assert.equal(opponentState.game.pendingDecision.cardId, revealedCardId);
+        assert.equal(opponentState.game.tableHeld.card.id, draw.drawn.id);
+        assert.equal(opponentState.game.viewerHeldCard, null);
 
         const keepRevealed = await emitAck(reconnected, 'game:intent', {
           code,
@@ -1817,6 +1819,11 @@ test('auth, room readiness, authoritative intents, duplicate rejection, and held
         assert.equal(afterSwitch.game.viewerHeldSource, 'draw');
         assert.equal(afterSwitch.game.topDiscard.id, takeForSwitch.drawn.id);
         assert.notEqual(afterSwitch.game.viewerHeldCard.id, takeForSwitch.drawn.id);
+        const switchObserver = await emitAck(switchSocket === reconnected ? otherSocket : reconnected, 'room:join', { code });
+        assert.deepEqual(switchObserver.game.tableHeld, afterSwitch.game.tableHeld);
+        assert.equal(switchObserver.game.viewerHeldCard, null);
+        assert.equal(afterSwitch.game.tableHeld.source, 'draw');
+        assert.equal(afterSwitch.game.tableHeld.card.id, switchToDeck.drawn.id);
       } finally {
         reconnected.disconnect();
       }
@@ -2654,16 +2661,16 @@ test('release policy blocks obsolete builds while preserving update and recovery
   });
 });
 
-test('opening cards and completed turns broadcast immediately across mobile platform pairs', async t => {
-  for (const platforms of [['ios', 'android'], ['android', 'android'], ['ios', 'ios']]) {
+test('opening, draw, mid-turn reveal, and completed turns broadcast immediately to every player', async t => {
+  for (const platforms of [['ios', 'android'], ['android', 'android'], ['ios', 'ios'], ['ios', 'android', 'web'], ['ios', 'android', 'web', 'android']]) {
     await t.test(platforms.join(' vs '), async () => withServer(async baseUrl => {
-      const players = [await signup(baseUrl, 'SyncOne'), await signup(baseUrl, 'SyncTwo')];
+      const players = await Promise.all(platforms.map((_, index) => signup(baseUrl, `SyncPlayer${index}`)));
       const { room } = await json(await fetch(`${baseUrl}/rooms`, {
         method: 'POST', headers: authHeaders(players[0].token),
-        body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
+        body: JSON.stringify({ maxPlayers: players.length, rounds: 5 }),
       }));
       const code = room.code;
-      await json(await fetch(`${baseUrl}/rooms/${code}/join`, { method: 'POST', headers: authHeaders(players[1].token) }));
+      for (const player of players.slice(1)) await json(await fetch(`${baseUrl}/rooms/${code}/join`, { method: 'POST', headers: authHeaders(player.token) }));
       const sockets = players.map((player, index) => io(baseUrl, {
         transports: ['websocket'], forceNew: true, autoConnect: false,
         auth: { token: player.token, platform: platforms[index], build: platforms[index] === 'ios' ? 4 : 60, channel: 'playtest', version: '0.1.0' },
@@ -2689,45 +2696,79 @@ test('opening cards and completed turns broadcast immediately across mobile plat
             emitAck(sockets[index], 'game:intent', { code, actionId: `visibility-${++actionNumber}`, type, payload }), received,
           ]);
           assert.equal(ack.ok, true, ack.error);
-          assert.equal(snapshots[0].revision, snapshots[1].revision);
+          assert.ok(snapshots.every(view => view.revision === snapshots[0].revision));
+          assert.ok(snapshots.every(view => JSON.stringify(view.players) === JSON.stringify(snapshots[0].players)), 'every face-up grid is shared');
+          assert.ok(snapshots.every(view => JSON.stringify(view.tableHeld) === JSON.stringify(snapshots[0].tableHeld)), 'every viewer receives the same public held card');
           views = snapshots;
           return ack;
         }
-        for (const index of [0, 1]) {
+        for (const index of players.keys()) {
           for (const c of [0, 1]) {
             await act(index, 'peek', { r: 0, c });
             const ownerCard = views[index].players[index].grid[0][c];
             assert.equal(ownerCard.faceUp, true);
-            assert.deepEqual(views[1 - index].players[index].grid[0][c], ownerCard, 'opponent must receive the flipped card immediately');
-            assert.equal(views[1 - index].players[index].grid[0][2].faceUp, false);
+            for (const view of views) {
+              assert.deepEqual(view.players[index].grid[0][c], ownerCard, 'every opponent sees the flip immediately');
+              assert.equal(view.players[index].grid[0][2].faceUp, false);
+            }
           }
         }
         assert.equal(views[0].phase, 'turn');
         assert.deepEqual(views[0].players, views[1].players);
         const actor = views[0].currentPlayerIndex;
-        const observer = 1 - actor;
+        const observer = (actor + 1) % players.length;
         const draw = await act(actor, 'draw');
         assert.deepEqual(views[actor].viewerHeldCard, draw.drawn);
         assert.equal(views[observer].viewerHeldCard, null);
-        assert.equal(JSON.stringify(views[observer]).includes(draw.drawn.id), false);
+        assert.deepEqual(views[observer].tableHeld, { playerIndex: actor, card: draw.drawn, source: 'draw' });
+        assert.equal(views[observer].currentPlayerIndex, actor);
+        const denied = await emitAck(sockets[observer], 'game:intent', { code, actionId: 'observer-cannot-play-public-card', type: 'replace', payload: { r: 0, c: 0 } });
+        assert.ok(denied.error, 'public visibility never permits an opponent to play the held card');
         assert.equal(views[actor].drawPile.length, views[observer].drawPile.length);
         await act(actor, 'reveal', { r: 1, c: 1 });
-        const privateCard = views[actor].players[actor].grid[1][1];
-        assert.equal(privateCard.faceUp, true);
-        assert.equal(views[observer].players[actor].grid[1][1].faceUp, false);
-        assert.equal(JSON.stringify(views[observer]).includes(privateCard.id), false);
-        // Keep the examined grid card; it and the discarded draw become public together.
+        const revealedCard = views[actor].players[actor].grid[1][1];
+        assert.equal(revealedCard.faceUp, true);
+        assert.deepEqual(views[observer].players[actor].grid[1][1], revealedCard);
+        assert.equal(views[observer].pendingDecision.cardId, revealedCard.id);
+        assert.equal(views[observer].currentPlayerIndex, actor, 'reveal arrives before decision/turn completion');
+        assert.equal(views[observer].players[actor].grid[2][2].faceUp, false);
+        // Reconnect the observer mid-decision, not only after the turn finishes.
+        sockets[observer].disconnect();
+        reconnect = io(baseUrl, { transports: ['websocket'], forceNew: true, autoConnect: false, auth: { token: players[observer].token, platform: platforms[observer] } });
+        const midTurnConnected = once(reconnect, 'connect');
+        reconnect.connect();
+        await midTurnConnected;
+        const midTurn = await emitAck(reconnect, 'room:join', { code });
+        assert.deepEqual(midTurn.game.tableHeld, views[observer].tableHeld);
+        assert.deepEqual(midTurn.game.players, views[observer].players);
+        sockets[observer] = reconnect;
+        // Keep the already-public grid card; the draw becomes the discard.
         await act(actor, 'discard');
-        assert.equal(views[observer].players[actor].grid[1][1].id, privateCard.id);
+        assert.equal(views[observer].players[actor].grid[1][1].id, revealedCard.id);
         assert.equal(views[observer].topDiscard.id, draw.drawn.id);
         assert.equal(views[observer].pendingDecision, null);
+        assert.equal(views[observer].tableHeld, null);
         assert.deepEqual(views[0].players, views[1].players);
         assert.equal(views[0].currentPlayerIndex, observer);
         // Also cover replacing an already face-up opening card from the discard pile.
         await act(observer, 'takeDiscard');
+        assert.deepEqual(views[actor].tableHeld, { playerIndex: observer, card: draw.drawn, source: 'discard' });
         await act(observer, 'replace', { r: 0, c: 0 });
         assert.equal(views[actor].players[observer].grid[0][0].id, draw.drawn.id);
+        assert.equal(views[actor].tableHeld, null);
         assert.deepEqual(views[0].players, views[1].players);
+        // Exercise the other keep/replace outcome before ending its turn.
+        const nextActor = views[0].currentPlayerIndex;
+        const secondDraw = await act(nextActor, 'draw');
+        await act(nextActor, 'reveal', { r: 2, c: 2 });
+        const secondRevealed = views[0].players[nextActor].grid[2][2];
+        assert.equal(secondRevealed.faceUp, true);
+        await act(nextActor, 'replace', { r: 2, c: 2 });
+        for (const view of views) {
+          assert.equal(view.tableHeld, null);
+          assert.equal(view.players[nextActor].grid[2][2].id, secondDraw.drawn.id);
+          assert.equal(view.topDiscard.id, secondRevealed.id);
+        }
         const expected = views[actor];
         sockets[actor].disconnect();
         reconnect = io(baseUrl, { transports: ['websocket'], forceNew: true, autoConnect: false, auth: { token: players[actor].token, platform: platforms[actor], build: platforms[actor] === 'ios' ? 4 : 60 } });

@@ -3353,13 +3353,17 @@ function queueDailyBonusPushes(now = Date.now()) {
 }
 
 function gameViewFor(room, userId) {
+  const activePlayerIndex = room.game.currentPlayerIndex;
+  const activeUserId = room.game.players[activePlayerIndex]?.userId;
+  const activeHeldCard = room.held.get(activeUserId);
   const view = publicGameState(
     room.game,
     userId,
     room.held.get(userId) || null,
     room.heldSource?.get(userId) || null,
     room.heldMustReplace?.get(userId) || false,
-    room.heldCanDiscard?.get(userId) || false
+    room.heldCanDiscard?.get(userId) || false,
+    activeHeldCard ? { playerIndex: activePlayerIndex, card: activeHeldCard, source: room.heldSource?.get(activeUserId) } : null
   );
   const playerAfk = afkPlayerState(room, userId);
   return {

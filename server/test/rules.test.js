@@ -527,7 +527,7 @@ test('timer-completed opening flips are public for sequential and simultaneous p
   }
 });
 
-test('legacy opening privacy markers cannot hide public cards or expose an active private decision', () => {
+test('legacy privacy markers cannot hide face-up opening or mid-turn cards', () => {
   let state = createGameState([
     { userId: 'u1', displayName: 'One' },
     { userId: 'u2', displayName: 'Two' },
@@ -546,17 +546,19 @@ test('legacy opening privacy markers cannot hide public cards or expose an activ
   state.currentPlayerIndex = 0;
   state.players[0].grid[1][1] = card('4', { id: 'private-four', faceUp: false });
   state = revealGridCardForDecision(state, 0, 1, 1).state;
-  // The active decision, not a stale per-card marker, defines temporary privacy.
-  delete state.players[0].grid[1][1].visibleToUserId;
+  // An in-flight room from the previous version may still carry this marker.
+  state.players[0].grid[1][1].visibleToUserId = 'u1';
   const opponent = publicGameState(state, 'u2');
   assert.equal(opponent.players[0].grid[0][0].rank, '8');
-  assert.equal(opponent.players[0].grid[1][1].faceUp, false);
-  assert.equal(JSON.stringify(opponent).includes('private-four'), false);
+  assert.equal(opponent.players[0].grid[1][1].faceUp, true);
+  assert.equal(opponent.players[0].grid[1][1].id, 'private-four');
+  assert.equal(opponent.players[0].grid[1][1].visibleToUserId, undefined);
+  assert.equal(opponent.pendingDecision.cardId, 'private-four');
   const resolved = resolvePendingGridDecision(state, 0, card('A'), 'revealed').state;
   assert.equal(publicGameState(resolved, 'u2').players[0].grid[1][1].rank, '4');
 });
 
-test('temporary private reveals are visible only to the deciding player', () => {
+test('mid-turn grid reveals are immediately public while untouched cards stay hidden', () => {
   let state = createGameState([
     { userId: 'u1', displayName: 'One' },
     { userId: 'u2', displayName: 'Two' },
@@ -572,10 +574,42 @@ test('temporary private reveals are visible only to the deciding player', () => 
 
   assert.equal(ownerView.players[0].grid[0][0].rank, 'Q');
   assert.equal(ownerView.players[0].grid[0][0].id, 'secret-queen-id');
-  assert.equal(opponentView.players[0].grid[0][0].faceUp, false);
-  assert.equal(opponentView.players[0].grid[0][0].rank, 'A');
-  assert.equal(opponentView.players[0].grid[0][0].id, 'hidden-u1-0-0');
-  assert.equal(JSON.stringify(opponentView).includes('secret-queen-id'), false);
+  assert.deepEqual(opponentView.players, ownerView.players);
+  assert.deepEqual(opponentView.pendingDecision, ownerView.pendingDecision);
+  assert.equal(opponentView.players[0].grid[0][0].visibleToUserId, undefined);
+  assert.equal(reveal.state.players[0].grid[0][0].visibleToUserId, undefined);
+  assert.equal(opponentView.players[0].grid[0][1].faceUp, false);
+  assert.equal(opponentView.players[0].grid[0][1].id, 'hidden-u1-0-1');
+  assert.equal(opponentView.currentPlayerIndex, 0, 'visible before the turn ends');
+});
+
+test('public held-card presentation is separate from ownership and limited to the active turn', () => {
+  let state = startTurns(createGameState([
+    { userId: 'u1', displayName: 'One' }, { userId: 'u2', displayName: 'Two' },
+  ]));
+  state.currentPlayerIndex = 0;
+  const held = card('9', { id: 'public-draw', visibleToUserId: 'u1' });
+  for (const source of ['draw', 'discard']) {
+    const tableHeld = { playerIndex: 0, card: held, source };
+    const view = publicGameState(state, 'u2', null, null, false, false, tableHeld);
+    assert.equal(view.tableHeld.card.id, held.id);
+    assert.equal(view.tableHeld.card.faceUp, true);
+    assert.equal(view.tableHeld.card.visibleToUserId, undefined);
+    assert.equal(view.tableHeld.source, source);
+    assert.equal(view.viewerHeldCard, null, 'seeing the card must not transfer ownership');
+    assert.equal(view.viewerHeldCanDiscard, false);
+    assert.equal(held.visibleToUserId, 'u1', 'serialization must not mutate held state');
+    for (const hidden of [...state.drawPile, ...state.players.flatMap(p => p.grid.flat()).filter(c => !c.faceUp)]) {
+      assert.equal(JSON.stringify(view).includes(hidden.id), false);
+    }
+    for (const phase of ['peek', 'roundReveal', 'roundSummary', 'roundEnd']) {
+      assert.equal(publicGameState({ ...state, phase }, 'u2', null, null, false, false, tableHeld).tableHeld, null);
+    }
+    assert.equal(publicGameState({ ...state, completed: true }, 'u2', null, null, false, false, tableHeld).tableHeld, null);
+    assert.equal(publicGameState({ ...state, currentPlayerIndex: 1 }, 'u2', null, null, false, false, tableHeld).tableHeld, null);
+  }
+  state.tableHeld = { playerIndex: 0, card: held, source: 'draw' };
+  assert.equal(publicGameState(state, 'u2').tableHeld, null, 'never reuse a stale serialized display card');
 });
 
 test('extra turns require drawing from the deck', () => {

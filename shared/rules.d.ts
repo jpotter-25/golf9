@@ -8,6 +8,7 @@ export type DisplayRankEmblem = { playerCount: 2 | 3 | 4; source: 'current' | 'c
 export type PlayerIdentity = { userId: string; displayName?: string; name?: string; avatarInitial?: string; displayRankEmblem?: DisplayRankEmblem | null; cosmetics?: EquippedCosmetics };
 export type Player = { id: string; userId: string; name: string; avatarInitial?: string; displayRankEmblem?: DisplayRankEmblem | null; cosmetics?: EquippedCosmetics; grid: Grid; score: number; peekFlips: number; connected?: boolean };
 export type PendingDecision = { playerIndex: number; r: number; c: number; cardId: string };
+export type TableHeldCard = { playerIndex: number; card: Card; source: 'draw' | 'discard' };
 export type GameState = {
   id: string; players: Player[]; currentPlayerIndex: number; drawPile: Card[]; discardPile: Card[];
   phase: 'peek' | 'turn' | 'roundReveal' | 'roundSummary' | 'roundEnd'; topDiscard: Card | null; turnEndsAt?: number; peekTurnIndex?: number;
@@ -15,6 +16,7 @@ export type GameState = {
   sweepActive?: boolean; sweepStarterIndex?: number | null; completed?: boolean; revision?: number; lastRoundScores?: number[];
   turnSerial?: number; lastRoundNumber?: number; lastRoundTotals?: number[]; pendingDecision?: PendingDecision | null;
   viewerHeldCard?: Card | null; viewerHeldSource?: 'draw' | 'discard' | null; viewerHeldMustReplace?: boolean; viewerHeldCanDiscard?: boolean; simultaneousPeek?: boolean;
+  tableHeld?: TableHeldCard | null;
   viewerAutoplay?: {
     active: boolean;
     consecutiveMisses: number;
@@ -62,4 +64,4 @@ export function continueAfterRoundSummary(state: GameState): { state: GameState;
 export function resolveExpiredTimers(state: GameState): GameState;
 export function isRoundOver(state: GameState): boolean;
 export function pickTarget(grid: Grid, incoming: Card): { r: number; c: number };
-export function publicGameState(state: GameState, viewerUserId?: string | null, viewerHeldCard?: Card | null, viewerHeldSource?: 'draw' | 'discard' | null, viewerHeldMustReplace?: boolean, viewerHeldCanDiscard?: boolean): GameState;
+export function publicGameState(state: GameState, viewerUserId?: string | null, viewerHeldCard?: Card | null, viewerHeldSource?: 'draw' | 'discard' | null, viewerHeldMustReplace?: boolean, viewerHeldCanDiscard?: boolean, tableHeld?: TableHeldCard | null): GameState;

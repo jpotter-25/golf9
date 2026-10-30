@@ -492,7 +492,8 @@ export function revealGridCardForDecision(state, playerIndex, r, c) {
   if (!player || !card) return { state: next, error: 'Invalid grid card.' };
   if (card.faceUp) return { state: next, error: 'Card is already face-up.' };
   card.faceUp = true;
-  card.visibleToUserId = player.userId;
+  // A revealed grid card is public immediately, before the keep/replace choice.
+  delete card.visibleToUserId;
   next.pendingDecision = { playerIndex, r, c, cardId: card.id };
   next.revision = (next.revision || 0) + 1;
   return { state: next };
@@ -694,7 +695,8 @@ export function publicGameState(
   viewerHeldCard = null,
   viewerHeldSource = null,
   viewerHeldMustReplace = false,
-  viewerHeldCanDiscard = false
+  viewerHeldCanDiscard = false,
+  tableHeld = null
 ) {
   const next = cloneState(state);
   next.drawPile = Array.from({ length: next.drawPile.length }, (_, index) => ({ id: `draw-${index}`, suit: '♠', rank: 'A', faceUp: false }));
@@ -702,19 +704,23 @@ export function publicGameState(
   next.viewerHeldSource = viewerHeldSource;
   next.viewerHeldMustReplace = !!viewerHeldMustReplace;
   next.viewerHeldCanDiscard = !!viewerHeldCanDiscard;
-  next.players = next.players.map((player, playerIndex) => ({
+  // Display-only shared card; viewerHeld* continues to describe ownership/actions.
+  next.tableHeld = null;
+  if (next.phase === 'turn' && !next.completed && tableHeld?.card
+      && tableHeld.playerIndex === next.currentPlayerIndex
+      && next.players[tableHeld.playerIndex]
+      && ['draw', 'discard'].includes(tableHeld.source)) {
+    const { id, rank, suit } = tableHeld.card;
+    next.tableHeld = { playerIndex: tableHeld.playerIndex, source: tableHeld.source,
+      card: { id, rank, suit, faceUp: true } };
+  }
+  next.players = next.players.map(player => ({
     ...player,
     cosmetics: sharedPlayerCosmetics(player.cosmetics),
     grid: player.grid.map((row, rowIndex) => row.map((card, columnIndex) => {
-      // Only the active keep/replace examination is private. Older room snapshots
-      // may still carry owner-only markers on public opening cards: do not let
-      // those stale markers hide already face-up cards for the rest of the round.
-      const privatelyHidden = next.phase === 'turn'
-        && next.pendingDecision?.playerIndex === playerIndex
-        && next.pendingDecision.r === rowIndex
-        && next.pendingDecision.c === columnIndex
-        && player.userId !== viewerUserId;
-      if (!card || (card.faceUp && !privatelyHidden)) {
+      // Face-up means public, including an unfinished keep/replace decision.
+      // Ignore obsolete owner-only markers without modifying authoritative state.
+      if (!card || card.faceUp) {
         if (card) delete card.visibleToUserId;
         return card;
       }
@@ -722,10 +728,9 @@ export function publicGameState(
     })),
   }));
   if (next.pendingDecision) {
-    const decidingPlayer = next.players[next.pendingDecision.playerIndex];
-    if (decidingPlayer?.userId !== viewerUserId) {
-      next.pendingDecision.cardId = `hidden-${decidingPlayer?.userId || 'player'}-${next.pendingDecision.r}-${next.pendingDecision.c}`;
-    }
+    // Derive the reference from the projected grid, never bypass its hidden mask.
+    const { playerIndex, r, c } = next.pendingDecision;
+    next.pendingDecision.cardId = next.players[playerIndex]?.grid?.[r]?.[c]?.id ?? null;
   }
   return next;
 }
