@@ -26,6 +26,14 @@ plugins.push('expo-web-browser');
 plugins.push([
   'expo-build-properties',
   {
+    ios: {
+      // Google Sign-In's AppCheckCore Swift dependency needs these module maps.
+      // Scope this to its dependencies; do not change all pods to frameworks.
+      extraPods: [
+        { name: 'GoogleUtilities', modular_headers: true },
+        { name: 'RecaptchaInterop', modular_headers: true },
+      ],
+    },
     android: {
       enableMinifyInReleaseBuilds: true,
       enableShrinkResourcesInReleaseBuilds: true,
