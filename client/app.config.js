@@ -83,7 +83,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.potterwell.ninebelow',
-      buildNumber: '6',
+      buildNumber: '7',
       usesAppleSignIn: true,
       config: { usesNonExemptEncryption: false },
       privacyManifests: {
@@ -97,7 +97,7 @@ module.exports = {
     },
     android: {
       package: 'com.potterwell.ninebelow',
-      versionCode: 62,
+      versionCode: 63,
       permissions: [],
       blockedPermissions: [
         'com.google.android.gms.permission.AD_ID',

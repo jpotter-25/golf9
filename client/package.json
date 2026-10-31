@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit",
     "test:browser": "node --test test/browserAlert.test.cjs",
     "test:native-codegen": "node --test test/nativeCodegen.test.cjs",
-    "test:social-auth": "node --test test/socialAuth.test.cjs",
+    "test:social-auth": "node --test test/socialAuth.test.cjs test/socialButtons.test.cjs",
     "test:header": "node --test test/coinBalance.test.cjs",
     "test:ranked": "node --test test/rankedLayout.test.cjs",
     "test:table": "node --test test/tableVisibility.test.cjs"

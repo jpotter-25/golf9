@@ -485,13 +485,17 @@ app.use((req, res, next) => {
   return next();
 });
 app.use((req, res, next) => {
+  // Railway probes new deployments, but does not necessarily probe a restarted
+  // process. Routed traffic must also be able to finish the delayed handoff.
+  scheduleRailwayWriterHandoff();
   const staleWriter = postgresStore?.runtimeStatus().lastSaveErrorCode === 'STALE_STATE_WRITE';
   if (staleWriter && !req.path.startsWith('/health')) {
     return res.status(503).json({ error: 'This server instance has been fenced from persistent writes. Retry shortly.' });
   }
   const readOnlyRequest = ['GET', 'HEAD', 'OPTIONS'].includes(req.method);
   if (!persistenceWriterReady && !readOnlyRequest && !req.path.startsWith('/health')) {
-    return res.status(503).json({ error: 'Persistent storage is completing a deployment handoff. Retry shortly.' });
+    res.setHeader('Retry-After', '5');
+    return res.status(503).json({ code: 'PERSISTENCE_HANDOFF_PENDING', error: 'Nine Below is reconnecting to storage after a server restart. Please try again in a few seconds.' });
   }
   return next();
 });
@@ -701,6 +705,8 @@ let storeReady = false;
 let storeLoadError = null;
 let persistenceWriterReady = !RAILWAY_WRITER_HANDOFF_REQUIRED;
 let writerHandoffTimer = null;
+let writerHandoffInProgress = false;
+let persistenceShuttingDown = false;
 let fatalPersistenceExitScheduled = false;
 let databaseHealthCache = { checkedAt: 0, result: null, pending: null };
 let smtpHealthCache = { checkedAt: 0, result: null, pending: null };
@@ -8327,6 +8333,7 @@ function socketAuth(socket) {
 }
 
 io.use((socket, next) => {
+  scheduleRailwayWriterHandoff();
   if (!persistenceWriterReady) return next(new Error('Persistent storage is completing a deployment handoff.'));
   const auth = socketAuth(socket);
   if (!auth) return next(new Error('Authentication required.'));
@@ -8841,13 +8848,26 @@ function prepareLoadedPersistenceState() {
 }
 
 function scheduleRailwayWriterHandoff() {
-  if (!RAILWAY_WRITER_HANDOFF_REQUIRED || persistenceWriterReady || writerHandoffTimer) return;
+  if (!RAILWAY_WRITER_HANDOFF_REQUIRED || persistenceWriterReady || writerHandoffTimer
+    || writerHandoffInProgress || persistenceShuttingDown || fatalPersistenceExitScheduled) return;
   console.log(`Railway persistence writer handoff requested; reloading authoritative state in ${WRITER_HANDOFF_DELAY_MS} ms.`);
   writerHandoffTimer = setTimeout(async () => {
     writerHandoffTimer = null;
+    writerHandoffInProgress = true;
+    let deadline;
     try {
       storeMigrationPending = false;
-      await loadStore();
+      await Promise.race([
+        loadStore(),
+        new Promise((_, reject) => {
+          deadline = setTimeout(() => reject(Object.assign(new Error('Writer handoff timed out.'), {
+            code: 'WRITER_HANDOFF_TIMEOUT',
+          })), 30_000);
+        }),
+      ]);
+      // A signal or fatal save while the reload was pending must never reopen
+      // the write gate. Compare-and-swap fencing remains authoritative.
+      if (persistenceShuttingDown || fatalPersistenceExitScheduled) return;
       const saveRequired = prepareLoadedPersistenceState();
       persistenceWriterReady = true;
       storeReady = true;
@@ -8855,6 +8875,8 @@ function scheduleRailwayWriterHandoff() {
       if (saveRequired) saveStore();
       console.log('Railway persistence writer handoff completed.');
     } catch (error) {
+      if (persistenceShuttingDown || fatalPersistenceExitScheduled) return;
+      fatalPersistenceExitScheduled = true;
       storeReady = false;
       persistenceWriterReady = false;
       storeLoadError = error;
@@ -8862,6 +8884,9 @@ function scheduleRailwayWriterHandoff() {
         code: safeHealthErrorCode(error?.code),
       });
       setTimeout(() => process.exit(1), 100).unref();
+    } finally {
+      clearTimeout(deadline);
+      writerHandoffInProgress = false;
     }
   }, WRITER_HANDOFF_DELAY_MS);
 }
@@ -8877,7 +8902,7 @@ async function initializePersistence() {
       storeReady = false;
       persistenceWriterReady = false;
       storeLoadError = null;
-      console.log('Nine Below persistence loaded for Railway handoff; waiting for the deployment health probe.');
+      console.log('Nine Below persistence loaded for Railway handoff; waiting for a deployment probe or routed traffic.');
       return;
     }
     const saveRequired = prepareLoadedPersistenceState();
@@ -8910,6 +8935,7 @@ async function startServer() {
 }
 
 async function shutdown() {
+  persistenceShuttingDown = true;
   clearInterval(maintenanceTimer);
   if (writerHandoffTimer) {
     clearTimeout(writerHandoffTimer);

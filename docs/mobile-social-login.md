@@ -2,6 +2,18 @@
 
 ## Status and scope
 
+### Latest: restart recovery and neutral buttons
+
+The October 30 production login outage was shared storage readiness, not a Google, Apple, or Facebook credential failure. Railway deployment `b7e1a365-a398-44ed-9756-7097849b7a10` logs show a handoff completion at 19:05:21 CDT, a `STALE_STATE_WRITE` fence and restart at 19:05:22, then a process waiting for a deployment health probe from 19:05:24 until a manual health request around 20:05:59. A restarted process was not receiving another deployment probe.
+
+Ordinary HTTP requests and Socket.IO reconnects now initiate the same delayed authoritative reload as the deployment probe. Recovery is single-flight even while the database read is pending, bounded to 30 seconds, and cannot reopen writes after shutdown or fatal fencing. Pending mutations return 503 with `Retry-After` and `PERSISTENCE_HANDOFF_PENDING` before their handlers run. PostgreSQL CAS revision fencing, TLS certificate validation, and authentication checks remain intact. A transient deployment conflict can still cause a safe restart; it no longer requires someone to manually visit `/health` to unstick the restarted process. Operate one Railway replica; this is not multi-writer support.
+
+Source targets iOS build 7 / Android versionCode 63 for equal light provider buttons, 52-point baseline height, matching corner radius, consistent 12-point gaps, and reduced label weight. iOS retains Apple's native white authentication button. The Google mark is the unmodified asset downloaded from [Google's official branding page](https://developers.google.com/identity/branding-guidelines), asset URL `https://developers.google.com/static/identity/images/g-logo.png`. No tracking or provider scope changes. Package completion and store availability must be verified separately; the prior distributed iOS build is 6 and Android 62 was submitted for review.
+
+Meta app `1315258740282659` was rechecked live: **Unpublished**, **Business verification required**, **Publish disabled**. `FACEBOOK_IOS_LOGIN_ENABLED` stays false until this is resolved and Limited Login is tested. Do not assign ordinary testers developer roles as a workaround. Android Facebook access for existing app-role accounts does not prove general tester access.
+
+Verification: 269 server tests and 34 client tests pass, including eight actual handoff-adapter/ingress regressions and three provider-button tests. Client lint and typecheck pass. Visual checks cover actual Android/web button components at 320px and 375px; native iOS rendering and real-device OAuth still require device acceptance. Earlier sections below record previous releases, not current distribution status.
+
 Implemented in source: Google and Facebook on iOS, Sign in with Apple on iOS and Android, account linking, fresh-provider verification for deletion, and Apple token revocation. Browser login remains Nine Below display name/password. All platforms still use the same player database and authoritative game server.
 
 **iOS 0.1.0 (3) is approved and available to the existing TestFlight group; Android versionCode 60 is packaged but not uploaded to Google Play.** Physical-device launch/sign-in acceptance remains pending. Build 2 was the previously distributed iOS version, which the owner reported successfully opening to the login screen on October 30. This is a beta rollout, not a public App Store or production release.

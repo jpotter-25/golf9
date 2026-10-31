@@ -12,6 +12,8 @@ import { SERVER_URL } from '../config';
 import * as api from '../services/api';
 import { availableSocialProviders } from '../services/socialAuth';
 import { AppleSignInButton } from '../components/AppleSignInButton';
+import { SocialSignInButton } from '../components/SocialSignInButton';
+import { socialButtonStyles } from '../components/socialButtonStyles';
 import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
@@ -207,9 +209,11 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
               <Text style={styles.dividerText}>OR</Text>
               <View style={styles.dividerLine} />
             </View>
-            {providers.apple ? <AppleSignInButton disabled={loading} onPress={() => startSocial('apple')} /> : null}
-            {googleEnabled ? <SocialButton provider="google" disabled={loading} onPress={() => startSocial('google')} /> : null}
-            {facebookEnabled ? <SocialButton provider="facebook" disabled={loading} onPress={() => startSocial('facebook')} /> : null}
+            <View style={socialButtonStyles.group}>
+              {providers.apple ? <AppleSignInButton disabled={loading} onPress={() => startSocial('apple')} /> : null}
+              {googleEnabled ? <SocialSignInButton provider="google" disabled={loading} onPress={() => startSocial('google')} /> : null}
+              {facebookEnabled ? <SocialSignInButton provider="facebook" disabled={loading} onPress={() => startSocial('facebook')} /> : null}
+            </View>
           </>
         ) : null}
       </PremiumPanel>
@@ -271,18 +275,6 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
 
 export default LoginScreen;
 
-function SocialButton({ provider, disabled, onPress }: { provider: 'google' | 'facebook'; disabled: boolean; onPress: () => void }) {
-  const isGoogle = provider === 'google';
-  return (
-    <Pressable style={[styles.socialButton, disabled && styles.disabled]} disabled={disabled} onPress={onPress}>
-      <View style={[styles.socialMark, isGoogle ? styles.googleMark : styles.facebookMark]}>
-        <Text style={[styles.socialMarkText, !isGoogle && styles.facebookMarkText]}>{isGoogle ? 'G' : 'f'}</Text>
-      </View>
-      <Text style={styles.socialButtonText}>Continue with {isGoogle ? 'Google' : 'Facebook'}</Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   heroIcon: {
     width: 54,
@@ -332,27 +324,6 @@ const styles = StyleSheet.create({
   dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 16 },
   dividerLine: { flex: 1, height: 1, backgroundColor: ui.border.soft },
   dividerText: { color: ui.text.muted, fontSize: 11, fontWeight: '900' },
-  socialButton: {
-    width: '100%',
-    minHeight: 50,
-    borderRadius: ui.radius.md,
-    borderWidth: 1,
-    borderColor: ui.border.soft,
-    backgroundColor: ui.surface.base,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    marginBottom: 10,
-    paddingHorizontal: 12,
-  },
-  socialMark: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  googleMark: { backgroundColor: '#F4F7FF' },
-  facebookMark: { backgroundColor: '#1877F2' },
-  socialMarkText: { color: ui.text.inverse, fontSize: 17, fontWeight: '900' },
-  facebookMarkText: { color: ui.text.primary },
-  socialButtonText: { color: ui.text.primary, fontSize: 14, fontWeight: '900' },
-  disabled: { opacity: 0.45 },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(3, 6, 18, 0.74)', alignItems: 'center', justifyContent: 'center', padding: 22 },
   modalCard: { width: '100%', maxWidth: 420, borderRadius: ui.radius.lg, borderWidth: 1, borderColor: ui.border.gold, backgroundColor: ui.surface.panel, padding: 18 },
   modalTitle: { color: ui.text.primary, fontSize: 24, fontWeight: '900', textAlign: 'center' },
