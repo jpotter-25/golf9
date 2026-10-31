@@ -169,6 +169,7 @@ export class PostgresStore {
     this.pendingSave = null;
     this.pendingStateFactory = null;
     this.lastSave = Promise.resolve();
+    this.backgroundSaveQueued = false;
     this.lastSuccessfulSaveAt = null;
     this.lastFailedSaveAt = null;
     this.lastSaveErrorCode = null;
@@ -389,9 +390,20 @@ export class PostgresStore {
         const mergeByUpdatedAt = ['early_access_signups', 'early_access_campaigns', 'early_access_deliveries'].includes(table);
         const appendOnly = table === 'admin_audit';
         if (!mergeByUpdatedAt && !appendOnly) await client.query(`DELETE FROM golf9_${table}`);
+        const rows = [];
         for (const item of collections[table]) {
           const id = itemId(item, key);
           if (!id) continue;
+          rows.push([String(id), json(item)]);
+        }
+        // Keep timestamp-merged early-access rows sequential so duplicate IDs
+        // retain the existing last/newest-update semantics. Ordinary snapshots
+        // and append-only audit rows can be inserted in bounded batches instead
+        // of paying a database round trip for every account/catalog/audit item.
+        const batchSize = mergeByUpdatedAt ? 1 : 200;
+        for (let offset = 0; offset < rows.length; offset += batchSize) {
+          const batch = rows.slice(offset, offset + batchSize);
+          const values = batch.map((_, index) => `($${index * 2 + 1}, $${index * 2 + 2}::jsonb, NOW())`).join(', ');
           const conflictClause = mergeByUpdatedAt
             ? ` ON CONFLICT (${key}) DO UPDATE
                   SET data = EXCLUDED.data, updated_at = NOW()
@@ -399,8 +411,8 @@ export class PostgresStore {
                    <= COALESCE((EXCLUDED.data->>'updatedAt')::numeric, 0)`
             : appendOnly ? ` ON CONFLICT (${key}) DO NOTHING` : '';
           await client.query(
-            `INSERT INTO golf9_${table} (${key}, data, updated_at) VALUES ($1, $2::jsonb, NOW())${conflictClause}`,
-            [String(id), json(item)]
+            `INSERT INTO golf9_${table} (${key}, data, updated_at) VALUES ${values}${conflictClause}`,
+            batch.flat()
           );
         }
       }
@@ -608,34 +620,34 @@ export class PostgresStore {
     this.pendingStateFactory = stateFactory;
     this.pendingSave = setTimeout(() => {
       this.pendingSave = null;
-      const snapshot = this.pendingStateFactory();
-      this.pendingStateFactory = null;
-      this.lastSave = this.lastSave
-        .then(() => this.save(snapshot))
-        .then(() => this.recordSaveSuccess())
-        .catch(error => {
-          this.recordSaveFailure(error);
-          console.error('Postgres save failed:', error);
-        });
+      this.queueBackgroundSave();
     }, Number(process.env.DATABASE_SAVE_DEBOUNCE_MS || 150));
+  }
+
+  queueBackgroundSave() {
+    if (this.backgroundSaveQueued) return;
+    this.backgroundSaveQueued = true;
+    this.lastSave = this.lastSave.then(async () => {
+      this.backgroundSaveQueued = false;
+      // Capture only when this write can actually begin. Repeated background
+      // saves coalesce into one latest-state write, not a backlog of stale copies.
+      const factory = this.pendingStateFactory;
+      this.pendingStateFactory = null;
+      if (!factory) return;
+      await this.save(factory());
+      this.recordSaveSuccess();
+    }).catch(error => {
+      this.recordSaveFailure(error);
+      console.error('Postgres save failed:', error);
+    });
   }
 
   async flush() {
     if (this.pendingSave) {
       clearTimeout(this.pendingSave);
       this.pendingSave = null;
-      const snapshot = this.pendingStateFactory?.();
-      this.pendingStateFactory = null;
-      if (snapshot) {
-        this.lastSave = this.lastSave
-          .then(() => this.save(snapshot))
-          .then(() => this.recordSaveSuccess())
-          .catch(error => {
-            this.recordSaveFailure(error);
-            console.error('Postgres save failed:', error);
-          });
-      }
     }
+    if (this.pendingStateFactory) this.queueBackgroundSave();
     await this.lastSave;
   }
 

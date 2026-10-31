@@ -21,6 +21,86 @@ test('critical auth saves cancel debounce, serialize current snapshots, and prop
   assert.equal(store.lastSaveErrorCode, 'TEST_WRITE_FAILURE');
 });
 
+test('background saves coalesce while blocked and snapshot the latest state when execution starts', async () => {
+  const store = new PostgresStore({});
+  const snapshots = [];
+  let unblock;
+  store.lastSave = new Promise(resolve => { unblock = resolve; });
+  store.save = async snapshot => snapshots.push(snapshot);
+  let revision = 0;
+  for (let i = 0; i < 100; i++) {
+    revision++;
+    store.pendingStateFactory = () => ({ revision });
+    store.queueBackgroundSave();
+  }
+  unblock();
+  await store.flush();
+  assert.deepEqual(snapshots, [{ revision: 100 }]);
+  assert.equal(store.pendingStateFactory, null);
+  assert.equal(store.backgroundSaveQueued, false);
+});
+
+test('critical auth replaces a queued background snapshot and still waits for durable commit', async () => {
+  const store = new PostgresStore({});
+  const snapshots = [];
+  let unblock;
+  store.lastSave = new Promise(resolve => { unblock = resolve; });
+  store.save = async snapshot => snapshots.push(snapshot);
+  store.pendingStateFactory = () => ({ obsolete: true });
+  store.queueBackgroundSave();
+  const critical = store.saveCritical(() => ({ tokenConsumed: true }));
+  assert.deepEqual(snapshots, []);
+  unblock(); await critical;
+  assert.deepEqual(snapshots, [{ tokenConsumed: true }]);
+});
+
+test('snapshot inserts batch ordinary and audit rows without changing merge or transaction semantics', async () => {
+  const queries = [];
+  const store = new PostgresStore({ connect: async () => ({
+    query: async (sql, params = []) => { queries.push({ sql, params }); return { rows: [{ value: 4 }] }; },
+    release() {},
+  }) });
+  store.migrate = async () => {};
+  store.stateRevision = 4;
+  const users = Array.from({ length: 401 }, (_, i) => ({ userId: `user-${i}`, displayName: `name-'${i}` }));
+  await store.save({ users, adminAudit: [{ auditId: 'a' }, { auditId: 'a' }],
+    earlyAccessSignups: [{ emailHash: 'hash', updatedAt: 10 }, { emailHash: 'hash', updatedAt: 11 }] });
+  const batches = queries.filter(q => /INSERT INTO golf9_users /.test(q.sql));
+  assert.equal(batches.length, 3);
+  assert.deepEqual(batches.map(q => q.params.length), [400, 400, 2]);
+  const stored = batches.flatMap(q => q.params.filter((_, index) => index % 2 === 1).map(JSON.parse));
+  assert.deepEqual(stored, users);
+  assert.ok(batches.every(q => !q.sql.includes("name-'")), 'Data stays parameterized');
+  const audit = queries.find(q => /INSERT INTO golf9_admin_audit /.test(q.sql));
+  assert.match(audit.sql, /ON CONFLICT \(audit_id\) DO NOTHING/);
+  assert.ok(!queries.some(q => /DELETE FROM golf9_admin_audit/.test(q.sql)));
+  const signups = queries.filter(q => /INSERT INTO golf9_early_access_signups /.test(q.sql));
+  assert.equal(signups.length, 2);
+  assert.ok(signups.every(q => /WHERE COALESCE/.test(q.sql)));
+  assert.equal(queries[0].sql, 'BEGIN');
+  assert.equal(queries.at(-1).sql, 'COMMIT');
+  assert.equal(store.stateRevision, 5);
+});
+
+test('a failed insert batch rolls back the complete snapshot without advancing its revision', async () => {
+  const statements = [];
+  let released = false;
+  const store = new PostgresStore({ connect: async () => ({
+    query: async sql => {
+      statements.push(sql);
+      if (/INSERT INTO golf9_users /.test(sql)) throw new Error('test insert failure');
+      return { rows: [{ value: 9 }] };
+    }, release() { released = true; },
+  }) });
+  store.migrate = async () => {};
+  store.stateRevision = 9;
+  await assert.rejects(store.save({ users: [{ userId: 'x' }] }), /test insert failure/);
+  assert.equal(store.stateRevision, 9);
+  assert.equal(statements.at(-1), 'ROLLBACK');
+  assert.equal(statements.includes('COMMIT'), false);
+  assert.equal(released, true);
+});
+
 const TEST_CA = `-----BEGIN CERTIFICATE-----
 MIIDHTCCAgWgAwIBAgIUMh2M6Z9G+ops/2s25awW2uIe9zUwDQYJKoZIhvcNAQEL
 BQAwHjEcMBoGA1UEAwwTbmluZWJlbG93LXRlc3Qtcm9vdDAeFw0yNjA4MjAwMDM2
