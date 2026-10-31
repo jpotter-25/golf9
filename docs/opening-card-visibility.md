@@ -79,9 +79,17 @@ availability must be verified separately from successful tests/builds.
   the same embedded upload certificate as version 61, and the new public-card
   JavaScript. SHA-256:
   `3cd57bf93d2e3c88a8edd1c33f9637c1f32e3e6001a09bc8cf53aca3397ffaba`.
-  Ready for the existing Google Play closed-testing track; not uploaded or
-  published to Google Play by this task. Both mobile builds use runtime commit
-  `970cb829`; later commits contain test fixtures and release documentation only.
+  Uploaded and submitted on 2026-10-30 to the existing Google Play
+  `Closed testing - Alpha` track `4700919917437591631`, release `14`, named
+  `Nine Below closed test 62`. Play accepted version 62 (0.1.0), API 24+,
+  target SDK 36, with no reduction in supported devices. Only this one release
+  was submitted, at 100% of the existing closed-test audience; country/tester
+  settings and production were not modified. Publishing overview shows
+  `Changes in review` and `1 change sent for review`, with automated quick checks
+  still running. Managed publishing remains off, so approval publishes the test
+  update automatically. Tester availability is not yet confirmed. Both mobile
+  builds use runtime commit `970cb829`; later commits contain test fixtures and
+  release documentation only.
 
 For the physical-device check, reconnect both apps and start a fresh online
 round. Flip one opening card and verify it appears on the other device before

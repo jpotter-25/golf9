@@ -1,27 +1,30 @@
 # Nine Below Internal Testing Checklist
 
 ## Latest Nine Below Google Play build
-- Package prepared: `2026-10-30` (Play upload still pending)
+- Package prepared and submitted to Google Play: `2026-10-30`
 - Package: `com.potterwell.ninebelow`
 - App version: `0.1.0`
-- Android versionCode: `60`
+- Android versionCode: `62`
 - EAS profile: `playtest`
-- EAS build ID: `4bf8019e-7530-446e-94ab-b06109c28d03`
-- Source commit: `676c63a82bed4abf3f5d87dfc3c8ad0c29c15cbb` (later server-only persistence fix deployed separately)
-- AAB: `https://expo.dev/artifacts/eas/5h7FaSuZGJBCaEF7z19H5CmtJxdHeMTQh3ok-XONHis.aab`
-- Local verified file: `artifacts/Nine-Below-Android-0.1.0-version-code-60.aab`
-- SHA-256: `56F787406A8A7E45A5BD83C9F3A7E0C643913EA2656E4C2FA0FBEBC2B53B7F00`
+- EAS build ID: `182634bb-457c-45b1-87e0-0af0c4525a47`
+- Source commit: `970cb8293ffaf5c81e2e7d450b39ee437f149f4b`
+- AAB: `https://expo.dev/artifacts/eas/sfL7G5wxyXLz5TvYNSNsw7ATrnnMshc7cPrOjB9L4mA.aab`
+- Local verified file: `artifacts/Nine-Below-Android-0.1.0-version-code-62.aab`
+- SHA-256: `3CD57BF93D2E3C88A8EDD1C33F9637C1F32E3E6001A09BC8CF53ACA3397FFABA`
 - Play app ID: `4976320176871747708`
 - Closed track ID: `4700919917437591631`
 - Internal track ID: `4701595510712306572`
-- Planned release: `Nine Below closed test 60`
-- Release status: `AAB integrity and upload signature verified; Play closed-test submission pending`
-- Tester audience: `Family/Friends` (`9` users)
-- Tester opt-in URL: `https://play.google.com/apps/internaltest/4701595510712306572`
+- Release: `Nine Below closed test 62`, Play release ID `14`
+- Release status: `Submitted; Changes in review, automated quick checks running`
+- Scope: existing `Closed testing - Alpha` track, 100% rollout, existing country and tester settings unchanged. Production was not modified.
+- Managed publishing: off (unchanged); approval will automatically publish the closed-test update. Submission is not proof of availability on testers' phones.
+- Last available release observed before submission: `58 (0.1.0)`, release ID `13`.
+- Previously recorded tester audience: `Family/Friends` (`9` users); no tester identities inspected or membership changes made during this submission.
+- Previously recorded internal-track tester opt-in URL: `https://play.google.com/apps/internaltest/4701595510712306572` (not the Alpha closed-track link).
 - Play app-signing SHA-1: `10:3E:57:F5:70:9D:AE:08:E4:B6:8F:B4:BC:9E:25:49:E4:A8:32:7E`
 - Upload certificate SHA-1: `D7:10:CA:08:96:BA:2B:8E:25:5F:D5:DD:4B:ED:74:29:0B:CD:6D:D9`
 - This is the canonical Nine Below Google Play listing and Android package.
-- Version 60 adds Apple login on Android. Existing players should link Apple from their current account rather than create a duplicate. See [social-login rollout](mobile-social-login.md) for provider status and remaining device checks.
+- Version 62 includes immediate public drawn/revealed cards, same-club Ranked matching, queue/coin/season layout fixes, and the earlier Apple login addition on Android. Existing players should link Apple from their current account rather than create a duplicate. See [public-card verification](opening-card-visibility.md) and [social-login rollout](mobile-social-login.md) for behavior and remaining device checks.
 
 ## Responsive layout coverage
 - Runtime layouts respond to live viewport width, height, safe-area insets, and player count.
