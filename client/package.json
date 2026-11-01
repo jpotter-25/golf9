@@ -17,7 +17,7 @@
     "test:social-auth": "node --test test/socialAuth.test.cjs test/socialButtons.test.cjs",
     "test:header": "node --test test/coinBalance.test.cjs",
     "test:ranked": "node --test test/rankedLayout.test.cjs",
-    "test:table": "node --test test/tableVisibility.test.cjs"
+    "test:table": "node --test test/tableVisibility.test.cjs test/autoplayRecovery.test.cjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",

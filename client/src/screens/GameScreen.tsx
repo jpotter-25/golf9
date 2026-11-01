@@ -6,11 +6,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as NavigationBar from 'expo-navigation-bar';
 import { Audio } from 'expo-av';
-import { Bell, Bot, Gem, LockKeyhole, MessageCircle, Settings, ShoppingBag, Trophy, UserPlus, Users, X } from 'lucide-react-native';
+import { Bell, Gem, LockKeyhole, MessageCircle, Settings, ShoppingBag, Trophy, UserPlus, Users, X } from 'lucide-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import type { GameState, Card, Grid, PlayerIdentity } from '../game/types';
 import { tablePilePresentation } from '../game/tablePresentation';
+import { selectGameOverlay, viewerRecovery } from '../game/recovery';
+import { AutoplayRecovery } from '../components/AutoplayRecovery';
 import { chooseAiPeekTargets, executeAiTurn, planAiTurn } from '../game/ai';
 import {
   deal,
@@ -211,6 +213,7 @@ export default function GameScreen({ route, navigation }: Props) {
   } = useClubRealtime();
   const isOnline = mode === 'online' && !!roomCode && !!token;
   const isFocused = useIsFocused();
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
 
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
@@ -268,6 +271,8 @@ export default function GameScreen({ route, navigation }: Props) {
   const [matchProgression, setMatchProgression] = useState<api.MatchProgressionSummary | null>(null);
   const [autoplayCue, setAutoplayCue] = useState<AutoplayCue | null>(null);
   const [takingControl, setTakingControl] = useState(false);
+  const [takeControlError, setTakeControlError] = useState<string | null>(null);
+  const takeControlInFlight = useRef(false);
   const [quitPromptOpen, setQuitPromptOpen] = useState(false);
   const [quittingMatch, setQuittingMatch] = useState(false);
 
@@ -320,7 +325,14 @@ export default function GameScreen({ route, navigation }: Props) {
   const currentTurnPlayer = state.players[state.currentPlayerIndex];
   const currentTurnUserId = currentTurnPlayer?.userId;
   const currentTurnName = currentTurnPlayer?.name ?? 'Player';
-  const viewerAutoplayActive = isOnline && !!state.viewerAutoplay?.active;
+  const recovery = viewerRecovery({
+    online: isOnline,
+    seated: onlineViewerIndex >= 0,
+    completed: state.completed,
+    viewer: state.viewerAutoplay,
+    seat: roomPlayers.find(player => player.userId === user?.userId),
+  });
+  const viewerAutoplayActive = recovery.active;
   const onlineMatchType = roomSummary?.matchType || routeMatchType || 'casual';
   const onlineBuyIn = roomSummary?.economy?.buyIn || routeBuyIn || 0;
   const quitPromptTitle = !isOnline
@@ -349,6 +361,11 @@ export default function GameScreen({ route, navigation }: Props) {
   const bottomCardBackId = playerCosmetics(bottomPlayer, bottomIndex)?.cardBack;
 
   useEffect(() => subscribeGameplayPreferences(setGameplayPrefs), []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', next => setAppActive(next === 'active'));
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     if (!isOnline || !roomCode || !user?.userId) return;
@@ -438,7 +455,7 @@ export default function GameScreen({ route, navigation }: Props) {
     notice: TurnNotice,
     options: { vibration?: number | number[]; notifyDevice?: boolean; duration?: number } = {}
   ) => {
-    if (!isFocused || !gameplayPrefs.turnAlerts) return;
+    if (!isFocused || !appActive || viewerAutoplayActive || !gameplayPrefs.turnAlerts) return;
     const { vibration = 80, notifyDevice = true, duration } = options;
     setTurnNotice(notice);
     if (turnNoticeTimer.current) clearTimeout(turnNoticeTimer.current);
@@ -450,14 +467,14 @@ export default function GameScreen({ route, navigation }: Props) {
     }
     if (notifyDevice && gameplayPrefs.vibrate) Vibration.vibrate(vibration);
     if (notifyDevice && gameplayPrefs.sound) playTurnChime();
-  }, [gameplayPrefs, isFocused]);
+  }, [appActive, gameplayPrefs, isFocused, viewerAutoplayActive]);
 
   useEffect(() => {
-    if (isFocused) return;
+    if (isFocused && appActive && !viewerAutoplayActive) return;
     setTurnNotice(null);
     if (turnNoticeTimer.current) clearTimeout(turnNoticeTimer.current);
     turnNoticeTimer.current = null;
-  }, [isFocused]);
+  }, [appActive, isFocused, viewerAutoplayActive]);
 
   useEffect(() => {
     chatOpenRef.current = chatOpen;
@@ -545,17 +562,28 @@ export default function GameScreen({ route, navigation }: Props) {
   }, [resyncOnlineRoom]);
 
   const handleTakeBackControl = useCallback(async () => {
-    if (!isOnline || !token || !roomCode || takingControl) return;
+    if (!isOnline || !token || !roomCode || !recovery.canReclaim || takeControlInFlight.current) return;
+    takeControlInFlight.current = true;
     setTakingControl(true);
+    setTakeControlError(null);
     try {
       const response = await takeBackControl(token, roomCode);
       applyOnlineGameState(response.game);
+      setAutoplayCue(null);
+      setTurnNotice(null);
     } catch (error) {
-      handleOnlineActionError('Unable to take control', error);
+      // Keep errors beside the retry button; another native alert could hide recovery.
+      setTakeControlError(error instanceof Error ? error.message : 'Unable to restore control. Please try again.');
+      void resyncOnlineRoom({ quiet: true });
     } finally {
+      takeControlInFlight.current = false;
       setTakingControl(false);
     }
-  }, [applyOnlineGameState, handleOnlineActionError, isOnline, roomCode, takingControl, token]);
+  }, [applyOnlineGameState, isOnline, recovery.canReclaim, resyncOnlineRoom, roomCode, token]);
+
+  useEffect(() => {
+    if (!viewerAutoplayActive) setTakeControlError(null);
+  }, [viewerAutoplayActive]);
 
   useEffect(() => {
     if (!isOnline || !token || !roomCode) return;
@@ -791,9 +819,9 @@ export default function GameScreen({ route, navigation }: Props) {
       ? onlineViewerIndex >= 0 && (state.players[onlineViewerIndex]?.peekFlips ?? 2) < 2
       : state.players[state.peekTurnIndex ?? 0]?.userId === user?.userId
     : true;
-  const isHumanTurn = isOnlineTurn && !(isSolo && state.phase === 'turn' && state.currentPlayerIndex !== 0);
+  const isHumanTurn = !viewerAutoplayActive && isOnlineTurn && !(isSolo && state.phase === 'turn' && state.currentPlayerIndex !== 0);
   const isHumanPeek = state.phase === 'peek'
-    ? isOnlinePeek && !(isSolo && (state.peekTurnIndex ?? 0) !== 0)
+    ? !viewerAutoplayActive && isOnlinePeek && !(isSolo && (state.peekTurnIndex ?? 0) !== 0)
     : true;
 
   // Pass & Play keeps the second reveal on screen briefly before the privacy handoff.
@@ -1122,14 +1150,12 @@ export default function GameScreen({ route, navigation }: Props) {
   const activeRoomPlayer = currentTurnUserId ? roomPlayersById.get(currentTurnUserId) : undefined;
   const peekAutoplayActive = state.phase === 'peek' && state.players.some(player => {
     const roomPlayer = roomPlayersById.get(player.userId);
-    const active = !!roomPlayer?.autoplayActive
-      || (player.userId === user?.userId && viewerAutoplayActive);
+    const active = player.userId === user?.userId ? viewerAutoplayActive : !!roomPlayer?.autoplayActive;
     return active && player.peekFlips < 2;
   });
   const tableAutoplayActive = isOnline && (
     (state.phase === 'turn' && (
-      !!activeRoomPlayer?.autoplayActive
-      || (currentTurnUserId === user?.userId && viewerAutoplayActive)
+      currentTurnUserId === user?.userId ? viewerAutoplayActive : !!activeRoomPlayer?.autoplayActive
     ))
     || peekAutoplayActive
   );
@@ -1207,7 +1233,7 @@ export default function GameScreen({ route, navigation }: Props) {
       ? 'Place Card'
       : 'Keep Drawn'
     : 'Reveal Card';
-  const hudTitle = state.phase === 'peek'
+  const hudTitle = viewerAutoplayActive ? 'Autoplay' : state.phase === 'peek'
     ? bottomIsActive
       ? 'Peek Phase'
       : 'Waiting'
@@ -1220,7 +1246,7 @@ export default function GameScreen({ route, navigation }: Props) {
             ? 'Final Turn'
             : 'Your Turn'
           : 'Opponent Turn';
-  const hudInstruction = activeAutoplayInstruction ?? (state.phase === 'peek'
+  const hudInstruction = viewerAutoplayActive ? 'Take back control below' : activeAutoplayInstruction ?? (state.phase === 'peek'
     ? bottomIsActive
       ? 'Flip two cards'
       : 'Table is peeking'
@@ -1238,6 +1264,13 @@ export default function GameScreen({ route, navigation }: Props) {
               : 'Draw or take discard'
           : 'Watch the table');
   const actionModel = useMemo<GameActionModel>(() => {
+    if (viewerAutoplayActive) {
+      return {
+        phase: 'waiting', primaryLabel: 'Take back control below', selectedSource: null, selectedCard: null,
+        canUsePiles: false, canUseGrid: false, canCancelSelection: false,
+        disabledReason: 'Autoplay is playing for you.',
+      };
+    }
     if (state.phase === 'peek') {
       return {
         phase: 'peek',
@@ -1344,6 +1377,7 @@ export default function GameScreen({ route, navigation }: Props) {
     selectedActionText,
     selectedForBottom,
     state.phase,
+    viewerAutoplayActive,
   ]);
   const gameLayerState = useMemo<GameLayerState>(() => ({
     table: { visible: true },
@@ -1856,10 +1890,24 @@ export default function GameScreen({ route, navigation }: Props) {
   // ===== Render =====
   const bottomRoomPlayer = roomPlayersById.get(bottomPlayer.userId);
   const bottomConnected = !isOnline || (bottomRoomPlayer?.connected ?? bottomPlayer.connected ?? true);
-  const bottomAutoplayActive = isOnline && (
-    !!bottomRoomPlayer?.autoplayActive
-    || (bottomPlayer.userId === user?.userId && viewerAutoplayActive)
-  );
+  const bottomAutoplayActive = viewerAutoplayActive;
+  const activeOverlay = selectGameOverlay({
+    quit: quitPromptOpen, pass: showPassOverlay, summary: showRoundSummary,
+    shop: shopOpen, avatar: !!avatarHubUserId, settings: alertSettingsOpen,
+    chat: isOnline && chatOpen, clubChat: !!user?.club?.clubId && clubChatOpen, notice: !!turnNotice,
+  }, isFocused && appActive, viewerAutoplayActive);
+  const closeActiveOverlay = () => {
+    if (activeOverlay === 'quit' && !quittingMatch) setQuitPromptOpen(false);
+    if (activeOverlay === 'shop') setShopOpen(false);
+    if (activeOverlay === 'avatar') setAvatarHubUserId(null);
+    if (activeOverlay === 'settings') setAlertSettingsOpen(false);
+    if (activeOverlay === 'chat') setChatOpen(false);
+    if (activeOverlay === 'clubChat') setClubChatOpen(false);
+    if (activeOverlay === 'notice') setTurnNotice(null);
+  };
+  const recoveryPanel = viewerAutoplayActive ? (
+    <AutoplayRecovery busy={takingControl} forfeited={recovery.forfeited} error={takeControlError} onTakeControl={handleTakeBackControl} />
+  ) : null;
   const bottomClubTag = bottomRoomPlayer?.club?.tag ?? (bottomPlayer.userId === user?.userId ? user?.club?.tag : null);
   const selfClaimableCount =
     (user?.currency.dailyBonus.canClaim ? 1 : 0)
@@ -2145,7 +2193,7 @@ export default function GameScreen({ route, navigation }: Props) {
         backgroundColor: tableTheme.headerColor,
         borderTopColor: tableTheme.borderColor,
       }]}>
-        {pendingForBottom && held ? (
+        {recoveryPanel ?? (pendingForBottom && held ? (
           <View style={styles.decisionButtons}>
             <Pressable style={styles.altBtn} onPress={onKeepRevealed}>
               <DecisionButtonContent label="Keep Revealed" card={pendingRevealedCard} />
@@ -2182,639 +2230,592 @@ export default function GameScreen({ route, navigation }: Props) {
               {actionCopy(gameLayerState.action)}
             </Text>
           </View>
-        )}
+        ))}
       </View>
 
-      {/* Feedback Layer */}
+      {/* One native host: swap content instead of presenting competing iOS modals. */}
       <Modal
         transparent
-        visible={isFocused && quitPromptOpen}
-        animationType="fade"
-        onRequestClose={() => {
-          if (!quittingMatch) setQuitPromptOpen(false);
-        }}
+        visible={activeOverlay !== null}
+        animationType="none"
+        onRequestClose={closeActiveOverlay}
       >
-        <View style={styles.quitPromptScrim}>
-          <View style={styles.quitPromptCard}>
-            <Text style={styles.quitPromptTitle}>{quitPromptTitle}</Text>
-            <Text style={styles.quitPromptBody}>{quitPromptBody}</Text>
-            <View style={styles.quitPromptActions}>
-              <Pressable
-                style={[styles.quitPromptButton, styles.quitPromptReturnButton]}
-                disabled={quittingMatch}
-                onPress={() => setQuitPromptOpen(false)}
-                accessibilityRole="button"
-                accessibilityLabel="Return to match"
-              >
-                <Text style={styles.quitPromptReturnText}>Return to Match</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.quitPromptButton, styles.quitPromptConfirmButton, quittingMatch && styles.quitPromptButtonDisabled]}
-                disabled={quittingMatch}
-                onPress={confirmQuitMatch}
-                accessibilityRole="button"
-                accessibilityLabel={isOnline ? 'Confirm forfeit' : 'Confirm quit'}
-              >
-                <Text style={styles.quitPromptConfirmText}>
-                  {quittingMatch ? 'Leaving...' : isOnline ? 'Confirm Forfeit' : 'Quit Match'}
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        transparent
-        visible={isFocused && bottomAutoplayActive && bottomPlayer.userId === user?.userId}
-        animationType="fade"
-        onRequestClose={() => {}}
-      >
-        <View style={styles.autoplayControlScrim}>
-          <View style={styles.autoplayControlCard}>
-            <View style={styles.autoplayControlIcon}>
-              <Bot color="#67E0B0" size={30} strokeWidth={2.8} />
-            </View>
-            <Text style={styles.autoplayControlTitle}>Autoplay is active</Text>
-            <Text style={styles.autoplayControlBody}>
-              Autoplay took over after missed turns. Take back control to continue playing.
-            </Text>
-            <Pressable
-              style={({ pressed }) => [
-                styles.takeControlButton,
-                takingControl && styles.takeControlButtonDisabled,
-                pressed && !takingControl && styles.takeControlButtonPressed,
-              ]}
-              onPress={handleTakeBackControl}
-              disabled={takingControl}
-              accessibilityRole="button"
-              accessibilityLabel="Take back control from autoplay"
-            >
-              <Bot color="#1A2943" size={19} strokeWidth={3} />
-              <Text style={styles.takeControlButtonText}>{takingControl ? 'Restoring Control...' : 'Take Back Control'}</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        transparent
-        visible={isFocused && shopOpen}
-        animationType="slide"
-        onRequestClose={() => setShopOpen(false)}
-      >
-        <View style={styles.shopOverlay}>
-          <Pressable style={styles.shopDismissArea} onPress={() => setShopOpen(false)} accessibilityRole="button" accessibilityLabel="Return to match" />
-          <View style={[styles.shopSheet, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }]}>
-            <View style={styles.shopSheetHeader}>
-              <View>
-                <Text style={styles.shopSheetEyebrow}>In Match</Text>
-                <Text style={styles.shopSheetTitle}>Storefront</Text>
+        <View style={styles.modalHost}>
+          <View style={styles.modalContent}>
+            {activeOverlay === 'quit' ? (
+              <View style={styles.quitPromptScrim}>
+                <View style={styles.quitPromptCard}>
+                  <Text style={styles.quitPromptTitle}>{quitPromptTitle}</Text>
+                  <Text style={styles.quitPromptBody}>{quitPromptBody}</Text>
+                  <View style={styles.quitPromptActions}>
+                    <Pressable
+                      style={[styles.quitPromptButton, styles.quitPromptReturnButton]}
+                      disabled={quittingMatch}
+                      onPress={() => setQuitPromptOpen(false)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Return to match"
+                    >
+                      <Text style={styles.quitPromptReturnText}>Return to Match</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.quitPromptButton, styles.quitPromptConfirmButton, quittingMatch && styles.quitPromptButtonDisabled]}
+                      disabled={quittingMatch}
+                      onPress={confirmQuitMatch}
+                      accessibilityRole="button"
+                      accessibilityLabel={isOnline ? 'Confirm forfeit' : 'Confirm quit'}
+                    >
+                      <Text style={styles.quitPromptConfirmText}>
+                        {quittingMatch ? 'Leaving...' : isOnline ? 'Confirm Forfeit' : 'Quit Match'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
               </View>
-              <Pressable style={styles.shopCloseButton} onPress={() => setShopOpen(false)} accessibilityRole="button" accessibilityLabel="Close shop and return to match">
-                <X size={24} color={ui.text.primary} strokeWidth={3} />
-              </Pressable>
-            </View>
-            <ScrollView contentContainerStyle={styles.shopScrollContent} keyboardShouldPersistTaps="handled">
-              {shopOpen ? <ShopContent embedded backLabel="Back to Match" onBack={() => setShopOpen(false)} /> : null}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+            ) : null}
 
-      <Modal
-        transparent
-        visible={isFocused && !!avatarHubUserId}
-        animationType="fade"
-        onRequestClose={() => setAvatarHubUserId(null)}
-      >
-        <View style={styles.avatarHubScrim}>
-          <Pressable style={styles.avatarHubDismissArea} onPress={() => setAvatarHubUserId(null)} />
-          <View style={[styles.avatarHubSheet, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }]}>
-            <View style={styles.avatarHubHeader}>
-              <View style={styles.avatarHubHero}>
-                {avatarHubIsSelf ? (
-                  <AvatarCluster
-                    cosmetics={avatarHubCosmetics}
-                    fallbackInitial={avatarHubInitial}
-                    size={74}
-                    mode="self"
-                    league={avatarHubLeague}
-                  />
-                ) : (
-                  <PlayerAvatar
-                    cosmetics={avatarHubCosmetics}
-                    fallbackInitial={avatarHubInitial}
-                    size={68}
-                  />
-                )}
-                <View style={styles.avatarHubCopy}>
-                  <Text style={styles.avatarHubName} numberOfLines={1}>
-                    {avatarHubIsSelf ? 'Your Avatar' : avatarHubName}
-                  </Text>
-                  <Text style={styles.avatarHubMeta} numberOfLines={1}>
-                    {avatarHubLoading
-                      ? 'Loading...'
-                      : avatarHubIsSelf
-                        ? `Level ${user?.progression.level ?? 1}${user?.displayRankEmblem ? ` - ${user.displayRankEmblem.league.name}` : ''}`
-                        : `${avatarHubProfile?.competitive.league.name ?? avatarHubRoomPlayer?.competitive?.league.name ?? 'Unranked'} - ${(avatarHubRoomPlayer?.connected ?? avatarHubProfile?.status.online) ? 'Online' : 'Offline'}`}
-                  </Text>
+            {activeOverlay === 'shop' ? (
+              <View style={styles.shopOverlay}>
+                <Pressable style={styles.shopDismissArea} onPress={() => setShopOpen(false)} accessibilityRole="button" accessibilityLabel="Return to match" />
+                <View style={[styles.shopSheet, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }]}>
+                  <View style={styles.shopSheetHeader}>
+                    <View>
+                      <Text style={styles.shopSheetEyebrow}>In Match</Text>
+                      <Text style={styles.shopSheetTitle}>Storefront</Text>
+                    </View>
+                    <Pressable style={styles.shopCloseButton} onPress={() => setShopOpen(false)} accessibilityRole="button" accessibilityLabel="Close shop and return to match">
+                      <X size={24} color={ui.text.primary} strokeWidth={3} />
+                    </Pressable>
+                  </View>
+                  <ScrollView contentContainerStyle={styles.shopScrollContent} keyboardShouldPersistTaps="handled">
+                    {shopOpen ? <ShopContent embedded backLabel="Back to Match" onBack={() => setShopOpen(false)} /> : null}
+                  </ScrollView>
                 </View>
-                <Pressable style={styles.avatarHubCloseButton} onPress={() => setAvatarHubUserId(null)}>
-                  <X size={22} color={ui.text.primary} strokeWidth={3} />
-                </Pressable>
               </View>
-              {avatarHubProgress ? (
-                <View style={styles.avatarHubXpTrack}>
-                  <View style={[styles.avatarHubXpFill, { width: `${Math.round((avatarHubProgress.levelProgress || 0) * 100)}%` }]} />
-                </View>
-              ) : null}
-            </View>
+            ) : null}
 
-            <ScrollView style={styles.avatarHubScroll} contentContainerStyle={styles.avatarHubScrollContent} showsVerticalScrollIndicator={false}>
-            {avatarHubIsSelf ? (
-              <View style={styles.avatarHubBody}>
-                <View style={styles.avatarHubStatRow}>
-                  <HubStat label="Level" value={String(user?.progression.level ?? 1)} />
-                  <HubStat label="Emblem" value={user?.displayRankEmblem ? rankEmblemForLeague(user.displayRankEmblem.league).label : 'Hidden'} />
-                  <HubStat label="Ready" value={String(selfClaimableCount)} />
-                </View>
-                <View style={styles.avatarHubActionGrid}>
-                  <Pressable
-                    style={styles.avatarHubAction}
-                    onPress={() => {
-                      refreshProfile().catch(() => {});
-                    }}
-                  >
-                    <Trophy size={20} color="#67E0B0" strokeWidth={2.8} />
-                    <Text style={styles.avatarHubActionText}>Profile</Text>
-                  </Pressable>
-                  <Pressable
-                    style={styles.avatarHubAction}
-                    onPress={() => {
-                      if (!token) return;
-                      setAvatarHubCosmeticsLoading(true);
-                      api.cosmeticCatalog(token)
-                        .then(response => setAvatarHubCosmeticCatalog(response.cosmetics))
-                        .catch(() => setAvatarHubCosmeticCatalog([]))
-                        .finally(() => setAvatarHubCosmeticsLoading(false));
-                    }}
-                  >
-                    <Gem size={20} color="#BDEBFF" strokeWidth={2.8} />
-                    <Text style={styles.avatarHubActionText}>Cosmetics</Text>
-                  </Pressable>
-                  {availability.isVisible('shop') ? <Pressable
-                    style={styles.avatarHubAction}
-                    onPress={() => {
-                      if (!availability.isAvailable('shop')) {
-                        availability.showUnavailable('shop');
-                        return;
-                      }
-                      setAvatarHubUserId(null);
-                      setShopOpen(true);
-                    }}
-                  >
-                    {availability.isAvailable('shop') ? <ShoppingBag size={20} color="#F4C95D" strokeWidth={2.8} /> : <LockKeyhole size={20} color={ui.text.muted} strokeWidth={2.8} />}
-                    <Text style={styles.avatarHubActionText}>{availability.isAvailable('shop') ? 'Shop' : 'Unavailable'}</Text>
-                  </Pressable> : null}
-                  <Pressable
-                    style={styles.avatarHubAction}
-                    onPress={() => {
-                      refreshProfile().catch(() => {});
-                    }}
-                  >
-                    <Bell size={20} color="#FF6B6B" strokeWidth={2.8} />
-                    <Text style={styles.avatarHubActionText}>Rewards</Text>
-                  </Pressable>
-                </View>
-                <Text style={styles.avatarHubSectionTitle}>Quick Locker</Text>
-                {avatarHubCosmeticsLoading ? (
-                  <Text style={styles.avatarHubEmptyText}>Loading owned cosmetics...</Text>
-                ) : (
-                  avatarHubLockerGroups.map(group => (
-                    <View key={group.key} style={styles.lockerSection}>
-                      <Text style={styles.lockerTitle}>{group.title}</Text>
-                      {group.items.length ? (
-                        <View style={styles.lockerGrid}>
-                          {group.items.map(item => {
-                            const busy = avatarHubBusy === `cosmetic:${item.id}`;
-                            return (
-                              <Pressable
-                                key={item.id}
-                                style={[styles.lockerChip, item.equipped && styles.lockerChipEquipped, busy && styles.avatarHubActionDisabled]}
-                                disabled={item.equipped || busy || !!avatarHubBusy}
-                                onPress={() => equipAvatarHubCosmetic(item)}
-                              >
-                                <Text style={styles.lockerName} numberOfLines={1}>{item.name}</Text>
-                                <Text style={[styles.lockerState, item.equipped && styles.lockerStateEquipped]} numberOfLines={1}>
-                                  {item.equipped ? 'Equipped' : busy ? 'Equipping...' : 'Equip'}
-                                </Text>
-                              </Pressable>
-                            );
-                          })}
-                        </View>
+            {activeOverlay === 'avatar' ? (
+              <View style={styles.avatarHubScrim}>
+                <Pressable style={styles.avatarHubDismissArea} onPress={() => setAvatarHubUserId(null)} />
+                <View style={[styles.avatarHubSheet, { backgroundColor: tableTheme.panelColor, borderColor: tableTheme.borderColor }]}>
+                  <View style={styles.avatarHubHeader}>
+                    <View style={styles.avatarHubHero}>
+                      {avatarHubIsSelf ? (
+                        <AvatarCluster
+                          cosmetics={avatarHubCosmetics}
+                          fallbackInitial={avatarHubInitial}
+                          size={74}
+                          mode="self"
+                          league={avatarHubLeague}
+                        />
                       ) : (
-                        <Text style={styles.avatarHubEmptyText}>{group.empty}</Text>
+                        <PlayerAvatar
+                          cosmetics={avatarHubCosmetics}
+                          fallbackInitial={avatarHubInitial}
+                          size={68}
+                        />
+                      )}
+                      <View style={styles.avatarHubCopy}>
+                        <Text style={styles.avatarHubName} numberOfLines={1}>
+                          {avatarHubIsSelf ? 'Your Avatar' : avatarHubName}
+                        </Text>
+                        <Text style={styles.avatarHubMeta} numberOfLines={1}>
+                          {avatarHubLoading
+                            ? 'Loading...'
+                            : avatarHubIsSelf
+                              ? `Level ${user?.progression.level ?? 1}${user?.displayRankEmblem ? ` - ${user.displayRankEmblem.league.name}` : ''}`
+                              : `${avatarHubProfile?.competitive.league.name ?? avatarHubRoomPlayer?.competitive?.league.name ?? 'Unranked'} - ${(avatarHubRoomPlayer?.connected ?? avatarHubProfile?.status.online) ? 'Online' : 'Offline'}`}
+                        </Text>
+                      </View>
+                      <Pressable style={styles.avatarHubCloseButton} onPress={() => setAvatarHubUserId(null)}>
+                        <X size={22} color={ui.text.primary} strokeWidth={3} />
+                      </Pressable>
+                    </View>
+                    {avatarHubProgress ? (
+                      <View style={styles.avatarHubXpTrack}>
+                        <View style={[styles.avatarHubXpFill, { width: `${Math.round((avatarHubProgress.levelProgress || 0) * 100)}%` }]} />
+                      </View>
+                    ) : null}
+                  </View>
+
+                  <ScrollView style={styles.avatarHubScroll} contentContainerStyle={styles.avatarHubScrollContent} showsVerticalScrollIndicator={false}>
+                  {avatarHubIsSelf ? (
+                    <View style={styles.avatarHubBody}>
+                      <View style={styles.avatarHubStatRow}>
+                        <HubStat label="Level" value={String(user?.progression.level ?? 1)} />
+                        <HubStat label="Emblem" value={user?.displayRankEmblem ? rankEmblemForLeague(user.displayRankEmblem.league).label : 'Hidden'} />
+                        <HubStat label="Ready" value={String(selfClaimableCount)} />
+                      </View>
+                      <View style={styles.avatarHubActionGrid}>
+                        <Pressable
+                          style={styles.avatarHubAction}
+                          onPress={() => {
+                            refreshProfile().catch(() => {});
+                          }}
+                        >
+                          <Trophy size={20} color="#67E0B0" strokeWidth={2.8} />
+                          <Text style={styles.avatarHubActionText}>Profile</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.avatarHubAction}
+                          onPress={() => {
+                            if (!token) return;
+                            setAvatarHubCosmeticsLoading(true);
+                            api.cosmeticCatalog(token)
+                              .then(response => setAvatarHubCosmeticCatalog(response.cosmetics))
+                              .catch(() => setAvatarHubCosmeticCatalog([]))
+                              .finally(() => setAvatarHubCosmeticsLoading(false));
+                          }}
+                        >
+                          <Gem size={20} color="#BDEBFF" strokeWidth={2.8} />
+                          <Text style={styles.avatarHubActionText}>Cosmetics</Text>
+                        </Pressable>
+                        {availability.isVisible('shop') ? <Pressable
+                          style={styles.avatarHubAction}
+                          onPress={() => {
+                            if (!availability.isAvailable('shop')) {
+                              availability.showUnavailable('shop');
+                              return;
+                            }
+                            setAvatarHubUserId(null);
+                            setShopOpen(true);
+                          }}
+                        >
+                          {availability.isAvailable('shop') ? <ShoppingBag size={20} color="#F4C95D" strokeWidth={2.8} /> : <LockKeyhole size={20} color={ui.text.muted} strokeWidth={2.8} />}
+                          <Text style={styles.avatarHubActionText}>{availability.isAvailable('shop') ? 'Shop' : 'Unavailable'}</Text>
+                        </Pressable> : null}
+                        <Pressable
+                          style={styles.avatarHubAction}
+                          onPress={() => {
+                            refreshProfile().catch(() => {});
+                          }}
+                        >
+                          <Bell size={20} color="#FF6B6B" strokeWidth={2.8} />
+                          <Text style={styles.avatarHubActionText}>Rewards</Text>
+                        </Pressable>
+                      </View>
+                      <Text style={styles.avatarHubSectionTitle}>Quick Locker</Text>
+                      {avatarHubCosmeticsLoading ? (
+                        <Text style={styles.avatarHubEmptyText}>Loading owned cosmetics...</Text>
+                      ) : (
+                        avatarHubLockerGroups.map(group => (
+                          <View key={group.key} style={styles.lockerSection}>
+                            <Text style={styles.lockerTitle}>{group.title}</Text>
+                            {group.items.length ? (
+                              <View style={styles.lockerGrid}>
+                                {group.items.map(item => {
+                                  const busy = avatarHubBusy === `cosmetic:${item.id}`;
+                                  return (
+                                    <Pressable
+                                      key={item.id}
+                                      style={[styles.lockerChip, item.equipped && styles.lockerChipEquipped, busy && styles.avatarHubActionDisabled]}
+                                      disabled={item.equipped || busy || !!avatarHubBusy}
+                                      onPress={() => equipAvatarHubCosmetic(item)}
+                                    >
+                                      <Text style={styles.lockerName} numberOfLines={1}>{item.name}</Text>
+                                      <Text style={[styles.lockerState, item.equipped && styles.lockerStateEquipped]} numberOfLines={1}>
+                                        {item.equipped ? 'Equipped' : busy ? 'Equipping...' : 'Equip'}
+                                      </Text>
+                                    </Pressable>
+                                  );
+                                })}
+                              </View>
+                            ) : (
+                              <Text style={styles.avatarHubEmptyText}>{group.empty}</Text>
+                            )}
+                          </View>
+                        ))
                       )}
                     </View>
-                  ))
-                )}
-              </View>
-            ) : (
-              <View style={styles.avatarHubBody}>
-                <View style={styles.avatarHubStatRow}>
-                  <HubStat label="Games" value={String(avatarHubProfile?.statistics.gamesPlayed ?? avatarHubProfile?.stats.gamesPlayed ?? '--')} />
-                  <HubStat label="Wins" value={String(avatarHubProfile?.statistics.wins ?? avatarHubProfile?.stats.wins ?? '--')} />
-                  <HubStat label="Emblem" value={avatarHubLeague ? rankEmblemForLeague(avatarHubLeague).label : 'Hidden'} />
+                  ) : (
+                    <View style={styles.avatarHubBody}>
+                      <View style={styles.avatarHubStatRow}>
+                        <HubStat label="Games" value={String(avatarHubProfile?.statistics.gamesPlayed ?? avatarHubProfile?.stats.gamesPlayed ?? '--')} />
+                        <HubStat label="Wins" value={String(avatarHubProfile?.statistics.wins ?? avatarHubProfile?.stats.wins ?? '--')} />
+                        <HubStat label="Emblem" value={avatarHubLeague ? rankEmblemForLeague(avatarHubLeague).label : 'Hidden'} />
+                      </View>
+                      <View style={styles.avatarHubActionGrid}>
+                        <Pressable
+                          style={styles.avatarHubAction}
+                          onPress={() => {
+                            if (!avatarHubUserId) return;
+                            setAvatarHubUserId(null);
+                            navigation.navigate('PlayerProfile', { userId: avatarHubUserId, fromActiveMatchRoomCode: roomCode });
+                          }}
+                        >
+                          <Trophy size={20} color="#67E0B0" strokeWidth={2.8} />
+                          <Text style={styles.avatarHubActionText}>Full Profile</Text>
+                        </Pressable>
+                        {availability.isVisible('social') ? <Pressable
+                          style={[
+                            styles.avatarHubAction,
+                            ((!avatarHubProfile || avatarHubProfile.relationship === 'outgoing') && availability.isAvailable('social')) && styles.avatarHubActionDisabled,
+                            !availability.isAvailable('social') && styles.featureButtonLocked,
+                          ]}
+                          disabled={availability.isAvailable('social') && (!avatarHubProfile || avatarHubProfile.relationship === 'outgoing' || avatarHubBusy === 'friend')}
+                          onPress={() => availability.isAvailable('social') ? void runAvatarHubFriendAction() : availability.showUnavailable('social')}
+                        >
+                          {availability.isAvailable('social') ? <UserPlus size={20} color="#BDEBFF" strokeWidth={2.8} /> : <LockKeyhole size={20} color={ui.text.muted} strokeWidth={2.8} />}
+                          <Text style={styles.avatarHubActionText}>{availability.isAvailable('social') ? friendActionLabel(avatarHubProfile?.relationship) : 'Unavailable'}</Text>
+                        </Pressable> : null}
+                        {availability.isVisible('social') ? <Pressable
+                          style={[
+                            styles.avatarHubAction,
+                            (avatarHubProfile?.relationship !== 'friend' && availability.isAvailable('social')) && styles.avatarHubActionDisabled,
+                            !availability.isAvailable('social') && styles.featureButtonLocked,
+                          ]}
+                          disabled={availability.isAvailable('social') && (avatarHubProfile?.relationship !== 'friend' || avatarHubBusy === 'invite')}
+                          onPress={() => availability.isAvailable('social') ? void inviteAvatarHubPlayer() : availability.showUnavailable('social')}
+                        >
+                          {availability.isAvailable('social') ? <MessageCircle size={20} color="#F4C95D" strokeWidth={2.8} /> : <LockKeyhole size={20} color={ui.text.muted} strokeWidth={2.8} />}
+                          <Text style={styles.avatarHubActionText}>{availability.isAvailable('social') ? 'Invite' : 'Unavailable'}</Text>
+                        </Pressable> : null}
+                      </View>
+                      {availability.isVisible('social') ? <>
+                      <Text style={styles.avatarHubSectionTitle}>{availability.isAvailable('social') ? 'Send Gift' : 'Gifts Unavailable'}</Text>
+                      {availability.isAvailable('social') ? <View style={styles.giftGrid}>
+                        {TABLE_GIFTS.map(gift => (
+                          <Pressable
+                            key={gift.id}
+                            style={[
+                              styles.giftChip,
+                              { borderColor: gift.accent },
+                              (avatarHubBusy === gift.id || (user?.currency.coins ?? 0) < gift.price) && styles.avatarHubActionDisabled,
+                            ]}
+                            disabled={!avatarHubUserId || !!avatarHubBusy || (user?.currency.coins ?? 0) < gift.price}
+                            onPress={() => avatarHubUserId ? sendGiftToPlayer(avatarHubUserId, gift.id) : undefined}
+                          >
+                            <Text style={styles.giftIcon}>{gift.icon}</Text>
+                            <View style={styles.giftCopy}>
+                              <Text style={styles.giftChipText} numberOfLines={1}>{gift.label}</Text>
+                              <Text style={[styles.giftPrice, { color: gift.accent }]} numberOfLines={1}>{gift.price} coins</Text>
+                            </View>
+                          </Pressable>
+                        ))}
+                      </View> : null}
+                      </> : null}
+                    </View>
+                  )}
+                  </ScrollView>
                 </View>
-                <View style={styles.avatarHubActionGrid}>
+              </View>
+            ) : null}
+
+            {activeOverlay === 'notice' ? (
+              <View style={styles.noticeScrim}>
+                <View style={[styles.noticeCard, turnNotice?.tone === 'warning' && styles.noticeCardWarning]}>
+                  <Text style={[styles.noticeTitle, turnNotice?.tone === 'warning' && styles.noticeTitleWarning]}>
+                    {turnNotice?.title}
+                  </Text>
+                  <Text style={styles.noticeBody}>{turnNotice?.body}</Text>
                   <Pressable
-                    style={styles.avatarHubAction}
+                    style={[styles.noticeButton, turnNotice?.tone === 'warning' && styles.noticeButtonWarning]}
+                    onPress={() => setTurnNotice(null)}
+                  >
+                    <Text style={styles.noticeButtonText}>OK</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
+
+            {activeOverlay === 'settings' ? (
+              <View style={styles.settingsScrim}>
+                <View style={styles.settingsCard}>
+                  <View style={styles.settingsHeader}>
+                    <Text style={styles.settingsTitle}>Settings</Text>
+                    <Pressable style={styles.settingsCloseButton} onPress={() => setAlertSettingsOpen(false)}>
+                      <Text style={styles.chatCloseText}>X</Text>
+                    </Pressable>
+                  </View>
+                  <View style={styles.settingsSectionHeader}>
+                    <Bell size={18} color={ui.palette.gold} strokeWidth={2.5} />
+                    <Text style={styles.settingsSectionTitle}>Turn Alerts</Text>
+                  </View>
+                  <View style={styles.settingsRow}>
+                    <Text style={styles.settingsLabel}>Popups</Text>
+                    <Switch
+                      value={gameplayPrefs.turnAlerts}
+                      onValueChange={value => setGameplayPreferences({ turnAlerts: value })}
+                      thumbColor={gameplayPrefs.turnAlerts ? '#67E0B0' : '#444'}
+                      trackColor={{ false: '#555', true: '#67E0B0' }}
+                    />
+                  </View>
+                  <View style={styles.settingsRow}>
+                    <Text style={styles.settingsLabel}>Sound</Text>
+                    <Switch
+                      value={gameplayPrefs.sound}
+                      onValueChange={value => setGameplayPreferences({ sound: value })}
+                      thumbColor={gameplayPrefs.sound ? '#67E0B0' : '#444'}
+                      trackColor={{ false: '#555', true: '#67E0B0' }}
+                    />
+                  </View>
+                  <View style={styles.settingsRow}>
+                    <Text style={styles.settingsLabel}>Vibrate</Text>
+                    <Switch
+                      value={gameplayPrefs.vibrate}
+                      onValueChange={value => setGameplayPreferences({ vibrate: value })}
+                      thumbColor={gameplayPrefs.vibrate ? '#67E0B0' : '#444'}
+                      trackColor={{ false: '#555', true: '#67E0B0' }}
+                    />
+                  </View>
+                  <Pressable style={styles.settingsDoneButton} onPress={() => setAlertSettingsOpen(false)}>
+                    <Text style={styles.settingsDoneText}>Done</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
+
+            {activeOverlay === 'pass' ? (
+              <View style={styles.overlay}>
+                <View style={styles.overlayCard}>
+                  <Text style={styles.overlayTitle}>{passPeekPlayer?.name ?? 'Player'}'s Peek</Text>
+                  <Text style={styles.overlayBody}>Pass the device. Flip two cards, then hand it to the next player.</Text>
+                  <Pressable
+                    style={styles.overlayButton}
                     onPress={() => {
-                      if (!avatarHubUserId) return;
-                      setAvatarHubUserId(null);
-                      navigation.navigate('PlayerProfile', { userId: avatarHubUserId, fromActiveMatchRoomCode: roomCode });
+                      if (passPeekPromptKey) setDismissedPeekPromptKey(passPeekPromptKey);
                     }}
                   >
-                    <Trophy size={20} color="#67E0B0" strokeWidth={2.8} />
-                    <Text style={styles.avatarHubActionText}>Full Profile</Text>
+                    <Text style={styles.overlayButtonText}>OK</Text>
                   </Pressable>
-                  {availability.isVisible('social') ? <Pressable
-                    style={[
-                      styles.avatarHubAction,
-                      ((!avatarHubProfile || avatarHubProfile.relationship === 'outgoing') && availability.isAvailable('social')) && styles.avatarHubActionDisabled,
-                      !availability.isAvailable('social') && styles.featureButtonLocked,
-                    ]}
-                    disabled={availability.isAvailable('social') && (!avatarHubProfile || avatarHubProfile.relationship === 'outgoing' || avatarHubBusy === 'friend')}
-                    onPress={() => availability.isAvailable('social') ? void runAvatarHubFriendAction() : availability.showUnavailable('social')}
-                  >
-                    {availability.isAvailable('social') ? <UserPlus size={20} color="#BDEBFF" strokeWidth={2.8} /> : <LockKeyhole size={20} color={ui.text.muted} strokeWidth={2.8} />}
-                    <Text style={styles.avatarHubActionText}>{availability.isAvailable('social') ? friendActionLabel(avatarHubProfile?.relationship) : 'Unavailable'}</Text>
-                  </Pressable> : null}
-                  {availability.isVisible('social') ? <Pressable
-                    style={[
-                      styles.avatarHubAction,
-                      (avatarHubProfile?.relationship !== 'friend' && availability.isAvailable('social')) && styles.avatarHubActionDisabled,
-                      !availability.isAvailable('social') && styles.featureButtonLocked,
-                    ]}
-                    disabled={availability.isAvailable('social') && (avatarHubProfile?.relationship !== 'friend' || avatarHubBusy === 'invite')}
-                    onPress={() => availability.isAvailable('social') ? void inviteAvatarHubPlayer() : availability.showUnavailable('social')}
-                  >
-                    {availability.isAvailable('social') ? <MessageCircle size={20} color="#F4C95D" strokeWidth={2.8} /> : <LockKeyhole size={20} color={ui.text.muted} strokeWidth={2.8} />}
-                    <Text style={styles.avatarHubActionText}>{availability.isAvailable('social') ? 'Invite' : 'Unavailable'}</Text>
-                  </Pressable> : null}
                 </View>
-                {availability.isVisible('social') ? <>
-                <Text style={styles.avatarHubSectionTitle}>{availability.isAvailable('social') ? 'Send Gift' : 'Gifts Unavailable'}</Text>
-                {availability.isAvailable('social') ? <View style={styles.giftGrid}>
-                  {TABLE_GIFTS.map(gift => (
-                    <Pressable
-                      key={gift.id}
-                      style={[
-                        styles.giftChip,
-                        { borderColor: gift.accent },
-                        (avatarHubBusy === gift.id || (user?.currency.coins ?? 0) < gift.price) && styles.avatarHubActionDisabled,
-                      ]}
-                      disabled={!avatarHubUserId || !!avatarHubBusy || (user?.currency.coins ?? 0) < gift.price}
-                      onPress={() => avatarHubUserId ? sendGiftToPlayer(avatarHubUserId, gift.id) : undefined}
-                    >
-                      <Text style={styles.giftIcon}>{gift.icon}</Text>
-                      <View style={styles.giftCopy}>
-                        <Text style={styles.giftChipText} numberOfLines={1}>{gift.label}</Text>
-                        <Text style={[styles.giftPrice, { color: gift.accent }]} numberOfLines={1}>{gift.price} coins</Text>
-                      </View>
-                    </Pressable>
+              </View>
+            ) : null}
+
+            {activeOverlay === 'summary' ? (
+              <View style={styles.overlay}>
+                <View style={styles.overlayCard}>
+                  <Text style={styles.overlayTitle}>
+                    {state.completed ? 'Game Complete' : `Round ${state.lastRoundNumber} Complete`}
+                  </Text>
+                  {state.lastRoundScores?.map((score, index) => (
+                    <Text key={state.players[index]?.id ?? index} style={styles.summaryLine}>
+                      {state.players[index]?.name ?? `Player ${index + 1}`}: {score}
+                      {state.lastRoundTotals ? `  Total ${state.lastRoundTotals[index] ?? score}` : ''}
+                    </Text>
                   ))}
-                </View> : null}
-                </> : null}
+                  {state.completed && matchProgression ? <RewardSummary progression={matchProgression} /> : null}
+                  <Pressable
+                    style={styles.summaryButton}
+                    onPress={() => {
+                      if (state.completed) navigation.replace('Lobby');
+                      else {
+                        if (roundSummaryKey) setDismissedSummaryKey(roundSummaryKey);
+                        if (isOnline && token && roomCode && state.phase === 'roundSummary') {
+                          sendGameIntent(token, roomCode, 'continueRound').catch(error => {
+                            if (roundSummaryKey) setDismissedSummaryKey(null);
+                            handleOnlineActionError('Continue rejected', error);
+                          });
+                        } else if (!isOnline && state.phase === 'roundSummary') {
+                          const result = continueAfterRoundSummary(state);
+                          if (result.error) {
+                            if (roundSummaryKey) setDismissedSummaryKey(null);
+                            Alert.alert('Continue rejected', result.error);
+                            return;
+                          }
+                          sweepStarter.current = null;
+                          setSweepActive(false);
+                          setHeld(null);
+                          setPending(null);
+                          setSelectedCell(null);
+                          setActiveSource(null);
+                          setHeldMustReplace(false);
+                          setHeldCanDiscard(false);
+                          setLocked(false);
+                          setState(result.state as GameState);
+                        }
+                      }
+                    }}
+                  >
+                    <Text style={styles.summaryButtonText}>
+                      {state.completed ? 'Back to Lobby' : 'Next Round'}
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
-            )}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+            ) : null}
 
-      <Modal
-        transparent
-        visible={isFocused && !!turnNotice}
-        animationType="fade"
-        onRequestClose={() => setTurnNotice(null)}
-      >
-        <View style={styles.noticeScrim}>
-          <View style={[styles.noticeCard, turnNotice?.tone === 'warning' && styles.noticeCardWarning]}>
-            <Text style={[styles.noticeTitle, turnNotice?.tone === 'warning' && styles.noticeTitleWarning]}>
-              {turnNotice?.title}
-            </Text>
-            <Text style={styles.noticeBody}>{turnNotice?.body}</Text>
-            <Pressable
-              style={[styles.noticeButton, turnNotice?.tone === 'warning' && styles.noticeButtonWarning]}
-              onPress={() => setTurnNotice(null)}
-            >
-              <Text style={styles.noticeButtonText}>OK</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Modal Layer */}
-      <Modal
-        transparent
-        visible={isFocused && alertSettingsOpen}
-        animationType="fade"
-        onRequestClose={() => setAlertSettingsOpen(false)}
-      >
-        <View style={styles.settingsScrim}>
-          <View style={styles.settingsCard}>
-            <View style={styles.settingsHeader}>
-              <Text style={styles.settingsTitle}>Settings</Text>
-              <Pressable style={styles.settingsCloseButton} onPress={() => setAlertSettingsOpen(false)}>
-                <Text style={styles.chatCloseText}>X</Text>
-              </Pressable>
-            </View>
-            <View style={styles.settingsSectionHeader}>
-              <Bell size={18} color={ui.palette.gold} strokeWidth={2.5} />
-              <Text style={styles.settingsSectionTitle}>Turn Alerts</Text>
-            </View>
-            <View style={styles.settingsRow}>
-              <Text style={styles.settingsLabel}>Popups</Text>
-              <Switch
-                value={gameplayPrefs.turnAlerts}
-                onValueChange={value => setGameplayPreferences({ turnAlerts: value })}
-                thumbColor={gameplayPrefs.turnAlerts ? '#67E0B0' : '#444'}
-                trackColor={{ false: '#555', true: '#67E0B0' }}
-              />
-            </View>
-            <View style={styles.settingsRow}>
-              <Text style={styles.settingsLabel}>Sound</Text>
-              <Switch
-                value={gameplayPrefs.sound}
-                onValueChange={value => setGameplayPreferences({ sound: value })}
-                thumbColor={gameplayPrefs.sound ? '#67E0B0' : '#444'}
-                trackColor={{ false: '#555', true: '#67E0B0' }}
-              />
-            </View>
-            <View style={styles.settingsRow}>
-              <Text style={styles.settingsLabel}>Vibrate</Text>
-              <Switch
-                value={gameplayPrefs.vibrate}
-                onValueChange={value => setGameplayPreferences({ vibrate: value })}
-                thumbColor={gameplayPrefs.vibrate ? '#67E0B0' : '#444'}
-                trackColor={{ false: '#555', true: '#67E0B0' }}
-              />
-            </View>
-            <Pressable style={styles.settingsDoneButton} onPress={() => setAlertSettingsOpen(false)}>
-              <Text style={styles.settingsDoneText}>Done</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Pass-and-play peek handoff */}
-      <Modal transparent visible={isFocused && showPassOverlay} animationType="fade">
-        <View style={styles.overlay}>
-          <View style={styles.overlayCard}>
-            <Text style={styles.overlayTitle}>{passPeekPlayer?.name ?? 'Player'}'s Peek</Text>
-            <Text style={styles.overlayBody}>Pass the device. Flip two cards, then hand it to the next player.</Text>
-            <Pressable
-              style={styles.overlayButton}
-              onPress={() => {
-                if (passPeekPromptKey) setDismissedPeekPromptKey(passPeekPromptKey);
-              }}
-            >
-              <Text style={styles.overlayButtonText}>OK</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal transparent visible={isFocused && showRoundSummary} animationType="fade">
-        <View style={styles.overlay}>
-          <View style={styles.overlayCard}>
-            <Text style={styles.overlayTitle}>
-              {state.completed ? 'Game Complete' : `Round ${state.lastRoundNumber} Complete`}
-            </Text>
-            {state.lastRoundScores?.map((score, index) => (
-              <Text key={state.players[index]?.id ?? index} style={styles.summaryLine}>
-                {state.players[index]?.name ?? `Player ${index + 1}`}: {score}
-                {state.lastRoundTotals ? `  Total ${state.lastRoundTotals[index] ?? score}` : ''}
-              </Text>
-            ))}
-            {state.completed && matchProgression ? <RewardSummary progression={matchProgression} /> : null}
-            <Pressable
-              style={styles.summaryButton}
-              onPress={() => {
-                if (state.completed) navigation.replace('Lobby');
-                else {
-                  if (roundSummaryKey) setDismissedSummaryKey(roundSummaryKey);
-                  if (isOnline && token && roomCode && state.phase === 'roundSummary') {
-                    sendGameIntent(token, roomCode, 'continueRound').catch(error => {
-                      if (roundSummaryKey) setDismissedSummaryKey(null);
-                      handleOnlineActionError('Continue rejected', error);
-                    });
-                  } else if (!isOnline && state.phase === 'roundSummary') {
-                    const result = continueAfterRoundSummary(state);
-                    if (result.error) {
-                      if (roundSummaryKey) setDismissedSummaryKey(null);
-                      Alert.alert('Continue rejected', result.error);
-                      return;
-                    }
-                    sweepStarter.current = null;
-                    setSweepActive(false);
-                    setHeld(null);
-                    setPending(null);
-                    setSelectedCell(null);
-                    setActiveSource(null);
-                    setHeldMustReplace(false);
-                    setHeldCanDiscard(false);
-                    setLocked(false);
-                    setState(result.state as GameState);
-                  }
-                }
-              }}
-            >
-              <Text style={styles.summaryButtonText}>
-                {state.completed ? 'Back to Lobby' : 'Next Round'}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal transparent visible={isFocused && isOnline && chatOpen} animationType="slide" onRequestClose={() => setChatOpen(false)}>
-        <KeyboardAvoidingView
-          style={styles.chatOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <Pressable style={styles.chatDismissArea} onPress={() => setChatOpen(false)} />
-          <View style={[styles.chatSheet, { paddingBottom: Math.max(12, insets.bottom + 8) }]}>
-            <View style={styles.chatHeader}>
-              <Text style={styles.chatTitle}>Game Chat</Text>
-              <Pressable style={styles.chatCloseButton} onPress={() => setChatOpen(false)}>
-                <Text style={styles.chatCloseText}>X</Text>
-              </Pressable>
-            </View>
-
-            <ScrollView
-              ref={chatScrollRef}
-              style={styles.chatMessages}
-              contentContainerStyle={styles.chatMessagesContent}
-              onContentSizeChange={() => chatScrollRef.current?.scrollToEnd({ animated: true })}
-              keyboardShouldPersistTaps="handled"
-            >
-              {chatMessages.length ? chatMessages.map(message => {
-                const mine = message.userId === user?.userId;
-                return (
-                  <View key={message.id} style={[styles.chatBubble, mine && styles.chatBubbleMine]}>
-                    <Text style={[styles.chatName, mine && styles.chatNameMine]} numberOfLines={1}>
-                      {mine ? 'You' : message.displayName}
-                    </Text>
-                    <Text style={[
-                      styles.chatMessageText,
-                      message.type === 'emoji' && styles.chatEmojiText,
-                      message.type === 'sticker' && styles.chatStickerText,
-                      message.type === 'gift' && styles.chatGiftText,
-                    ]}>
-                      {message.type === 'gift' && message.targetDisplayName
-                        ? `${message.giftIcon || '\u{1F381}'} ${message.text} to ${message.targetDisplayName}`
-                        : message.text}
-                    </Text>
-                  </View>
-                );
-              }) : (
-                <Text style={styles.chatEmpty}>No messages yet.</Text>
-              )}
-            </ScrollView>
-
-            <Text style={styles.chatSectionLabel}>Quick Chat</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickChatRow} keyboardShouldPersistTaps="handled">
-              {QUICK_CHAT_PRESETS.map(preset => (
-                <Pressable
-                  key={preset}
-                  style={[styles.quickChatChip, chatSending && styles.chatDisabled]}
-                  disabled={chatSending}
-                  onPress={() => onSendChat('preset', preset)}
-                >
-                  <Text style={styles.quickChatText}>{preset}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.emojiRow} keyboardShouldPersistTaps="handled">
-              {QUICK_CHAT_EMOJIS.map(emoji => (
-                <Pressable
-                  key={emoji}
-                  style={[styles.emojiChip, chatSending && styles.chatDisabled]}
-                  disabled={chatSending}
-                  onPress={() => onSendChat('emoji', emoji)}
-                >
-                  <Text style={styles.emojiText}>{emoji}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-
-            <Text style={styles.chatSectionLabel}>Stickers</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.stickerRow} keyboardShouldPersistTaps="handled">
-              {QUICK_CHAT_STICKERS.map(sticker => (
-                <Pressable
-                  key={sticker}
-                  style={[styles.stickerChip, chatSending && styles.chatDisabled]}
-                  disabled={chatSending}
-                  onPress={() => onSendChat('sticker', sticker)}
-                >
-                  <Text style={styles.stickerText}>{sticker}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-
-            <View style={styles.chatInputRow}>
-              <TextInput
-                value={chatText}
-                onChangeText={setChatText}
-                placeholder="Type a message"
-                placeholderTextColor="#6F789E"
-                style={styles.chatInput}
-                maxLength={160}
-                multiline
-              />
-              <Pressable
-                style={[styles.chatSendButton, (!chatText.trim() || chatSending) && styles.chatSendButtonDisabled]}
-                disabled={!chatText.trim() || chatSending}
-                onPress={() => onSendChat('text', chatText)}
+            {activeOverlay === 'chat' ? (
+              <KeyboardAvoidingView
+                style={styles.chatOverlay}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
               >
-                <Text style={styles.chatSendText}>Send</Text>
-              </Pressable>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      <Modal transparent visible={isFocused && !!user?.club?.clubId && clubChatOpen} animationType="slide" onRequestClose={() => setClubChatOpen(false)}>
-        <KeyboardAvoidingView
-          style={styles.chatOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <Pressable style={styles.chatDismissArea} onPress={() => setClubChatOpen(false)} />
-          <View style={[styles.chatSheet, { paddingBottom: Math.max(12, insets.bottom + 8) }]}>
-            <View style={styles.chatHeader}>
-              <View>
-                <Text style={styles.chatTitle}>Club Chat</Text>
-                <Text style={styles.clubChatSubtitle} numberOfLines={1}>{clubProfile?.name ?? user?.club?.name ?? 'Your club'}</Text>
-              </View>
-              <Pressable style={styles.chatCloseButton} onPress={() => setClubChatOpen(false)}>
-                <Text style={styles.chatCloseText}>X</Text>
-              </Pressable>
-            </View>
-
-            <ScrollView
-              ref={clubChatScrollRef}
-              style={styles.chatMessages}
-              contentContainerStyle={styles.chatMessagesContent}
-              onContentSizeChange={() => clubChatScrollRef.current?.scrollToEnd({ animated: true })}
-              keyboardShouldPersistTaps="handled"
-            >
-              {clubChatMessages.length ? clubChatMessages.map(message => {
-                const mine = message.userId === user?.userId;
-                return (
-                  <View key={message.id} style={[styles.chatBubble, mine && styles.chatBubbleMine]}>
-                    <Text style={[styles.chatName, mine && styles.chatNameMine]} numberOfLines={1}>
-                      {mine ? 'You' : message.displayName}
-                    </Text>
-                    <Text style={[
-                      styles.chatMessageText,
-                      message.type === 'emoji' && styles.chatEmojiText,
-                      message.type === 'sticker' && styles.chatStickerText,
-                    ]}>
-                      {message.text}
-                    </Text>
+                <Pressable style={styles.chatDismissArea} onPress={() => setChatOpen(false)} />
+                <View style={[styles.chatSheet, { paddingBottom: Math.max(12, insets.bottom + 8) }]}>
+                  <View style={styles.chatHeader}>
+                    <Text style={styles.chatTitle}>Game Chat</Text>
+                    <Pressable style={styles.chatCloseButton} onPress={() => setChatOpen(false)}>
+                      <Text style={styles.chatCloseText}>X</Text>
+                    </Pressable>
                   </View>
-                );
-              }) : (
-                <Text style={styles.chatEmpty}>No club messages yet.</Text>
-              )}
-            </ScrollView>
 
-            <View style={styles.chatInputRow}>
-              <TextInput
-                value={clubChatText}
-                onChangeText={setClubChatText}
-                placeholder="Message your club"
-                placeholderTextColor="#6F789E"
-                style={styles.chatInput}
-                maxLength={160}
-                multiline
-              />
-              <Pressable
-                style={[styles.chatSendButton, (!clubChatText.trim() || clubChatSending) && styles.chatSendButtonDisabled]}
-                disabled={!clubChatText.trim() || clubChatSending}
-                onPress={() => onSendClubChat(clubChatText)}
+                  <ScrollView
+                    ref={chatScrollRef}
+                    style={styles.chatMessages}
+                    contentContainerStyle={styles.chatMessagesContent}
+                    onContentSizeChange={() => chatScrollRef.current?.scrollToEnd({ animated: true })}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    {chatMessages.length ? chatMessages.map(message => {
+                      const mine = message.userId === user?.userId;
+                      return (
+                        <View key={message.id} style={[styles.chatBubble, mine && styles.chatBubbleMine]}>
+                          <Text style={[styles.chatName, mine && styles.chatNameMine]} numberOfLines={1}>
+                            {mine ? 'You' : message.displayName}
+                          </Text>
+                          <Text style={[
+                            styles.chatMessageText,
+                            message.type === 'emoji' && styles.chatEmojiText,
+                            message.type === 'sticker' && styles.chatStickerText,
+                            message.type === 'gift' && styles.chatGiftText,
+                          ]}>
+                            {message.type === 'gift' && message.targetDisplayName
+                              ? `${message.giftIcon || '\u{1F381}'} ${message.text} to ${message.targetDisplayName}`
+                              : message.text}
+                          </Text>
+                        </View>
+                      );
+                    }) : (
+                      <Text style={styles.chatEmpty}>No messages yet.</Text>
+                    )}
+                  </ScrollView>
+
+                  <Text style={styles.chatSectionLabel}>Quick Chat</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickChatRow} keyboardShouldPersistTaps="handled">
+                    {QUICK_CHAT_PRESETS.map(preset => (
+                      <Pressable
+                        key={preset}
+                        style={[styles.quickChatChip, chatSending && styles.chatDisabled]}
+                        disabled={chatSending}
+                        onPress={() => onSendChat('preset', preset)}
+                      >
+                        <Text style={styles.quickChatText}>{preset}</Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.emojiRow} keyboardShouldPersistTaps="handled">
+                    {QUICK_CHAT_EMOJIS.map(emoji => (
+                      <Pressable
+                        key={emoji}
+                        style={[styles.emojiChip, chatSending && styles.chatDisabled]}
+                        disabled={chatSending}
+                        onPress={() => onSendChat('emoji', emoji)}
+                      >
+                        <Text style={styles.emojiText}>{emoji}</Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+
+                  <Text style={styles.chatSectionLabel}>Stickers</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.stickerRow} keyboardShouldPersistTaps="handled">
+                    {QUICK_CHAT_STICKERS.map(sticker => (
+                      <Pressable
+                        key={sticker}
+                        style={[styles.stickerChip, chatSending && styles.chatDisabled]}
+                        disabled={chatSending}
+                        onPress={() => onSendChat('sticker', sticker)}
+                      >
+                        <Text style={styles.stickerText}>{sticker}</Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+
+                  <View style={styles.chatInputRow}>
+                    <TextInput
+                      value={chatText}
+                      onChangeText={setChatText}
+                      placeholder="Type a message"
+                      placeholderTextColor="#6F789E"
+                      style={styles.chatInput}
+                      maxLength={160}
+                      multiline
+                    />
+                    <Pressable
+                      style={[styles.chatSendButton, (!chatText.trim() || chatSending) && styles.chatSendButtonDisabled]}
+                      disabled={!chatText.trim() || chatSending}
+                      onPress={() => onSendChat('text', chatText)}
+                    >
+                      <Text style={styles.chatSendText}>Send</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </KeyboardAvoidingView>
+            ) : null}
+
+            {activeOverlay === 'clubChat' ? (
+              <KeyboardAvoidingView
+                style={styles.chatOverlay}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
               >
-                <Text style={styles.chatSendText}>Send</Text>
-              </Pressable>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+                <Pressable style={styles.chatDismissArea} onPress={() => setClubChatOpen(false)} />
+                <View style={[styles.chatSheet, { paddingBottom: Math.max(12, insets.bottom + 8) }]}>
+                  <View style={styles.chatHeader}>
+                    <View>
+                      <Text style={styles.chatTitle}>Club Chat</Text>
+                      <Text style={styles.clubChatSubtitle} numberOfLines={1}>{clubProfile?.name ?? user?.club?.name ?? 'Your club'}</Text>
+                    </View>
+                    <Pressable style={styles.chatCloseButton} onPress={() => setClubChatOpen(false)}>
+                      <Text style={styles.chatCloseText}>X</Text>
+                    </Pressable>
+                  </View>
 
+                  <ScrollView
+                    ref={clubChatScrollRef}
+                    style={styles.chatMessages}
+                    contentContainerStyle={styles.chatMessagesContent}
+                    onContentSizeChange={() => clubChatScrollRef.current?.scrollToEnd({ animated: true })}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    {clubChatMessages.length ? clubChatMessages.map(message => {
+                      const mine = message.userId === user?.userId;
+                      return (
+                        <View key={message.id} style={[styles.chatBubble, mine && styles.chatBubbleMine]}>
+                          <Text style={[styles.chatName, mine && styles.chatNameMine]} numberOfLines={1}>
+                            {mine ? 'You' : message.displayName}
+                          </Text>
+                          <Text style={[
+                            styles.chatMessageText,
+                            message.type === 'emoji' && styles.chatEmojiText,
+                            message.type === 'sticker' && styles.chatStickerText,
+                          ]}>
+                            {message.text}
+                          </Text>
+                        </View>
+                      );
+                    }) : (
+                      <Text style={styles.chatEmpty}>No club messages yet.</Text>
+                    )}
+                  </ScrollView>
+
+                  <View style={styles.chatInputRow}>
+                    <TextInput
+                      value={clubChatText}
+                      onChangeText={setClubChatText}
+                      placeholder="Message your club"
+                      placeholderTextColor="#6F789E"
+                      style={styles.chatInput}
+                      maxLength={160}
+                      multiline
+                    />
+                    <Pressable
+                      style={[styles.chatSendButton, (!clubChatText.trim() || clubChatSending) && styles.chatSendButtonDisabled]}
+                      disabled={!clubChatText.trim() || clubChatSending}
+                      onPress={() => onSendClubChat(clubChatText)}
+                    >
+                      <Text style={styles.chatSendText}>Send</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </KeyboardAvoidingView>
+            ) : null}
+          </View>
+          {recoveryPanel ? (
+            <View style={[styles.modalRecovery, { paddingBottom: Math.max(12, insets.bottom + 6) }]}>
+              {recoveryPanel}
+            </View>
+          ) : null}
+        </View>
+      </Modal>
     </LinearGradient>
   );
 }
@@ -3547,51 +3548,9 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: '#67E0B0',
   },
-  takeControlButton: {
-    width: '100%',
-    minHeight: 48,
-    marginTop: 20,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    backgroundColor: '#67E0B0',
-  },
-  takeControlButtonDisabled: { opacity: 0.58 },
-  takeControlButtonPressed: { opacity: 0.82 },
-  takeControlButtonText: { color: '#1A2943', fontSize: 15, fontWeight: '900' },
-  autoplayControlScrim: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.68)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-  },
-  autoplayControlCard: {
-    width: '100%',
-    maxWidth: 360,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#67E0B0',
-    backgroundColor: '#102E2A',
-    paddingHorizontal: 20,
-    paddingVertical: 22,
-    alignItems: 'center',
-  },
-  autoplayControlIcon: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    borderWidth: 2,
-    borderColor: '#67E0B0',
-    backgroundColor: '#1A2943',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  autoplayControlTitle: { color: '#67E0B0', fontSize: 24, fontWeight: '900', textAlign: 'center' },
-  autoplayControlBody: { color: '#F7FAFC', fontSize: 14, fontWeight: '800', textAlign: 'center', marginTop: 8, lineHeight: 20 },
+  modalHost: { flex: 1 },
+  modalContent: { flex: 1 },
+  modalRecovery: { backgroundColor: '#1A2943', padding: 12, borderTopWidth: 1, borderColor: '#67E0B0' },
   turnBadge: {
     color: '#1A2943',
     backgroundColor: '#67E0B0',

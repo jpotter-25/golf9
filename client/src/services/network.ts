@@ -270,9 +270,10 @@ export function sendGameIntent(token: string, code: string, type: string, payloa
 export function takeBackControl(token: string, code: string): Promise<{ game: GameState }> {
   const s = connect(token);
   return new Promise((resolve, reject) => {
-    s.emit('game:take-control', { code }, (res: { error?: string; game?: GameState }) => {
-      if (res.error) reject(new Error(res.error));
-      else if (!res.game) reject(new Error('Unable to restore player control.'));
+    s.timeout(10_000).emit('game:take-control', { code }, (error: Error | null, res?: { error?: string; game?: GameState }) => {
+      if (error) reject(new Error('Connection interrupted. Please try Take Back Control again.'));
+      else if (res?.error) reject(new Error(res.error));
+      else if (!res?.game) reject(new Error('Unable to restore player control.'));
       else resolve({ game: res.game });
     });
   });

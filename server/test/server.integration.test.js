@@ -1994,6 +1994,79 @@ test('confirmed online forfeits leave the UI, permanently hand the seat to autop
   });
 });
 
+test('both AFK seats can reclaim after foreground return and reconnect, cancelling queued AI moves', async () => {
+  await withSeededServer({ afkConfig: { takeoverMisses: 1, sourceCueMs: 1500, commitMs: 5000 } }, async baseUrl => {
+    const one = await signup(baseUrl, 'AfkHost');
+    const two = await signup(baseUrl, 'AfkGuest');
+    const outsider = await signup(baseUrl, 'AfkOther');
+    const { room } = await json(await fetch(`${baseUrl}/rooms`, {
+      method: 'POST', headers: authHeaders(one.token), body: JSON.stringify({ maxPlayers: 2, rounds: 5 }),
+    }));
+    const code = room.code;
+    await json(await fetch(`${baseUrl}/rooms/${code}/join`, { method: 'POST', headers: authHeaders(two.token) }));
+    const connectPlayer = player => io(baseUrl, { transports: ['websocket'], auth: { token: player.token }, forceNew: true });
+    const host = connectPlayer(one);
+    let guest = connectPlayer(two);
+    const other = connectPlayer(outsider);
+    try {
+      await Promise.all([once(host, 'connect'), once(guest, 'connect'), once(other, 'connect')]);
+      await emitAck(host, 'room:join', { code });
+      await emitAck(guest, 'room:join', { code });
+      assert.equal((await emitAck(host, 'room:start', { code })).ok, true);
+      await emitAck(host, 'presence:state', { code, foreground: false });
+      await emitAck(guest, 'presence:state', { code, foreground: false });
+      // Let the real initial-peek deadline expire for both players, not a forged AFK flag.
+      const [hostAuto, guestAuto] = await Promise.all([
+        waitForSocketEvent(host, 'game:state', game => game.phase === 'turn' && game.viewerAutoplay?.active, 35_000),
+        waitForSocketEvent(guest, 'game:state', game => game.phase === 'turn' && game.viewerAutoplay?.active, 35_000),
+      ]);
+      assert.equal((await emitAck(other, 'game:take-control', { code })).error, 'You are not seated in this game.');
+
+      guest.disconnect();
+      guest = connectPlayer(two);
+      await once(guest, 'connect');
+      const returned = await emitAck(guest, 'room:join', { code });
+      assert.equal(returned.game.viewerAutoplay.active, true);
+      await emitAck(guest, 'presence:state', { code, foreground: true });
+      await emitAck(host, 'presence:state', { code, foreground: true });
+      // The starting seat is randomized; exercise both roles without assuming host goes first.
+      const activeUserId = hostAuto.players[hostAuto.currentPlayerIndex].userId;
+      const hostIsActive = activeUserId === one.user.userId;
+      const activeSocket = hostIsActive ? host : guest;
+      const waitingSocket = hostIsActive ? guest : host;
+      const activeAuto = hostIsActive ? hostAuto : guestAuto;
+      const waitingAuto = hostIsActive ? guestAuto : hostAuto;
+      const cueArrives = waitForSocketEvent(activeSocket, 'game:autoplay:cue', cue => cue.userId === activeUserId, 4000);
+      const waitingReclaimed = await emitAck(waitingSocket, 'game:take-control', { code });
+      assert.equal(waitingReclaimed.ok, true);
+      assert.equal(waitingReclaimed.game.viewerAutoplay.active, false);
+      assert.equal(waitingReclaimed.game.viewerAutoplay.automatedWindows, waitingAuto.viewerAutoplay.automatedWindows);
+
+      // Let the scheduled cue arrive, then cancel that already queued move.
+      await cueArrives;
+      const reclaimed = await emitAck(activeSocket, 'game:take-control', { code });
+      assert.equal(reclaimed.game.viewerAutoplay.active, false);
+      assert.ok(reclaimed.game.turnEndsAt > Date.now() + 40_000);
+      assert.equal((await emitAck(activeSocket, 'game:take-control', { code })).ok, true, 'reclaim is idempotent');
+      const drawn = await emitAck(activeSocket, 'game:intent', { code, actionId: 'afk-manual-draw', type: 'draw', payload: {} });
+      assert.equal(drawn.ok, true);
+      await new Promise(resolve => setTimeout(resolve, 5500));
+      const stable = await emitAck(activeSocket, 'room:join', { code });
+      assert.equal(stable.game.viewerAutoplay.active, false);
+      assert.equal(stable.game.viewerAutoplay.automatedWindows, activeAuto.viewerAutoplay.automatedWindows);
+      assert.equal(stable.game.viewerHeldCard.id, drawn.drawn.id, 'cancelled AI must not overwrite the manual draw');
+      assert.equal(stable.game.currentPlayerIndex, reclaimed.game.currentPlayerIndex);
+      const target = stable.game.players[stable.game.currentPlayerIndex].grid.flatMap((row, r) => row.map((card, c) => ({ card, r, c }))).find(cell => cell.card?.faceUp);
+      assert.equal((await emitAck(activeSocket, 'game:intent', { code, actionId: 'afk-manual-replace', type: 'replace', payload: { r: target.r, c: target.c } })).ok, true);
+      assert.equal((await emitAck(waitingSocket, 'game:intent', { code, actionId: 'afk-second-draw', type: 'draw', payload: {} })).ok, true);
+    } finally {
+      host.disconnect();
+      guest.disconnect();
+      other.disconnect();
+    }
+  });
+});
+
 test('loads durable profile stats and completed results', async () => {
   const token = 'seed-token';
   const userId = 'seed-user';
