@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { authConfig, PROVIDER_LABELS } from '../services/api';
 import type { AuthProviderKey, AuthProviderStatus } from '../services/api';
 import { availableSocialProviders } from '../services/socialAuth';
+import { isSocialAuthCancelled } from '../services/socialAuthErrors';
 import { AppleSignInButton } from './AppleSignInButton';
 import { ui } from '../ui/theme';
 
@@ -37,7 +38,9 @@ export function AccountControls({ onSessionEnd }: AccountControlsProps) {
       await linkSocialProvider(provider);
       Alert.alert('Account linked', `${PROVIDER_LABELS[provider]} can now sign in to this Nine Below profile.`);
     } catch (error) {
-      Alert.alert('Link failed', error instanceof Error ? error.message : 'Try again.');
+      if (!isSocialAuthCancelled(error)) {
+        Alert.alert('Link failed', error instanceof Error ? error.message : 'Try again.');
+      }
     } finally {
       setBusy(null);
     }
@@ -62,7 +65,9 @@ export function AccountControls({ onSessionEnd }: AccountControlsProps) {
       await deleteAccount(method, method === 'password' ? deletePassword : undefined);
       onSessionEnd?.();
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : 'Account deletion could not be completed.');
+      if (!isSocialAuthCancelled(error)) {
+        setDeleteError(error instanceof Error ? error.message : 'Account deletion could not be completed.');
+      }
       setBusy(null);
     }
   };

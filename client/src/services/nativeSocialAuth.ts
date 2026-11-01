@@ -6,6 +6,7 @@ import * as Crypto from 'expo-crypto';
 import * as WebBrowser from 'expo-web-browser';
 import { SOCIAL_AUTH_CONFIG } from '../config';
 import { socialChallenge } from './api';
+import { appleAuthorizationError } from './socialAuthErrors';
 import type { AuthConfig, AuthProviderKey, AuthProviderStatus, SocialAuthPayload, SocialAuthPurpose } from './api';
 
 const APPLE_RETURN_URL = 'com.potterwell.ninebelow://auth/apple';
@@ -86,7 +87,7 @@ async function appleCredential(purpose: SocialAuthPurpose, token?: string | null
     const result = await AppleAuthentication.signInAsync({
       requestedScopes: [AppleAuthentication.AppleAuthenticationScope.EMAIL],
       nonce: attempt.nonce, state: attempt.challengeId,
-    });
+    }).catch(error => { throw appleAuthorizationError(error); });
     if (!result.identityToken || !result.authorizationCode || result.state !== attempt.challengeId) throw new Error('Apple sign-in could not be verified.');
     return { ...base, idToken: result.identityToken, authorizationCode: result.authorizationCode };
   }

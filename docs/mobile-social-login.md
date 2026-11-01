@@ -1,8 +1,26 @@
-# Mobile social login rollout — October 30, 2026
+# Mobile social login rollout
 
 ## Status and scope
 
-### Latest: restart recovery and neutral buttons
+### November 1: incomplete iCloud setup and matching label sizes
+
+The owner reproduced Apple's native "Sign in with your Apple ID in Settings" prompt while Settings already displayed an Apple Account. The same screen showed **iCloud: Set Up**. The installed Expo Apple adapter maps Apple's native unknown authorization error to `ERR_REQUEST_UNKNOWN`; Nine Below had displayed its unhelpful raw message. The owner then completed iCloud setup and confirmed successful account creation and login on the existing installed build. This was a device/account-setup issue, not a provider credential or backend fix. Read-only checks of live `/health/ready` returned 200 and `/auth/config` reported Apple iOS/Android enabled.
+
+Updated client behavior:
+
+- A native Apple unknown error explains **Settings > your name > iCloud > Set Up**, even when the Apple Account already appears signed in, and asks the player to check two-factor authentication. It gives retry/support guidance without claiming every unknown error has the same cause. iOS supplies no specific "iCloud setup incomplete" flag here, so the app cannot reliably preflight that state or replace Apple's own system alert.
+- Deliberate Apple cancellation is not presented as a failure during login, linking, or deletion verification. Other native errors receive safe actionable copy. Backend challenge errors and state/token verification failures remain distinct; no fallback bypasses native authorization.
+- Apple and Google now use the same shared 16-point, medium-weight label with identical font-scaling limits. The auto-sized iOS-native *button presentation* override was removed; the actual Apple sign-in flow still uses `AppleAuthentication.signInAsync`, with the same nonce, state, scopes and server verification.
+- The custom Apple presentation uses the unmodified path and padded 31x44 viewBox from Apple's **Logo - SIWA - Left-aligned - Black - Medium.svg**, downloaded from [Apple Design Resources](https://developer.apple.com/design/resources/) via `https://devimages-cdn.apple.com/design/resources/download/Logo-Sign-in-with-Apple.dmg`. Black logo/text and a white surface are preserved. Apple's [custom-button guidance](https://developer.apple.com/design/human-interface-guidelines/sign-in-with-apple/) permits coordinating typography; final native visual acceptance and App Review remain separate from local layout checks.
+- Facebook iOS availability remains unchanged/off. Provider credentials, entitlement, account linking rules, and production database records were not changed.
+
+Verification: **44 client tests**, **274 server tests**, client lint/typecheck, and iOS/Android/web source exports pass. Browser preview of actual shared components at 320/375/414-pixel phone widths confirms 16px labels and equal 52px button heights. This is not physical-device rendering verification of the changed build. The owner verified Apple authentication on the previously installed build after completing account setup.
+
+**Release status:** these client refinements, along with the prior autoplay-recovery changes, require new mobile packages. No new signed IPA/AAB or store upload was created for this change; the historical distribution record below remains the last verified package record.
+
+Tester guidance: complete any pending Apple Account/iCloud setup, verify two-factor authentication, then reopen Nine Below. Existing players who want to add Apple to an existing profile should sign in using the old method and link Apple in account controls, rather than create a duplicate profile. Do not request passwords, MFA codes or identity tokens in support reports. [Apple's sign-in requirements](https://support.apple.com/en-ca/102379).
+
+### October 30: restart recovery and neutral buttons
 
 The October 30 production login outage was shared storage readiness, not a Google, Apple, or Facebook credential failure. Railway deployment `b7e1a365-a398-44ed-9756-7097849b7a10` logs show a handoff completion at 19:05:21 CDT, a `STALE_STATE_WRITE` fence and restart at 19:05:22, then a process waiting for a deployment health probe from 19:05:24 until a manual health request around 20:05:59. A restarted process was not receiving another deployment probe.
 
@@ -66,7 +84,7 @@ Build tracking:
 - A provider identity already linked elsewhere cannot be attached to a second player. Matching email addresses never automatically merge players.
 - New player: provider login still requires choosing a valid display name and supplying the Nine Below alpha invite when the invite gate is enabled.
 - Apple can hide the personal email behind its private relay. Nine Below requests email, not a real name; the public display name is chosen separately.
-- iOS uses Apple's native button and prompt; Android opens Apple in the system browser. Installing through Google Play does not restrict which identity provider a player may use.
+- iOS uses Apple's native authorization prompt with a shared custom button; Android opens Apple in the system browser. Installing through Google Play does not restrict which identity provider a player may use.
 - iOS Facebook uses Limited Login with public_profile, not an access token sent to Graph. Advertising tracking, advertiser-ID collection, and automatic app events stay off.
 - Account deletion re-verifies the selected method, revokes every stored Apple client grant, then deletes the game account. If Apple revocation is unavailable, deletion returns a retryable error and does not silently skip revocation.
 

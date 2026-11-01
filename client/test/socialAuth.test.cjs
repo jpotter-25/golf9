@@ -5,6 +5,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 const test = require('node:test');
 const ts = require('typescript');
+const { compile } = require('./helpers/topBarFixture.cjs');
+const authErrors = compile('src/services/socialAuthErrors.ts');
 
 const config = { providers: { google: true, facebook: true, apple: true },
   mobileProviders: { appleIos: true, appleAndroid: true, facebookIos: true } };
@@ -12,11 +14,13 @@ function fixture(platform, overrides = {}) {
   const calls = [];
   const exports = {};
   const modules = {
+    './socialAuthErrors': authErrors,
     'react-native': { Platform: { OS: platform } },
     '../config': { SOCIAL_AUTH_CONFIG: { googleWebClientId: 'web-id', googleIosClientId: 'ios-id',
       facebookAppId: 'fb-id', facebookClientToken: 'public-client-token', appleEnabled: true, ...overrides.config } },
     './api': { socialChallenge: async (payload, token) => {
       calls.push(['challenge', payload, token]);
+      if (overrides.challengeError) throw overrides.challengeError;
       return { challengeId: 'challenge-123', nonce: 'nonce-123',
         authorizationUrl: 'https://appleid.apple.com/auth/authorize?state=state' };
     } },
@@ -39,7 +43,9 @@ function fixture(platform, overrides = {}) {
     'expo-apple-authentication': {
       AppleAuthenticationScope: { EMAIL: 'email' },
       isAvailableAsync: async () => overrides.appleAvailable !== false,
-      signInAsync: async options => { calls.push(['apple-native', options]); return {
+      signInAsync: async options => { calls.push(['apple-native', options]);
+        if (overrides.appleError) throw overrides.appleError;
+        return {
         identityToken: 'apple-id-token', authorizationCode: 'one-use-code', state: overrides.wrongState ? 'other' : options.state,
       }; },
     },
@@ -73,6 +79,49 @@ test('iOS only advertises social providers when Apple and each provider are read
   }
   assert.equal((await fixture('ios', { config: { googleIosClientId: '' } }).api.availableSocialProviders(config)).google, false);
   assert.equal((await f.api.availableSocialProviders({ ...config, mobileProviders: {} })).apple, false);
+});
+
+test('native Apple unknown failure offers account setup checks without exposing SDK details', async () => {
+  const f = fixture('ios', { appleError: { code: 'ERR_REQUEST_UNKNOWN',
+    message: 'private SDK detail', userInfo: { token: 'secret-token' } } });
+  await assert.rejects(f.api.getSocialCredential('apple'), error => {
+    assert.match(error.message, /iCloud.*Set Up/);
+    assert.match(error.message, /already appears signed in/);
+    assert.match(error.message, /two-factor authentication/);
+    assert.match(error.message, /ERR_REQUEST_UNKNOWN/);
+    assert.doesNotMatch(error.message, /private SDK detail|secret-token/);
+    return true;
+  });
+  assert.equal(f.calls.filter(call => call[0] === 'apple-native').length, 1);
+  assert.equal(f.calls.some(call => call[0] === 'apple-browser'), false);
+});
+
+test('Apple cancellation remains distinguishable from failure in login, linking and deletion', async () => {
+  for (const purpose of ['login', 'link', 'delete']) {
+    await assert.rejects(fixture('ios', { appleError: { code: 'ERR_REQUEST_CANCELED' } })
+      .api.getSocialCredential('apple', purpose), error => {
+        assert.equal(authErrors.isSocialAuthCancelled(error), true);
+        return true;
+      });
+  }
+  for (const value of [null, undefined, 'cancelled', {}, new Error('cancelled'),
+    { code: 'ERR_REQUEST_UNKNOWN' }]) assert.equal(authErrors.isSocialAuthCancelled(value), false);
+});
+
+test('native Apple failures fail closed and do not mislabel backend challenge errors', async () => {
+  for (const code of ['ERR_REQUEST_FAILED', 'ERR_INVALID_RESPONSE', 'ERR_REQUEST_NOT_HANDLED',
+    'ERR_REQUEST_NOT_INTERACTIVE', 'new-private-code']) {
+    await assert.rejects(fixture('ios', { appleError: { code, message: 'secret-native-detail' } })
+      .api.getSocialCredential('apple'), error => {
+        assert.equal(authErrors.isSocialAuthCancelled(error), false);
+        assert.doesNotMatch(error.message, /secret-native-detail/);
+        return true;
+      });
+  }
+  const challengeError = new Error('Persistent storage is unavailable.');
+  const f = fixture('ios', { challengeError });
+  await assert.rejects(f.api.getSocialCredential('apple'), error => error === challengeError);
+  assert.equal(f.calls.some(call => call[0] === 'apple-native'), false);
 });
 
 test('Google configures the iOS client ID and never checks Play Services on iOS', async () => {

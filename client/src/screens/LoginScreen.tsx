@@ -12,6 +12,7 @@ import { SERVER_URL } from '../config';
 import * as api from '../services/api';
 import { availableSocialProviders } from '../services/socialAuth';
 import { AppleSignInButton } from '../components/AppleSignInButton';
+import { isSocialAuthCancelled } from '../services/socialAuthErrors';
 import { SocialSignInButton } from '../components/SocialSignInButton';
 import { socialButtonStyles } from '../components/socialButtonStyles';
 import { ActionButton, PremiumPanel, ScreenHeader, ScreenShell, StatusBadge, ui } from '../ui';
@@ -99,7 +100,9 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
         setSocialInviteCode('');
       }
     } catch (error) {
-      Alert.alert(`${api.PROVIDER_LABELS[provider]} login failed`, error instanceof Error ? error.message : 'Please try again.');
+      if (!isSocialAuthCancelled(error)) {
+        Alert.alert(`${api.PROVIDER_LABELS[provider]} login failed`, error instanceof Error ? error.message : 'Please try again.');
+      }
     } finally {
       setLoading(false);
     }

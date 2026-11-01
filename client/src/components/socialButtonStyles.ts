@@ -1,7 +1,7 @@
 import { StyleSheet, useWindowDimensions } from 'react-native';
 
-// Apple retains its native control on iOS. The other providers share its
-// neutral light treatment, dimensions and spacing rather than competing colors.
+// All platforms/providers share text metrics as well as neutral light surfaces,
+// dimensions and spacing. Native provider authorization remains unchanged.
 export const SOCIAL_BUTTON_RADIUS = 10;
 export function useSocialButtonHeight() {
   const { fontScale } = useWindowDimensions();
