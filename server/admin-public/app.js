@@ -31,6 +31,41 @@ let earlyAccessPermissions = [];
 let earlyAccessEditingCampaignId = null;
 let healthPollTimer = null;
 let healthRequestInFlight = false;
+let catalogPreviewAssetUrl = '';
+
+const ADMIN_WORKSPACES = {
+  health: { group: 'Overview', title: 'Command Center', description: 'See what needs attention and confirm Nine Below is running smoothly.' },
+  players: { group: 'Community', title: 'Players', description: 'Find player accounts, understand their progress, and handle moderation safely.' },
+  clubs: { group: 'Community', title: 'Clubs', description: 'Review club health, membership, rewards, and community activity.' },
+  support: { group: 'Community', title: 'Player Support', description: 'Read player requests, respond clearly, and keep internal notes together.' },
+  invites: { group: 'Engagement', title: 'Invites', description: 'Create and manage secure access codes for new testers and players.' },
+  earlyAccess: { group: 'Engagement', title: 'Early Access', description: 'Guide waitlisted players from signup through onboarding and activation.' },
+  mail: { group: 'Engagement', title: 'Player Mail', description: 'Send useful inbox messages and rewards without writing technical payloads.' },
+  notifications: { group: 'Engagement', title: 'Notifications', description: 'Manage push templates and send timely messages to the right audience.' },
+  catalog: { group: 'Game Design', title: 'Design Studio', description: 'Create cosmetics visually, choose their player journey, and publish when ready.' },
+  economy: { group: 'Game Design', title: 'Economy', description: 'Balance coin entry points, wager tables, and long-term club goals.' },
+  competitive: { group: 'Game Design', title: 'Competitive', description: 'Tune ranked progression, preview outcomes, and manage seasons.' },
+  liveOps: { group: 'Game Design', title: 'Live Operations', description: 'Control feature availability, maintenance, and app release policy.' },
+  admins: { group: 'Administration', title: 'Admin Team', description: 'Manage staff access, roles, recovery, and account security.' },
+  audit: { group: 'Administration', title: 'Activity Log', description: 'Review who changed what and when across Nine Below.' },
+};
+
+const COSMETIC_TYPE_LABELS = {
+  cardBack: 'Card Back',
+  avatarIcon: 'Avatar Icon',
+  avatarFrame: 'Avatar Frame',
+  avatarAccessory: 'Avatar Accessory',
+  title: 'Title',
+  tableTheme: 'Table Theme',
+};
+
+const COSMETIC_SOURCE_LABELS = {
+  starter: 'Starter collection',
+  coin: 'Coin shop',
+  ranked: 'Ranked rewards',
+  club: 'Club rewards',
+  event: 'Limited event',
+};
 
 const NOTIFICATION_LABELS = {
   turn: 'Your Turn',
@@ -88,31 +123,86 @@ function renderConsole() {
   app.replaceChildren(template.content.cloneNode(true));
   bindTabs();
   bindConsoleActions();
+  applySavedConsoleDensity();
+  updateWorkspaceHeading('health');
   loadMetrics();
   startHealthPolling();
 }
 
 function bindTabs() {
-  document.querySelectorAll('.tabs button').forEach(button => {
+  document.querySelectorAll('.tabs button[data-tab]').forEach(button => {
     button.addEventListener('click', () => {
-      document.querySelectorAll('.tabs button').forEach(item => item.classList.remove('active'));
+      document.querySelectorAll('.tabs button[data-tab]').forEach(item => item.classList.remove('active'));
       document.querySelectorAll('.tab').forEach(item => item.classList.remove('active'));
       button.classList.add('active');
       document.querySelector(`#${button.dataset.tab}`)?.classList.add('active');
+      updateWorkspaceHeading(button.dataset.tab);
       startHealthPolling();
       if (button.dataset.tab === 'invites') loadInvites();
       if (button.dataset.tab === 'earlyAccess') loadEarlyAccess();
+      if (button.dataset.tab === 'support') loadTickets();
       if (button.dataset.tab === 'mail') loadMail();
       if (button.dataset.tab === 'economy') loadEconomy();
       if (button.dataset.tab === 'notifications') loadNotifications();
       if (button.dataset.tab === 'liveOps') loadLiveOps();
       if (button.dataset.tab === 'competitive') loadCompetitive();
+      if (button.dataset.tab === 'catalog') loadCatalog();
+      if (button.dataset.tab === 'clubs') loadClubs();
       if (button.dataset.tab === 'admins') loadAdmins();
     });
   });
 }
 
+function updateWorkspaceHeading(tab) {
+  const workspace = ADMIN_WORKSPACES[tab] || ADMIN_WORKSPACES.health;
+  const kicker = document.querySelector('#pageKicker');
+  const title = document.querySelector('#pageTitle');
+  const description = document.querySelector('#pageDescription');
+  if (kicker) kicker.textContent = workspace.group;
+  if (title) title.textContent = workspace.title;
+  if (description) description.textContent = workspace.description;
+  document.title = `${workspace.title} - Nine Below Admin`;
+}
+
+function filterAdminNavigation() {
+  const query = String(document.querySelector('#adminNavSearch')?.value || '').trim().toLowerCase();
+  let visibleButtons = 0;
+  document.querySelectorAll('.tabs .nav-group').forEach(group => {
+    let visibleInGroup = 0;
+    group.querySelectorAll('button[data-tab]').forEach(button => {
+      const workspace = ADMIN_WORKSPACES[button.dataset.tab];
+      const haystack = `${button.textContent} ${workspace?.group || ''} ${workspace?.description || ''}`.toLowerCase();
+      const visible = !query || haystack.includes(query);
+      button.classList.toggle('hidden', !visible);
+      if (visible) visibleInGroup += 1;
+    });
+    group.classList.toggle('hidden', visibleInGroup === 0);
+    visibleButtons += visibleInGroup;
+  });
+  document.querySelector('#navEmptyState')?.classList.toggle('hidden', visibleButtons > 0);
+}
+
+function applySavedConsoleDensity() {
+  const compact = typeof localStorage !== 'undefined' && localStorage.getItem('nineBelowAdminDensity') === 'compact';
+  const shell = document.querySelector('.console-shell');
+  const toggle = document.querySelector('#toggleConsoleDensity');
+  shell?.classList.toggle('compact-density', compact);
+  if (toggle) {
+    toggle.textContent = compact ? 'Compact view' : 'Comfortable view';
+    toggle.setAttribute('aria-pressed', compact ? 'true' : 'false');
+  }
+}
+
+function toggleConsoleDensity() {
+  const shell = document.querySelector('.console-shell');
+  const compact = !shell?.classList.contains('compact-density');
+  if (typeof localStorage !== 'undefined') localStorage.setItem('nineBelowAdminDensity', compact ? 'compact' : 'comfortable');
+  applySavedConsoleDensity();
+}
+
 function bindConsoleActions() {
+  document.querySelector('#adminNavSearch')?.addEventListener('input', filterAdminNavigation);
+  document.querySelector('#toggleConsoleDensity')?.addEventListener('click', toggleConsoleDensity);
   document.querySelector('#logoutButton').addEventListener('click', async () => {
     stopHealthPolling();
     await api('/auth/logout', { method: 'POST' }).catch(() => null);
@@ -178,10 +268,15 @@ function bindConsoleActions() {
   document.querySelector('#loadCatalog').addEventListener('click', loadCatalog);
   document.querySelector('#newCatalogItem').addEventListener('click', createCatalogItemDraft);
   document.querySelector('#publishCatalog').addEventListener('click', publishCatalog);
+  document.querySelector('#catalogSearch').addEventListener('input', renderCatalog);
   document.querySelector('#catalogFilter').addEventListener('change', renderCatalog);
   document.querySelector('#catalogStateFilter').addEventListener('change', renderCatalog);
   document.querySelector('#catalogEditor').addEventListener('submit', saveCatalogItem);
+  document.querySelector('#catalogEditor').addEventListener('input', syncCatalogDesigner);
+  document.querySelector('#catalogEditor').addEventListener('change', syncCatalogDesigner);
   document.querySelector('#catalogEditor select[name="type"]').addEventListener('change', () => renderCatalogAssetHelp());
+  document.querySelector('#catalogAdvancedToggle').addEventListener('click', toggleCatalogAdvanced);
+  document.querySelectorAll('.palette-card').forEach(button => button.addEventListener('click', () => applyCatalogPalette(button)));
   document.querySelector('#catalogAsset').addEventListener('change', previewCatalogAsset);
   document.querySelector('#uploadCatalogAsset').addEventListener('click', uploadCatalogAsset);
   document.querySelector('#duplicateCatalogItem').addEventListener('click', duplicateCatalogItem);
@@ -2723,8 +2818,15 @@ async function loadCatalog() {
 function renderCatalog() {
   const typeFilter = document.querySelector('#catalogFilter')?.value || '';
   const stateFilter = document.querySelector('#catalogStateFilter')?.value || '';
+  const search = String(document.querySelector('#catalogSearch')?.value || '').trim().toLowerCase();
   const liveIds = new Set(catalogLive.map(item => `${item.id}:${JSON.stringify(item)}`));
+  const changedItems = catalogDraft.filter(item => !liveIds.has(`${item.id}:${JSON.stringify(item)}`));
+  const draftCount = document.querySelector('#catalogDraftCount');
+  if (draftCount) draftCount.textContent = changedItems.length
+    ? `${changedItems.length} unpublished ${changedItems.length === 1 ? 'change' : 'changes'}`
+    : 'No unpublished changes';
   const items = catalogDraft.filter(item => {
+    if (search && !`${item.name} ${item.description} ${item.id} ${item.type}`.toLowerCase().includes(search)) return false;
     if (typeFilter && item.type !== typeFilter) return false;
     if (stateFilter === 'enabled' && !item.enabled) return false;
     if (stateFilter === 'disabled' && item.enabled) return false;
@@ -2733,24 +2835,28 @@ function renderCatalog() {
     return true;
   });
   const output = document.querySelector('#catalogOutput');
-  output.replaceChildren(...items.map(item => {
+  const cards = items.map(item => {
     const card = document.createElement('button');
     const changed = !liveIds.has(`${item.id}:${JSON.stringify(item)}`);
-    card.className = `card ghost catalog-card ${item.enabled ? '' : 'dim'} ${item.archivedAt ? 'danger-border' : ''}`;
+    card.type = 'button';
+    card.className = `card ghost catalog-card ${item.enabled ? '' : 'dim'} ${item.archivedAt ? 'danger-border' : ''} ${selectedCatalogItem?.id === item.id ? 'selected' : ''}`;
+    card.setAttribute('aria-pressed', selectedCatalogItem?.id === item.id ? 'true' : 'false');
     card.innerHTML = `
       <div class="catalog-preview" style="${previewStyle(item)}">${item.asset?.url ? `<img src="${escapeHtml(item.asset.url)}" alt="" />` : escapeHtml(item.visual?.mark || item.name.slice(0, 2).toUpperCase())}</div>
       <strong>${escapeHtml(item.name)}</strong>
-      <p class="muted">${escapeHtml(item.id)} - ${escapeHtml(item.type)} - ${escapeHtml(item.shopCategory)}</p>
+      <p class="muted">${escapeHtml(COSMETIC_TYPE_LABELS[item.type] || item.type)} · ${escapeHtml(COSMETIC_SOURCE_LABELS[item.shopCategory] || item.shopCategory)}</p>
       <div class="statline">
         <span class="chip">${money(item.price)}</span>
         ${item.sale ? `<span class="chip gold">Sale ${money(item.salePrice)}</span>` : ''}
-        <span class="chip">${item.enabled ? 'Enabled' : 'Disabled'}</span>
-        ${changed ? '<span class="chip blue">Draft changed</span>' : ''}
+        <span class="chip">${item.enabled ? 'Available' : 'Hidden'}</span>
+        ${changed ? '<span class="chip blue">Edited</span>' : ''}
       </div>
     `;
     card.addEventListener('click', () => editCatalogItem(item.id));
     return card;
-  }));
+  });
+  if (cards.length) output.replaceChildren(...cards);
+  else output.innerHTML = '<div class="card"><strong>No cosmetics found</strong><p class="muted">Try a different search or filter.</p></div>';
 }
 
 function previewStyle(item) {
@@ -2762,16 +2868,123 @@ function previewStyle(item) {
   ].join(';');
 }
 
+function normalizeHexColor(value, fallback) {
+  const candidate = String(value || '').trim();
+  return /^#[0-9a-f]{6}$/i.test(candidate) ? candidate : fallback;
+}
+
+function catalogUnlockSummary(form) {
+  const requirement = form.elements.unlockRequirement.value;
+  if (requirement === 'level') return `Reach Level ${Number(form.elements.requiredLevel.value) || '?'}`;
+  if (requirement === 'rank') return `Reach ${form.elements.requiredLeague.value.trim() || 'the selected rank'}`;
+  if (requirement === 'club') return 'Earn through club progress';
+  if (requirement === 'event') return 'Earn during its event';
+  if (requirement === 'season') return 'Earn during its season';
+  if (requirement === 'achievement') return 'Complete its achievement';
+  return 'Available immediately';
+}
+
+function syncCatalogDesigner() {
+  const form = document.querySelector('#catalogEditor');
+  if (!form || form.classList.contains('hidden')) return;
+  const type = form.elements.type.value;
+  const name = form.elements.name.value.trim() || 'Untitled Cosmetic';
+  const description = form.elements.description.value.trim() || 'Add a short player-facing description.';
+  const background = normalizeHexColor(form.elements.backgroundColor.value, '#132a40');
+  const border = normalizeHexColor(form.elements.borderColor.value, '#55a8ff');
+  const accent = normalizeHexColor(form.elements.accentColor.value, '#ffd166');
+  const rarity = form.elements.rarity.value || 'rare';
+  const mark = form.elements.mark.value.trim() || name.slice(0, 2).toUpperCase();
+  const preview = document.querySelector('#catalogLivePreview');
+  const typeLabel = COSMETIC_TYPE_LABELS[type] || 'Cosmetic';
+  const sourceLabel = COSMETIC_SOURCE_LABELS[form.elements.shopCategory.value] || 'Collection';
+  const unlockSummary = catalogUnlockSummary(form);
+  const sale = form.elements.sale.checked;
+  const price = Number(sale ? form.elements.salePrice.value : form.elements.price.value) || 0;
+  const rarityColors = { starter: '#aab4d5', common: '#b8c7d8', rare: '#55a8ff', epic: '#b79af7', legendary: '#ffd166' };
+
+  document.querySelector('#catalogEditorType').textContent = typeLabel;
+  document.querySelector('#catalogEditorTitle').textContent = name;
+  const rarityNode = document.querySelector('#catalogPreviewRarity');
+  rarityNode.textContent = rarity.charAt(0).toUpperCase() + rarity.slice(1);
+  rarityNode.style.setProperty('--preview-border', rarityColors[rarity] || rarityColors.rare);
+
+  if (preview) {
+    preview.style.setProperty('--preview-bg', background);
+    preview.style.setProperty('--preview-border', border);
+    preview.style.setProperty('--preview-accent', accent);
+    const assetUrl = catalogPreviewAssetUrl || selectedCatalogItem?.asset?.url || '';
+    let artwork = '';
+    if (assetUrl) {
+      artwork = `<img class="preview-uploaded-art" src="${escapeHtml(assetUrl)}" alt="Preview of ${escapeHtml(name)}" />`;
+    } else if (type === 'cardBack') {
+      artwork = `<div class="preview-cardback" data-pattern="${escapeHtml(form.elements.pattern.value)}"><span>${escapeHtml(mark)}</span></div>`;
+    } else if (type === 'tableTheme') {
+      artwork = '<div class="preview-table"></div>';
+    } else if (type === 'title') {
+      artwork = `<div class="preview-title">${escapeHtml(name)}</div>`;
+    } else {
+      artwork = `<div class="preview-avatar">${type === 'avatarAccessory' ? '✦' : escapeHtml(mark.slice(0, 1))}</div>`;
+    }
+    preview.innerHTML = `<div class="preview-product">${artwork}<div><h4>${escapeHtml(name)}</h4><p>${escapeHtml(description)}</p></div></div>`;
+  }
+
+  const summary = document.querySelector('#catalogPlayerSummary');
+  if (summary) summary.innerHTML = `
+    <div class="player-summary-row"><span>Appears in</span><strong>${escapeHtml(sourceLabel)}</strong></div>
+    <div class="player-summary-row"><span>Players unlock it by</span><strong>${escapeHtml(unlockSummary)}</strong></div>
+    <div class="player-summary-row"><span>Player price</span><strong>${price ? money(price) : 'Reward / free'}</strong></div>
+    <div class="player-summary-row"><span>Store visibility</span><strong>${form.elements.enabled.checked ? 'Available' : 'Hidden'}</strong></div>
+  `;
+
+  const requirement = form.elements.unlockRequirement.value;
+  form.querySelectorAll('[data-requirement-field]').forEach(label => {
+    label.classList.toggle('condition-hidden', label.dataset.requirementField !== requirement);
+  });
+  const guidance = document.querySelector('#unlockGuidance');
+  if (guidance) guidance.textContent = requirement ? `Players must ${unlockSummary.charAt(0).toLowerCase()}${unlockSummary.slice(1)} before they can obtain this item.` : 'Players can obtain this item as soon as it is available.';
+  form.querySelector('[data-sale-field]')?.classList.toggle('condition-hidden', !sale);
+  document.querySelectorAll('.palette-card').forEach(button => {
+    const active = button.dataset.background.toLowerCase() === background.toLowerCase()
+      && button.dataset.border.toLowerCase() === border.toLowerCase()
+      && button.dataset.accent.toLowerCase() === accent.toLowerCase();
+    button.classList.toggle('active', active);
+  });
+}
+
+function toggleCatalogAdvanced() {
+  const form = document.querySelector('#catalogEditor');
+  const button = document.querySelector('#catalogAdvancedToggle');
+  const visible = !form.classList.contains('show-advanced');
+  form.classList.toggle('show-advanced', visible);
+  button.setAttribute('aria-pressed', visible ? 'true' : 'false');
+  button.textContent = visible ? 'Hide Advanced' : 'Show Advanced';
+}
+
+function applyCatalogPalette(button) {
+  const form = document.querySelector('#catalogEditor');
+  if (!form || form.classList.contains('hidden')) return;
+  form.elements.backgroundColor.value = button.dataset.background;
+  form.elements.borderColor.value = button.dataset.border;
+  form.elements.accentColor.value = button.dataset.accent;
+  form.elements.pattern.value = button.dataset.palette;
+  syncCatalogDesigner();
+}
+
 function editCatalogItem(id) {
   selectedCatalogItem = catalogDraft.find(item => item.id === id);
   if (!selectedCatalogItem) return;
   const form = document.querySelector('#catalogEditor');
   form.classList.remove('hidden');
+  form.classList.remove('show-advanced');
+  document.querySelector('#catalogAdvancedToggle').textContent = 'Show Advanced';
+  document.querySelector('#catalogAdvancedToggle').setAttribute('aria-pressed', 'false');
   const item = selectedCatalogItem;
   for (const [key, value] of Object.entries({
     id: item.id,
     name: item.name,
     description: item.description,
+    rarity: item.rarity || 'rare',
     type: item.type,
     shopCategory: item.shopCategory,
     price: item.price,
@@ -2781,10 +2994,12 @@ function editCatalogItem(id) {
     requiredMmr: item.requiredMmr ?? '',
     requiredLeague: item.requiredLeague || '',
     seasonId: item.seasonId || '',
-    backgroundColor: item.visual?.backgroundColor || '',
-    borderColor: item.visual?.borderColor || '',
-    accentColor: item.visual?.accentColor || '',
+    backgroundColor: normalizeHexColor(item.visual?.backgroundColor, '#132a40'),
+    borderColor: normalizeHexColor(item.visual?.borderColor, '#55a8ff'),
+    accentColor: normalizeHexColor(item.visual?.accentColor, '#ffd166'),
+    pattern: item.visual?.pattern || 'heritage',
     mark: item.visual?.mark || '',
+    changeReason: '',
   })) {
     if (form.elements[key]) form.elements[key].value = value;
   }
@@ -2792,15 +3007,18 @@ function editCatalogItem(id) {
   form.elements.sale.checked = !!item.sale;
   form.elements.featured.checked = !!item.featured;
   form.querySelector('#catalogAsset').value = '';
+  catalogPreviewAssetUrl = '';
   renderCatalogAssetHelp(item);
+  syncCatalogDesigner();
+  renderCatalog();
+  form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function createCatalogItemDraft() {
-  const id = prompt('New cosmetic id, lowercase with dashes');
-  if (!id) return;
+  const id = `custom-cosmetic-${Date.now().toString(36)}`;
   const item = {
     id,
-    name: id.split('-').map(part => part.slice(0, 1).toUpperCase() + part.slice(1)).join(' '),
+    name: 'Untitled Cosmetic',
     description: '',
     type: 'cardBack',
     shopCategory: 'coin',
@@ -2808,23 +3026,33 @@ function createCatalogItemDraft() {
     price: 500,
     salePrice: 500,
     enabled: false,
-    visual: { kind: 'preset', backgroundColor: '#132a40', borderColor: '#55e0a3', accentColor: '#ffd166', mark: 'G9' },
+    sale: false,
+    featured: false,
+    unlockRequirement: null,
+    requiredLevel: null,
+    requiredMmr: null,
+    requiredLeague: null,
+    seasonId: null,
+    visual: { kind: 'preset', backgroundColor: '#132a40', borderColor: '#55a8ff', accentColor: '#ffd166', textColor: '#ffd166', mark: '9B', pattern: 'heritage' },
   };
   catalogDraft.unshift(item);
   renderCatalog();
   editCatalogItem(id);
+  const nameInput = document.querySelector('#catalogEditor input[name="name"]');
+  nameInput?.focus();
+  nameInput?.select();
 }
 
 async function saveCatalogItem(event) {
   event.preventDefault();
   if (!selectedCatalogItem) return;
   const form = event.currentTarget;
-  const reason = prompt('Reason for audit log');
-  if (!reason) return;
+  const reason = form.elements.changeReason.value.trim() || `Updated ${form.elements.name.value.trim() || selectedCatalogItem.name} in Design Studio.`;
   const item = {
     id: form.elements.id.value,
     name: form.elements.name.value,
     description: form.elements.description.value,
+    rarity: form.elements.rarity.value,
     type: form.elements.type.value,
     shopCategory: form.elements.shopCategory.value,
     price: Number(form.elements.price.value || 0),
@@ -2838,12 +3066,15 @@ async function saveCatalogItem(event) {
     requiredLeague: form.elements.requiredLeague.value || null,
     seasonId: form.elements.seasonId.value || null,
     visual: {
+      ...(selectedCatalogItem.visual || {}),
       kind: 'preset',
       type: form.elements.type.value,
       backgroundColor: form.elements.backgroundColor.value,
       borderColor: form.elements.borderColor.value,
       accentColor: form.elements.accentColor.value,
+      textColor: form.elements.accentColor.value,
       mark: form.elements.mark.value,
+      pattern: form.elements.pattern.value,
     },
   };
   const result = await api(`/catalog/cosmetics/${encodeURIComponent(item.id)}`, { method: 'PATCH', body: JSON.stringify({ item, reason }) });
@@ -2863,8 +3094,7 @@ async function uploadCatalogAsset() {
     setCatalogAssetError(validation.error);
     return;
   }
-  const reason = prompt('Reason for audit log');
-  if (!reason) return;
+  const reason = `Uploaded artwork for ${selectedCatalogItem.name} in Design Studio.`;
   const data = await fileToBase64(file);
   await api(`/catalog/cosmetics/${encodeURIComponent(selectedCatalogItem.id)}/asset`, {
     method: 'POST',
@@ -2894,12 +3124,9 @@ function renderCatalogAssetHelp(item = selectedCatalogItem) {
   setCatalogAssetError('');
   if (!help) return;
   if (!spec) {
-    help.innerHTML = '<span class="chip danger-chip">No uploads supported for this item type.</span>';
+    help.textContent = 'This cosmetic uses its built-in visual design and does not need an image upload.';
   } else {
-    help.innerHTML = `
-      <strong>${escapeHtml(type)} asset requirements</strong>
-      <p class="muted">Exact size ${spec.width}x${spec.height}. Accepted: ${(spec.mimeTypes || []).map(type => type.replace('image/', '').toUpperCase()).join(', ')}. Max ${formatBytes(spec.maxBytes)}.</p>
-    `;
+    help.textContent = `${spec.width}x${spec.height} · ${(spec.mimeTypes || []).map(type => type.replace('image/', '').toUpperCase()).join(' or ')} · up to ${formatBytes(spec.maxBytes)}`;
   }
   if (preview) {
     if (item?.asset?.url) {
@@ -2907,7 +3134,7 @@ function renderCatalogAssetHelp(item = selectedCatalogItem) {
       preview.innerHTML = `<img src="${escapeHtml(item.asset.url)}" alt="" /><span>${escapeHtml(item.asset.width || spec?.width || '?')}x${escapeHtml(item.asset.height || spec?.height || '?')}</span>`;
     } else {
       preview.classList.add('empty');
-      preview.textContent = 'Choose an asset to preview it here.';
+      preview.textContent = 'No custom artwork selected.';
     }
   }
 }
@@ -2922,7 +3149,10 @@ async function previewCatalogAsset() {
   const preview = document.querySelector('#catalogAssetPreview');
   setCatalogAssetError('');
   if (!file || !preview) {
+    if (catalogPreviewAssetUrl.startsWith('blob:')) URL.revokeObjectURL(catalogPreviewAssetUrl);
+    catalogPreviewAssetUrl = '';
     renderCatalogAssetHelp();
+    syncCatalogDesigner();
     return;
   }
   const validation = await validateCatalogAssetFile(file, document.querySelector('#catalogEditor select[name="type"]')?.value || selectedCatalogItem?.type);
@@ -2933,8 +3163,11 @@ async function previewCatalogAsset() {
     return;
   }
   const url = URL.createObjectURL(file);
+  if (catalogPreviewAssetUrl.startsWith('blob:')) URL.revokeObjectURL(catalogPreviewAssetUrl);
+  catalogPreviewAssetUrl = url;
   preview.classList.remove('empty');
   preview.innerHTML = `<img src="${url}" alt="" /><span>${validation.width}x${validation.height} - ${formatBytes(file.size)}</span>`;
+  syncCatalogDesigner();
 }
 
 function readImageSize(file) {
@@ -2971,8 +3204,7 @@ async function validateCatalogAssetFile(file, type) {
 
 async function duplicateCatalogItem() {
   if (!selectedCatalogItem) return;
-  const reason = prompt('Reason for audit log');
-  if (!reason) return;
+  const reason = `Created a design copy of ${selectedCatalogItem.name}.`;
   const result = await api(`/catalog/cosmetics/${encodeURIComponent(selectedCatalogItem.id)}/duplicate`, { method: 'POST', body: JSON.stringify({ reason }) });
   catalogDraft = result.draft;
   renderCatalog();
@@ -2981,8 +3213,7 @@ async function duplicateCatalogItem() {
 
 async function archiveCatalogItem() {
   if (!selectedCatalogItem || !confirm(`Archive ${selectedCatalogItem.name}?`)) return;
-  const reason = prompt('Reason for audit log');
-  if (!reason) return;
+  const reason = `Archived ${selectedCatalogItem.name} from Design Studio.`;
   const result = await api(`/catalog/cosmetics/${encodeURIComponent(selectedCatalogItem.id)}/archive`, { method: 'POST', body: JSON.stringify({ reason }) });
   catalogDraft = result.draft;
   status('Draft item archived. Publish to make it live.', 'ok');
@@ -2990,8 +3221,11 @@ async function archiveCatalogItem() {
 }
 
 async function publishCatalog() {
-  const reason = prompt('Publish reason for audit log');
-  if (!reason) return;
+  const liveIds = new Set(catalogLive.map(item => `${item.id}:${JSON.stringify(item)}`));
+  const changedCount = catalogDraft.filter(item => !liveIds.has(`${item.id}:${JSON.stringify(item)}`)).length;
+  if (!changedCount) return alert('There are no cosmetic changes to publish.');
+  if (!confirm(`Publish ${changedCount} cosmetic ${changedCount === 1 ? 'change' : 'changes'} to players?`)) return;
+  const reason = `Published ${changedCount} cosmetic design ${changedCount === 1 ? 'change' : 'changes'} from Design Studio.`;
   await api('/catalog/publish', { method: 'POST', body: JSON.stringify({ reason }) });
   status('Catalog published.', 'ok');
   await loadCatalog();

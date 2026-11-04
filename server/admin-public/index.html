@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Nine Below Admin</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%230d2d29'/%3E%3Cpath d='M18 18h28v28H18z' fill='none' stroke='%2355e0a3' stroke-width='4'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-family='Arial,sans-serif' font-size='30' font-weight='800' fill='%23f6f8ff'%3E9%3C/text%3E%3C/svg%3E" />
     <link rel="stylesheet" href="/admin/styles.css" />
   </head>
   <body>
@@ -69,30 +70,64 @@
       </section>
     </main>
     <template id="consoleTemplate">
-      <section class="shell">
+      <section class="shell console-shell">
         <header class="topbar">
-          <div>
-            <p class="eyebrow">Nine Below Operations</p>
-            <h1>Admin Console</h1>
+          <div class="brand-lockup">
+            <span class="brand-mark" aria-hidden="true">9</span>
+            <div>
+              <p class="eyebrow">Nine Below</p>
+              <h1>Game Operations</h1>
+            </div>
           </div>
-          <button id="logoutButton" class="ghost">Log Out</button>
+          <div class="topbar-actions">
+            <span class="environment-badge"><span></span> Live services</span>
+            <button id="logoutButton" class="ghost">Log Out</button>
+          </div>
         </header>
         <nav class="tabs">
-          <button data-tab="health" class="active">Health <span id="healthTabIndicator" class="health-tab-indicator health-unknown" aria-label="Health status not checked"></span></button>
-          <button data-tab="players">Players</button>
-          <button data-tab="invites">Invites</button>
-          <button data-tab="earlyAccess">Early Access</button>
-          <button data-tab="support">Support</button>
-          <button data-tab="mail">Mail</button>
-          <button data-tab="economy">Economy</button>
-          <button data-tab="notifications">Notifications</button>
-          <button data-tab="liveOps">Live Ops</button>
-          <button data-tab="competitive">Competitive</button>
-          <button data-tab="catalog">Catalog</button>
-          <button data-tab="clubs">Clubs</button>
-          <button data-tab="admins">Admins</button>
-          <button data-tab="audit">Audit</button>
+          <label class="nav-search">
+            <span>Find a workspace</span>
+            <input id="adminNavSearch" type="search" placeholder="Players, cosmetics, mail..." autocomplete="off" />
+          </label>
+          <div class="nav-group" data-nav-group>
+            <p>Overview</p>
+            <button data-tab="health" class="active"><span class="nav-icon" aria-hidden="true">◎</span><span><strong>Command Center</strong><small>Health and activity</small></span><span id="healthTabIndicator" class="health-tab-indicator health-unknown" aria-label="Health status not checked"></span></button>
+          </div>
+          <div class="nav-group" data-nav-group>
+            <p>Community</p>
+            <button data-tab="players"><span class="nav-icon" aria-hidden="true">♙</span><span><strong>Players</strong><small>Accounts and moderation</small></span></button>
+            <button data-tab="clubs"><span class="nav-icon" aria-hidden="true">◇</span><span><strong>Clubs</strong><small>Teams and membership</small></span></button>
+            <button data-tab="support"><span class="nav-icon" aria-hidden="true">?</span><span><strong>Player Support</strong><small>Tickets and replies</small></span></button>
+          </div>
+          <div class="nav-group" data-nav-group>
+            <p>Engagement</p>
+            <button data-tab="invites"><span class="nav-icon" aria-hidden="true">＋</span><span><strong>Invites</strong><small>Access codes</small></span></button>
+            <button data-tab="earlyAccess"><span class="nav-icon" aria-hidden="true">◷</span><span><strong>Early Access</strong><small>Waitlist and campaigns</small></span></button>
+            <button data-tab="mail"><span class="nav-icon" aria-hidden="true">✉</span><span><strong>Player Mail</strong><small>Inbox rewards</small></span></button>
+            <button data-tab="notifications"><span class="nav-icon" aria-hidden="true">◉</span><span><strong>Notifications</strong><small>Push messages</small></span></button>
+          </div>
+          <div class="nav-group" data-nav-group>
+            <p>Game Design</p>
+            <button data-tab="catalog"><span class="nav-icon" aria-hidden="true">✦</span><span><strong>Design Studio</strong><small>Cosmetics and rewards</small></span></button>
+            <button data-tab="economy"><span class="nav-icon" aria-hidden="true">◌</span><span><strong>Economy</strong><small>Coins and table stakes</small></span></button>
+            <button data-tab="competitive"><span class="nav-icon" aria-hidden="true">△</span><span><strong>Competitive</strong><small>Ranks and seasons</small></span></button>
+            <button data-tab="liveOps"><span class="nav-icon" aria-hidden="true">⚡</span><span><strong>Live Operations</strong><small>Availability and releases</small></span></button>
+          </div>
+          <div class="nav-group" data-nav-group>
+            <p>Administration</p>
+            <button data-tab="admins"><span class="nav-icon" aria-hidden="true">♢</span><span><strong>Admin Team</strong><small>Roles and security</small></span></button>
+            <button data-tab="audit"><span class="nav-icon" aria-hidden="true">≡</span><span><strong>Activity Log</strong><small>Change history</small></span></button>
+          </div>
+          <div id="navEmptyState" class="nav-empty hidden">No workspaces match that search.</div>
         </nav>
+        <div class="page-heading">
+          <div>
+            <p id="pageKicker" class="eyebrow">Overview</p>
+            <h2 id="pageTitle">Command Center</h2>
+            <p id="pageDescription" class="muted">See what needs attention and confirm Nine Below is running smoothly.</p>
+          </div>
+          <button id="toggleConsoleDensity" class="ghost compact-action" type="button" aria-pressed="false">Comfortable view</button>
+        </div>
         <p id="status" class="status"></p>
         <section id="health" class="tab active">
           <div class="panel health-overview">
@@ -763,21 +798,33 @@
           </div>
         </section>
         <section id="catalog" class="tab">
-          <div class="panel">
+          <div class="studio-overview">
+            <div>
+              <p class="eyebrow">No-code creation tools</p>
+              <h2>Game Design Studio</h2>
+              <p class="muted">Shape what players see, how they earn it, and when it appears. Exact system controls stay available under Advanced.</p>
+            </div>
+            <div class="studio-publish-card">
+              <span id="catalogDraftCount" class="draft-count">No unpublished changes</span>
+              <button id="publishCatalog">Review &amp; Publish</button>
+            </div>
+          </div>
+          <div class="panel studio-workbench">
             <div class="split-header">
               <div>
-                <h2>Catalog Studio</h2>
-                <p class="muted">Edit draft cosmetics, preview assets, then publish when ready.</p>
+                <p class="eyebrow">Collection</p>
+                <h2>Cosmetics</h2>
+                <p class="muted">Select an item to edit, or start with a new design.</p>
               </div>
               <div class="actions-inline">
-                <button id="newCatalogItem" class="ghost">New Item</button>
-                <button id="publishCatalog">Publish Draft</button>
-                <button id="loadCatalog">Refresh</button>
+                <button id="newCatalogItem">＋ Create Cosmetic</button>
+                <button id="loadCatalog" class="ghost">Refresh</button>
               </div>
             </div>
-            <div class="toolbar">
+            <div class="toolbar studio-filters">
+              <input id="catalogSearch" type="search" placeholder="Search cosmetic names" autocomplete="off" />
               <select id="catalogFilter">
-                <option value="">All categories</option>
+                <option value="">All cosmetic types</option>
                 <option value="cardBack">Card backs</option>
                 <option value="avatarIcon">Avatar icons</option>
                 <option value="avatarFrame">Avatar frames</option>
@@ -786,86 +833,128 @@
                 <option value="tableTheme">Table themes</option>
               </select>
               <select id="catalogStateFilter">
-                <option value="">All states</option>
-                <option value="enabled">Enabled</option>
-                <option value="disabled">Disabled</option>
+                <option value="">Any status</option>
+                <option value="enabled">Available to players</option>
+                <option value="disabled">Hidden from players</option>
                 <option value="sale">On sale</option>
                 <option value="archived">Archived</option>
               </select>
             </div>
-            <div class="workspace">
-              <div id="catalogOutput" class="list"></div>
-              <form id="catalogEditor" class="panel compact hidden">
-                <h3>Cosmetic Editor</h3>
-                <label>ID <input name="id" readonly /></label>
-                <label>Name <input name="name" required /></label>
-                <label>Description <textarea name="description"></textarea></label>
-                <div class="row two">
-                  <label>Type
-                    <select name="type">
-                      <option value="cardBack">Card Back</option>
-                      <option value="avatarIcon">Avatar Icon</option>
-                      <option value="avatarFrame">Avatar Frame</option>
-                      <option value="avatarAccessory">Avatar Accessory</option>
-                      <option value="title">Title</option>
-                      <option value="tableTheme">Table Theme</option>
-                    </select>
-                  </label>
-                  <label>Source
-                    <select name="shopCategory">
-                      <option value="starter">Starter</option>
-                      <option value="coin">Coin</option>
-                      <option value="ranked">Ranked</option>
-                      <option value="club">Club</option>
-                      <option value="event">Event</option>
-                    </select>
-                  </label>
+            <div class="workspace studio-layout">
+              <div id="catalogOutput" class="list studio-item-list"></div>
+              <form id="catalogEditor" class="designer hidden">
+                <div class="designer-topbar">
+                  <div>
+                    <p id="catalogEditorType" class="eyebrow">Cosmetic</p>
+                    <h3 id="catalogEditorTitle">Untitled Cosmetic</h3>
+                    <p class="muted">Changes stay in draft until you publish them.</p>
+                  </div>
+                  <div class="actions-inline">
+                    <button type="button" id="catalogAdvancedToggle" class="ghost" aria-pressed="false">Show Advanced</button>
+                    <button type="submit">Save Draft</button>
+                  </div>
                 </div>
-                <div class="row two">
-                  <label>Price <input name="price" type="number" min="0" /></label>
-                  <label>Sale price <input name="salePrice" type="number" min="0" /></label>
-                </div>
-                <div class="row two">
-                  <label>Unlock
-                    <select name="unlockRequirement">
-                      <option value="">None</option>
-                      <option value="rank">Rank</option>
-                      <option value="club">Club</option>
-                      <option value="event">Event</option>
-                      <option value="season">Season</option>
-                      <option value="achievement">Achievement</option>
-                      <option value="level">Level</option>
-                    </select>
-                  </label>
-                  <label>Required level <input name="requiredLevel" type="number" min="1" /></label>
-                </div>
-                <div class="row two">
-                  <label>Required MMR <input name="requiredMmr" type="number" min="0" /></label>
-                  <label>Required league <input name="requiredLeague" /></label>
-                </div>
-                <label>Season ID <input name="seasonId" /></label>
-                <div class="row two">
-                  <label>Background <input name="backgroundColor" placeholder="#132a40" /></label>
-                  <label>Border <input name="borderColor" placeholder="#55e0a3" /></label>
-                </div>
-                <div class="row two">
-                  <label>Accent <input name="accentColor" placeholder="#ffd166" /></label>
-                  <label>Mark <input name="mark" placeholder="G9" /></label>
-                </div>
-                <div class="checks">
-                  <label><input name="enabled" type="checkbox" /> Enabled</label>
-                  <label><input name="sale" type="checkbox" /> On sale</label>
-                  <label><input name="featured" type="checkbox" /> Featured</label>
-                </div>
-                <div id="catalogAssetRequirement" class="asset-requirement"></div>
-                <label>Preview asset <input id="catalogAsset" type="file" accept="image/png,image/jpeg,image/webp" /></label>
-                <div id="catalogAssetPreview" class="asset-preview empty">Choose an asset to preview it here.</div>
-                <p id="catalogAssetError" class="error"></p>
-                <div class="actions">
-                  <button type="submit">Save Draft</button>
-                  <button type="button" id="uploadCatalogAsset" class="ghost">Upload Asset</button>
-                  <button type="button" id="duplicateCatalogItem" class="ghost">Duplicate</button>
-                  <button type="button" id="archiveCatalogItem" class="danger">Archive</button>
+                <div class="designer-grid">
+                  <div class="designer-controls">
+                    <section class="design-section">
+                      <div class="section-heading"><span>1</span><div><h4>Player-facing identity</h4><p>What players will call and understand this item.</p></div></div>
+                      <label>Cosmetic type
+                        <select name="type">
+                          <option value="cardBack">Card Back</option><option value="avatarIcon">Avatar Icon</option><option value="avatarFrame">Avatar Frame</option><option value="avatarAccessory">Avatar Accessory</option><option value="title">Title</option><option value="tableTheme">Table Theme</option>
+                        </select>
+                      </label>
+                      <label>Display name <input name="name" required placeholder="Example: Celestial Atlas" /></label>
+                      <label>Player description <textarea name="description" placeholder="Explain why this cosmetic feels special."></textarea></label>
+                      <label>Rarity
+                        <select name="rarity"><option value="starter">Starter</option><option value="common">Common</option><option value="rare">Rare</option><option value="epic">Epic</option><option value="legendary">Legendary</option></select>
+                      </label>
+                    </section>
+
+                    <section class="design-section">
+                      <div class="section-heading"><span>2</span><div><h4>Look &amp; feel</h4><p>Start with a mood, then tune the colors while watching the preview.</p></div></div>
+                      <div class="palette-grid" role="group" aria-label="Visual presets">
+                        <button type="button" class="palette-card" data-palette="heritage" data-background="#17263e" data-border="#b8c7d8" data-accent="#6e89a8"><i style="--swatch:#6e89a8"></i><span>Heritage<small>Classic steel</small></span></button>
+                        <button type="button" class="palette-card" data-palette="filigree" data-background="#251d0d" data-border="#f4c95d" data-accent="#fff0b8"><i style="--swatch:#f4c95d"></i><span>Gilded<small>Warm prestige</small></span></button>
+                        <button type="button" class="palette-card" data-palette="vine" data-background="#123d38" data-border="#67e0b0" data-accent="#d7f9ea"><i style="--swatch:#67e0b0"></i><span>Verdant<small>Tournament green</small></span></button>
+                        <button type="button" class="palette-card" data-palette="circuit" data-background="#0a102b" data-border="#58d6ff" data-accent="#d66bff"><i style="--swatch:#58d6ff"></i><span>Neon<small>Electric night</small></span></button>
+                        <button type="button" class="palette-card" data-palette="celestial" data-background="#100d2d" data-border="#c8b8ff" data-accent="#74dcff"><i style="--swatch:#c8b8ff"></i><span>Astral<small>Late-game wonder</small></span></button>
+                      </div>
+                      <div class="color-controls">
+                        <label>Base color <input name="backgroundColor" type="color" value="#132a40" /></label>
+                        <label>Edge color <input name="borderColor" type="color" value="#55a8ff" /></label>
+                        <label>Highlight <input name="accentColor" type="color" value="#ffd166" /></label>
+                      </div>
+                      <label>Design motif
+                        <select name="pattern"><option value="heritage">Heritage geometry</option><option value="filigree">Fine filigree</option><option value="vine">Botanical lines</option><option value="circuit">Neon circuit</option><option value="sunburst">Ranked sunburst</option><option value="celestial">Celestial chart</option><option value="faceted">Faceted crystal</option><option value="carbon">Carbon weave</option><option value="constellation">Constellation</option><option value="aurora">Aurora bands</option><option value="club">Club crest</option><option value="champion">Champion crest</option><option value="masterwork">Masterwork facets</option></select>
+                      </label>
+                      <div class="asset-dropzone">
+                        <div><strong>Use custom artwork</strong><p id="catalogAssetRequirement" class="muted">Choose an image to see its requirements.</p></div>
+                        <label class="file-button">Choose Artwork<input id="catalogAsset" type="file" accept="image/png,image/jpeg,image/webp" /></label>
+                      </div>
+                      <div id="catalogAssetPreview" class="asset-preview empty">No custom artwork selected.</div>
+                      <p id="catalogAssetError" class="error"></p>
+                      <button type="button" id="uploadCatalogAsset" class="ghost">Upload Artwork to Draft</button>
+                    </section>
+
+                    <section class="design-section">
+                      <div class="section-heading"><span>3</span><div><h4>How players get it</h4><p>Choose the player journey instead of configuring a rule.</p></div></div>
+                      <div class="row two">
+                        <label>Collection
+                          <select name="shopCategory"><option value="starter">Starter collection</option><option value="coin">Coin shop</option><option value="ranked">Ranked rewards</option><option value="club">Club rewards</option><option value="event">Limited event</option></select>
+                        </label>
+                        <label>Unlock path
+                          <select name="unlockRequirement"><option value="">Available immediately</option><option value="level">Reach a player level</option><option value="rank">Reach a competitive rank</option><option value="club">Earn through a club</option><option value="event">Earn during an event</option><option value="season">Earn during a season</option><option value="achievement">Complete an achievement</option></select>
+                        </label>
+                      </div>
+                      <p id="unlockGuidance" class="inline-guidance">Players can obtain this item as soon as it is available.</p>
+                      <div class="row two">
+                        <label data-requirement-field="level">Player level <input name="requiredLevel" type="number" min="1" placeholder="10" /></label>
+                        <label data-requirement-field="rank">Competitive league <input name="requiredLeague" placeholder="Gold" /></label>
+                      </div>
+                      <div class="row two advanced-only">
+                        <label data-requirement-field="rank">Exact MMR threshold <input name="requiredMmr" type="number" min="0" /></label>
+                        <label>Season reference <input name="seasonId" placeholder="season-1" /></label>
+                      </div>
+                    </section>
+
+                    <section class="design-section">
+                      <div class="section-heading"><span>4</span><div><h4>Price &amp; visibility</h4><p>Control cost and storefront placement without changing the design.</p></div></div>
+                      <div class="row two">
+                        <label>Regular price <div class="input-suffix"><input name="price" type="number" min="0" /><span>coins</span></div></label>
+                        <label data-sale-field>Sale price <div class="input-suffix"><input name="salePrice" type="number" min="0" /><span>coins</span></div></label>
+                      </div>
+                      <div class="switch-grid">
+                        <label class="switch-control"><input name="enabled" type="checkbox" /><span></span><strong>Available to players<small>Show this item in its collection.</small></strong></label>
+                        <label class="switch-control"><input name="featured" type="checkbox" /><span></span><strong>Feature in shop<small>Give this item extra visibility.</small></strong></label>
+                        <label class="switch-control"><input name="sale" type="checkbox" /><span></span><strong>Put on sale<small>Show the discounted price.</small></strong></label>
+                      </div>
+                    </section>
+
+                    <section class="design-section advanced-only">
+                      <div class="section-heading"><span>⚙</span><div><h4>Advanced system details</h4><p>Stable identifiers and exact thresholds for technical operators.</p></div></div>
+                      <label>Permanent item ID <input name="id" readonly /></label>
+                      <label>Card or badge mark <input name="mark" maxlength="8" placeholder="9B" /></label>
+                    </section>
+
+                    <section class="design-section change-note-section">
+                      <label>What did you change? <input name="changeReason" maxlength="240" placeholder="Example: Updated colors and moved unlock to Level 20" /></label>
+                      <p class="muted">This note appears in the activity log so the team can understand the change later.</p>
+                    </section>
+                    <div class="designer-actions">
+                      <button type="submit">Save Draft</button>
+                      <button type="button" id="duplicateCatalogItem" class="ghost">Make a Copy</button>
+                      <button type="button" id="archiveCatalogItem" class="ghost danger-text">Archive Item</button>
+                    </div>
+                  </div>
+
+                  <aside class="preview-column">
+                    <div class="preview-sticky">
+                      <div class="preview-heading"><span>Live player preview</span><span id="catalogPreviewRarity" class="rarity-pill">Rare</span></div>
+                      <div id="catalogLivePreview" class="game-preview" aria-live="polite"></div>
+                      <div id="catalogPlayerSummary" class="player-summary"></div>
+                      <div class="preview-note"><strong>Preview only</strong><p>Save keeps this in draft. Players see it only after Review &amp; Publish.</p></div>
+                    </div>
+                  </aside>
                 </div>
               </form>
             </div>
